@@ -54,7 +54,7 @@ import { rgbaToBlob } from '../../utils';
  * The 8-bit display path is bit-exact with the former strategy-driven decoder
  * (the same preserve-mode vips readback → gamut-aware proxy). When the source is
  * >8-bit, the SAME vips pass also yields the high-bit-depth naked pixels (packed
- * to f16), surfaced on the page's `highDepthSource` — so the importer warms the
+ * to f16), surfaced on the page's `highDepthData` — so the importer warms the
  * high-depth cache directly (RAW-aligned), no second decode. Multi-page files get
  * this per page, gated on that page's own `BitsPerSample`.
  */
@@ -92,7 +92,7 @@ export async function decodeTiff(
   // ── Single-page path: execute the assigned decode channel ──
   let displayBlob: Blob;
   let dimensions: { w: number; h: number };
-  let highDepthSource: DecodedPayload['highDepthSource'];
+  let highDepthData: DecodedPayload['highDepthData'];
 
   if (decodeChannel === 'vips') {
     // All non-CMYK TIFF: a preserve-mode vips pass (colour management OFF) yields
@@ -108,13 +108,9 @@ export async function decodeTiff(
     displayBlob = blob!;
 
     if (highDepth) {
-      // BARE payload — container/trc/gamut live on the sibling `colorIdentity`
-      // the entry injects (Path B), so they are no longer carried per-page here.
-      highDepthSource = {
-        data: highDepth.data,
-        width: highDepth.width,
-        height: highDepth.height,
-      };
+      // BARE bytes — container/trc/gamut live on the sibling `colorIdentity`
+      // the entry injects (Path B); geometry is the page dims (invariant).
+      highDepthData = highDepth.data;
     }
   } else {
     // vips-icc — CMYK / custom ICC: full LibVips ICC engine conversion (Little CMS).
@@ -137,18 +133,14 @@ export async function decodeTiff(
     if (wantHighDepth) {
       const { highDepth } = await getLibVips().decode(bytes, { wantHighDepth: true });
       if (highDepth) {
-        // BARE payload (same as the `vips` branch) — container/trc/gamut come from
+        // BARE bytes (same as the `vips` branch) — container/trc/gamut come from
         // the entry-injected sibling `colorIdentity` (Path B).
-        highDepthSource = {
-          data: highDepth.data,
-          width: highDepth.width,
-          height: highDepth.height,
-        };
+        highDepthData = highDepth.data;
       }
     }
   }
 
-  return [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0, highDepthSource }];
+  return [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0, highDepthData }];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -177,7 +169,7 @@ export async function decodeTiff(
  *    `LibVipsHighDepth.format` is what the GPU upload derives `bytesPerRow` from
  *    — a guessed value mis-strides the whole image.
  *
- * 2. `dataFormat` AND `highDepthSource` ARE STRICTLY CO-PRESENT. This function
+ * 2. `dataFormat` AND `highDepthData` ARE STRICTLY CO-PRESENT. This function
  *    builds pixels FIRST and mints the label AFTER, so "label claims rgba16float
  *    but `dec:` is missing" is structurally impossible here. That is STRONGER
  *    than the single-page path, where strategy mints the label first and the
@@ -252,14 +244,14 @@ async function decodeAllPages(
       gamut,
     });
 
-    // ── 5. Display blob + highDepthSource + the page's own colorIdentity ──
+    // ── 5. Display blob + highDepthData + the page's own colorIdentity ──
     const displayBlob = blob!;
-    let highDepthSource: DecodedPayload['highDepthSource'];
+    let highDepthData: DecodedPayload['highDepthData'];
     let colorIdentity: ColorIdentity;
 
     if (highDepth) {
       // >8-bit page OR 8-bit wide-gamut lifted page
-      highDepthSource = { data: highDepth.data, width: highDepth.width, height: highDepth.height };
+      highDepthData = highDepth.data;
       colorIdentity = {
         gamut,
         trc: highDepth.trc,
@@ -272,7 +264,7 @@ async function decodeAllPages(
       colorIdentity = { gamut, trc: 'srgb-trc', bitDepth: 8, dataFormat: undefined };
     }
 
-    pages.push({ displayBlob, width, height, index: i, highDepthSource, colorIdentity });
+    pages.push({ displayBlob, width, height, index: i, highDepthData, colorIdentity });
   }
 
   return pages;

@@ -19,6 +19,7 @@
 
 import type { CompositeRequest, CompositedImage, ResampledImage, SampledPixels, GpuInfo } from '../engine/types';
 import type { LayerHistogramData } from '../engine/color/histograms';
+import type { AssetStoreAuditEntry } from '../storage/asset/AssetService';
 
 import {
   Frame,
@@ -40,10 +41,12 @@ import { EditorData } from './state';
 import type { ImageMetadata, EncodeSource, GainMapData } from '../files/types';
 import type { ImageAssetPayload } from '../storage/asset/AssetStore';
 import type { ColorIdentity, AssetEntry } from '../storage/asset/AssetStore';
-import type { InMemAsset, AssetInputOptions, AssetBundle } from '../storage/asset/AssetService';
+import type { InMemAsset, AssetBundle } from '../storage/asset/AssetService';
+import type { ImageAssetInput } from '../storage/asset/AssetStore';
 import type { GpexAssetManifest } from '../helpers/gpex-format';
 
-export type { ColorIdentity, AssetEntry, InMemAsset, AssetInputOptions, AssetBundle };
+export type { ColorIdentity, AssetEntry, InMemAsset, AssetBundle };
+export type { ImageAssetInput } from '../storage/asset/AssetStore';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Frame command contracts — .gpex project container
@@ -247,7 +250,7 @@ export interface AssetInfo extends AssetEntry {
  */
 export interface AssetService {
   /** Registers asset: computes content hash, creates an InMemAsset, and persists a StoredAsset. Always triggers rendering cache pre-warm. */
-  register: (blob: Blob, options: AssetInputOptions) => Promise<AssetRef>;
+  register: (input: ImageAssetInput) => Promise<AssetRef>;
   /** Stores a raw source blob, returns its content hash. Returns undefined if rawBlob is null/undefined. */
   storeRaw: (rawBlob: Blob | undefined | null) => Promise<string | undefined>;
   /**
@@ -280,11 +283,11 @@ export interface AssetService {
   /**
    * Injects asset: directly stores under a caller-provided id (PixelResult bake
    * output, or a high-depth import repointing its base layer at the source hash),
-   * bypassing hash calculation. Takes the same `AssetInputOptions` shape as
+   * bypassing hash calculation. Takes the same single-input `ImageAssetInput` shape as
    * `register` and returns the same `AssetRef` shape — full signature symmetry
    * between the two registration paths.
    */
-  inject: (assetId: string, blob: Blob, options: AssetInputOptions) => Promise<AssetRef>;
+  inject: (assetId: string, input: ImageAssetInput) => Promise<AssetRef>;
   /**
    * One-shot ingest of a single image asset payload (the Golden Path): register
    * the display asset, store the shared raw source blob, and warm the high-depth
@@ -301,11 +304,17 @@ export interface AssetService {
   resolve: (assetId?: string, fallbackSrc?: string) => string;
   withSession: <T>(task: () => Promise<T>) => Promise<T>;
   sweep: (activeIds: Set<string>, force?: boolean) => void;
-  hydrate: (activeIds?: Set<string>) => Promise<void>;
+  hydrate: (activeIds: Set<string>) => Promise<void>;
   clear: () => void;
   getPool: () => Record<string, InMemAsset>;
-  /** Wire lifecycle callbacks (engine layer subscribes to asset events) */
-  setCallbacks: (callbacks: { onRegistered?: (assetId: string, blob: Blob) => void; onReleased?: (assetId: string) => void }) => void;
+  /** Store-level audit (diagnostics): light metadata for EVERY persisted entry incl. raw:/dec:, independent of the session pool. */
+  auditStore: () => Promise<AssetStoreAuditEntry[]>;
+  /** On-demand preview URL for one persisted store entry (display/raw decodable; dec: null). Caller revokes. */
+  getAssetPreviewUrl: (key: string) => Promise<string | null>;
+  /** Purge every persisted entry NOT protected by the given document-referenced ids (over-broad protection; store-key scan reaches unhydrated entries). */
+  purgeOrphans: (referencedIds: Set<string>) => Promise<{ removed: number; bytes: number }>;
+  /** Wire lifecycle callbacks (engine layer subscribes to asset events). `highDepthData` rides only when the ingest path confirmed a successful `storeDec` persistence — the write-ordering authority stays on the asset side. */
+  setCallbacks: (callbacks: { onLoaded?: (assetId: string, blob: Blob, highDepthData?: Uint16Array | Float32Array) => void; onReleased?: (assetId: string) => void }) => void;
 }
 
 /**
@@ -359,7 +368,7 @@ export interface PixelService {
      * Flow: cache hit → return | in-flight dedup → share | miss → Worker DECODE job → cache → return.
      *
      * Callers must NOT close the returned bitmap; it is owned by
-     * SourceBitmapCache and shared across every consumer (render engine,
+     * ImageBitmapCache and shared across every consumer (render engine,
      * BrushOverlay, ClipTool wand, Adjustment histogram, BgRemoval, …).
      */
     loadBitmap: (src: string) => Promise<ImageBitmap>;
@@ -424,7 +433,7 @@ export interface PixelService {
     resample: (src: string, options: { targetSize?: { w: number; h: number }; maxSize?: number; scale?: number; sourceGamut?: GamutId; targetRect?: Rect; format?: 'image/png' | 'image/webp'; quality?: number }) => Promise<ResampledImage>;
 
     /**
-     * Clear all bitmap caches (SourceBitmapCache).
+     * Clear all bitmap caches (ImageBitmapCache).
      */
     clearCache: () => void;
 
@@ -598,6 +607,8 @@ export interface StateStorage {
   restore: () => Promise<EditorData | null>;
   gc: (state: EditorData, force?: boolean) => Promise<void>;
   clear: () => Promise<void>;
+  /** Sanction the next empty-index save (see the EMPTY-INDEX GUARD in StateStorage.save). */
+  authorizeEmptyIndexSave: () => void;
 
   /**
    * Exports artboards to portable serialized form (dehydration + asset

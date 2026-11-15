@@ -77,7 +77,7 @@ export async function importSingleImage(
   const contentBounds = page.contentBounds ?? { x: 0, y: 0, w: page.width, h: page.height };
 
   // 3. Register thumbnail asset (dimensions from resample output)
-  const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbResult.displayBlob, { width: thumbResult.width, height: thumbResult.height, precomputedHash: thumbResult.precomputedHash });
+  const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register({ displayBlob: thumbResult.displayBlob, width: thumbResult.width, height: thumbResult.height, precomputedHash: thumbResult.precomputedHash });
 
   // 4. Camera calculation
   const { insets } = state.ui.theme.config;
@@ -89,7 +89,7 @@ export async function importSingleImage(
   const canvasClipBox = getDefaultCanvasClipBox({ w: page.width, h: page.height });
 
   // 5. Assemble base layer
-  const baseLayer = LayerFactory.getNewLayer({
+  const baseLayer = LayerFactory.createLayer('image', {
     name: 'Background',
     src: bundle.url,
     assetId: bundle.assetId,
@@ -168,7 +168,7 @@ export async function revertSingleImage(
     const canvasClipBox = getDefaultCanvasClipBox({ w: page.width, h: page.height });
 
     // 4. Assemble base layer
-    const baseLayer = LayerFactory.getNewLayer({
+    const baseLayer = LayerFactory.createLayer('image', {
       name: 'Background',
       src: bundle.url,
       assetId: bundle.assetId,

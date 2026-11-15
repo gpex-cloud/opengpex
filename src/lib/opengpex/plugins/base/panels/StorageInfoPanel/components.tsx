@@ -36,20 +36,21 @@ import {
   AlertCircle,
   Package,
   Brain,
+  HardDrive,
 } from "lucide-react";
 import {
   useEditorState,
   useEditorServices,
 } from "@opengpex/editor/core/context";
 import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
-import DelayedConfirm from "@opengpex/editor/widgets/DelayedConfirm";
+import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
+import { Hydrating } from "@opengpex/editor/core/storage/state/Hydrating";
 import { PopupPanel } from "@opengpex/editor/widgets/PopupPanel";
 import {
   useStorageMetrics,
   useStorageConfig,
   useModelCacheMetrics,
   purgeModelCacheStorage,
-  copyAssetUsages,
 } from "./hooks";
 import * as Prot from "./protocols";
 import { formatBytes } from "./components/shared";
@@ -58,6 +59,7 @@ import { AssetSectionHUD, AssetTreeNode } from "./components/AssetSection";
 import { HistoryTreeNode } from "./components/HistorySection";
 import { ShardSection } from "./components/ShardSection";
 import { ModelCacheTreeNode } from "./components/ModelCacheSection";
+import { StoreAuditHUD, StoreAuditTreeNode, StoreAuditDetails } from "./components/StoreAuditSection";
 
 /**
  * StorageInfoComponent (Outer Controller):
@@ -97,6 +99,18 @@ export function StorageInfoComponent() {
     window.location.reload();
   }, [storage, assets]);
 
+  const purgeOrphans = useCallback(async () => {
+    // Authoritative referenced set derived from the CURRENT state (frames +
+    // history) — the same authority the GC sweep uses; AssetService applies
+    // over-broad protection on top.
+    const referenced = Hydrating.extractAllIds(stateRef.current);
+    const { removed, bytes } = await assets.purgeOrphans(referenced);
+    if (removed > 0) {
+      console.info(`[StorageInfo] Purged ${removed} orphaned store entries (${(bytes / 1024 / 1024).toFixed(1)} MB)`);
+    }
+    refresh();
+  }, [assets, refresh]);
+
   const handleSelectLayer = useCallback(
     (frameId: string, layerId: string) => {
       actions.switchFrame(frameId);
@@ -122,6 +136,7 @@ export function StorageInfoComponent() {
       triggerGC={triggerGC}
       clearHistory={clearHistory}
       purgeAll={purgeAll}
+      purgeOrphans={purgeOrphans}
       handleSelectLayer={handleSelectLayer}
       handleSelectFrame={handleSelectFrame}
       onClose={() => toggleCmd?.execute()}
@@ -136,6 +151,7 @@ interface InnerPanelProps {
   triggerGC: () => void;
   clearHistory: () => void;
   purgeAll: () => Promise<void>;
+  purgeOrphans: () => Promise<void>;
   handleSelectLayer: (frameId: string, layerId: string) => void;
   handleSelectFrame: (frameId: string) => void;
   onClose: () => void;
@@ -154,6 +170,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
   triggerGC,
   clearHistory,
   purgeAll,
+  purgeOrphans,
   handleSelectLayer,
   handleSelectFrame,
   onClose,
@@ -175,7 +192,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
 
   // Selected item details in tree explorer
   const [selectedNode, setSelectedNode] = useState<{
-    type: "frame" | "layer" | "asset" | "history";
+    type: "frame" | "layer" | "asset" | "history" | "store";
     id: string;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     data: any;
@@ -184,10 +201,12 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
   // Active hover preview card for assets
   const [hoveredAsset, setHoveredAsset] = useState<Prot.AssetMetric | null>(null);
 
+  // Orphan tree nodes default to EXPANDED: the orphan triage is this panel's
+  // reason to exist, so its triage view must not hide behind a second click.
   const toggleNode = (nodeKey: string) => {
     setExpandedNodes((prev) => ({
       ...prev,
-      [nodeKey]: !prev[nodeKey],
+      [nodeKey]: prev[nodeKey] === undefined ? true : !prev[nodeKey],
     }));
   };
 
@@ -211,13 +230,15 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
   const orphanSize = metrics.detached.reduce((sum, a) => sum + a.size, 0);
   const stateSize = metrics.stateBytes || 0;
   const modelSize = modelCache.totalBytes;
-  const grandTotal = activeSize + historySize + orphanSize + stateSize + modelSize || 1;
+  const storeOrphanBytes = metrics.storeAudit?.orphanBytes ?? 0;
+  const grandTotal = activeSize + historySize + orphanSize + stateSize + modelSize + storeOrphanBytes || 1;
 
   const pActive = (activeSize / grandTotal) * 100;
   const pHistory = (historySize / grandTotal) * 100;
   const pOrphan = (orphanSize / grandTotal) * 100;
   const pState = (stateSize / grandTotal) * 100;
   const pModels = (modelSize / grandTotal) * 100;
+  const pStoreOrphan = (storeOrphanBytes / grandTotal) * 100;
 
   // --- DUAL MODE RENDERING ---
   return (
@@ -241,7 +262,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
               {/* Refresh button row */}
               <div className="flex items-center justify-between flex-shrink-0">
                 <div className="flex items-center gap-2">
-                  <Zap size={8} className="text-indigo-500 animate-bounce" />
+                  <Zap size={8} className="text-indigo-500" />
                   <span className="text-[8px] font-black text-[var(--text-muted)] uppercase tracking-widest">
                     Live Linked
                   </span>
@@ -263,7 +284,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
               <div className="grid grid-cols-2 gap-2 flex-shrink-0">
                 <div className="bg-[var(--bg-stage)] p-2.5 rounded-xl border border-[var(--border-subtle)] dark:border-white/[0.08] ">
                   <div className="text-[7px] font-black uppercase tracking-widest text-[var(--text-muted)] mb-1">
-                    TOTAL ASSETS
+                    POOL ASSETS (SESSION)
                   </div>
                   <div className="text-sm font-mono text-[var(--text-main)] font-bold tabular-nums">
                     {formatBytes(metrics.totalBytes)}
@@ -301,6 +322,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                   handleSelectLayer={handleSelectLayer}
                 />
                 <AssetSectionHUD detached={metrics.detached} />
+                <StoreAuditHUD storeAudit={metrics.storeAudit} />
               </div>
 
               {/* Footer */}
@@ -314,7 +336,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
             /* DASHBOARD MODE */
             <div className="flex-1 min-h-0 flex font-sans text-[var(--text-main)] select-none">
               {/* Left Column - Analytics Dashboard */}
-              <div className="w-[380px] border-r border-[var(--border-subtle)] dark:border-r-white/[0.06] p-6 flex flex-col gap-6 overflow-y-auto bg-[var(--bg-stage)] custom-scrollbar">
+              <div className="w-[380px] border-r border-[var(--border-subtle)] dark:border-r-white/[0.06] p-4 flex flex-col gap-3 overflow-y-auto bg-[var(--bg-stage)] custom-scrollbar">
                 {/* Classification Segment Bar */}
                 <div className="space-y-3">
                   <div className="text-[10px] font-black uppercase tracking-wider text-[var(--text-muted)] flex items-center justify-between">
@@ -345,6 +367,11 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                       style={{ width: `${pState}%` }}
                       className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-500"
                       title="Database State Size"
+                    />
+                    <div
+                      style={{ width: `${pStoreOrphan}%` }}
+                      className="h-full bg-gradient-to-r from-red-700 to-rose-700 transition-all duration-500"
+                      title="Store Orphans (IndexedDB)"
                     />
                     <div
                       style={{ width: `${pModels}%` }}
@@ -395,10 +422,24 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                       </span>
                     </div>
 
-                    <div className="flex flex-col gap-1 p-2 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] dark:border-white/[0.08] col-span-2">
+                    <div className="flex flex-col gap-1 p-2 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] dark:border-white/[0.08]">
+                      <div className="flex items-center gap-1.5 text-[var(--text-muted)] ">
+                        <span className="w-1.5 h-1.5 rounded-full bg-red-700" />
+                        <span>Store Orphans</span>
+                        {metrics.storeAudit && metrics.storeAudit.orphanCount > 0 && (
+                          <span className="font-mono text-[8px] text-rose-500 ml-auto">
+                            {metrics.storeAudit.orphanCount} entries
+                          </span>
+                        )}
+                      </div>
+                      <span className="font-mono text-[var(--text-main)] font-bold pl-3">
+                        {formatBytes(storeOrphanBytes)} ({pStoreOrphan.toFixed(1)}%)
+                      </span>
+                    </div>
+
+                    <div className="flex flex-col gap-1 p-2 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] dark:border-white/[0.08]">
                       <div className="flex items-center gap-1.5 text-[var(--text-muted)] ">
                         <span className="w-1.5 h-1.5 rounded-full bg-purple-500" />
-                        <Brain size={9} className="text-purple-500" />
                         <span>Downloaded Models</span>
                       </div>
                       <span className="font-mono text-[var(--text-main)] font-bold pl-3">
@@ -414,10 +455,10 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                 </div>
 
                 {/* Shard & Database Metrics */}
-                <ShardSection shards={metrics.shards} />
+                <ShardSection shards={metrics.shards} stateBytes={metrics.stateBytes} />
 
                 {/* Performance Indicators */}
-                <div className="space-y-3">
+                <div className="space-y-3 mt-3">
                   <div className="text-[10px] font-black uppercase tracking-wider text-[var(--text-muted)] ">
                     System Profiles
                   </div>
@@ -449,63 +490,84 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
 
                 {/* Action Suite Control panel */}
                 <div className="mt-auto pt-4 border-t border-[var(--border-subtle)] dark:border-t-white/[0.06] space-y-4">
-                  {/* Utilities */}
-                  <div className="flex gap-2">
-                    <FancyButton
-                      onClick={triggerGC}
-                      variant="zinc"
-                      shape="pill"
-                      size="xs"
-                      subtle
-                    >
-                      <Trash2 size={10} />
-                      Force GC
-                    </FancyButton>
-                  </div>
-
-                  {/* Data Purging */}
+                  {/* Data Management — Force GC first (non-destructive reclaim),
+                      then the destructive purge menu (DelayedConfirm per row).
+                      Every entry carries a DelayedConfirm window inside the
+                      dropdown row itself; the menu opens UP because the panel
+                      docks to the bottom-right corner. */}
                   <div className="space-y-2 p-3 rounded-xl border border-[var(--border-subtle)] dark:border-white/[0.08] bg-[var(--bg-stage)]">
                     <div className="text-[8px] font-black uppercase tracking-widest text-[var(--text-muted)]">
-                      Data Purging
+                      Data Management
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <DelayedConfirm
-                        onConfirm={purgeAll}
-                        delayTime={3000}
-                        confirmClassName="bg-rose-500/20"
-                        ringColor="text-rose-500"
+                      <FancyButton
+                        onClick={triggerGC}
+                        variant="zinc"
+                        shape="pill"
+                        size="xs"
+                        subtle
                       >
-                        <FancyButton variant="red" shape="pill" size="xs" subtle>
-                          <Trash2 size={10} />
-                          Wipe All
-                        </FancyButton>
-                      </DelayedConfirm>
-
-                      <DelayedConfirm
-                        onConfirm={clearHistory}
-                        delayTime={2000}
-                        confirmClassName="bg-amber-500/20"
-                        ringColor="text-amber-500"
-                      >
-                        <FancyButton variant="amber" shape="pill" size="xs" subtle>
-                          <History size={10} />
-                          History
-                        </FancyButton>
-                      </DelayedConfirm>
-
-                      {modelCache.totalBytes > 0 && (
-                        <DelayedConfirm
-                          onConfirm={purgeDownloadedModels}
-                          delayTime={2000}
-                          confirmClassName="bg-cyan-500/20"
-                          ringColor="text-cyan-500"
+                        <Trash2 size={10} />
+                        Force GC
+                      </FancyButton>
+                      <ActionDropdown
+                      align="right"
+                      direction="up"
+                      trigger={
+                        <button
+                          onMouseDown={(e) => e.preventDefault()}
+                          className="flex items-center gap-1 px-2 h-7 rounded-full border border-rose-500/30 bg-rose-500/5 text-rose-500 text-[9px] font-black uppercase tracking-wider hover:bg-rose-500/15 transition-colors"
                         >
-                          <FancyButton variant="cyan" shape="pill" size="xs" subtle>
-                            <Brain size={10} />
-                            AI Models
-                          </FancyButton>
-                        </DelayedConfirm>
-                      )}
+                          <Trash2 size={10} />
+                          Purge
+                          <ChevronDown size={8} className="opacity-50" />
+                        </button>
+                      }
+                      onSelect={(value) => {
+                        if (value === 'orphans') void purgeOrphans();
+                        else if (value === 'history') void clearHistory();
+                        else if (value === 'models') void purgeDownloadedModels();
+                        else if (value === 'wipe') void purgeAll();
+                      }}
+                      options={[
+                        {
+                          label: 'Store Orphans',
+                          value: 'orphans',
+                          description:
+                            metrics.storeAudit && metrics.storeAudit.orphanCount > 0
+                              ? `${metrics.storeAudit.orphanCount} · ${formatBytes(metrics.storeAudit.orphanBytes)}`
+                              : 'none',
+                          icon: <HardDrive size={11} />,
+                          variant: 'warning',
+                          confirm: 2000,
+                        },
+                        {
+                          label: 'Undo History',
+                          value: 'history',
+                          icon: <History size={11} />,
+                          variant: 'warning',
+                          confirm: 2000,
+                        },
+                        ...(modelCache.totalBytes > 0
+                          ? [{
+                              label: 'AI Models',
+                              value: 'models',
+                              icon: <Brain size={11} />,
+                              variant: 'warning' as const,
+                              confirm: 2000,
+                            }]
+                          : []),
+                        { label: '', value: 'divider', divider: true },
+                        {
+                          label: 'Wipe All Data',
+                          value: 'wipe',
+                          description: 'everything',
+                          icon: <Trash2 size={11} />,
+                          variant: 'danger',
+                          confirm: 3000,
+                        },
+                      ]}
+                      />
                     </div>
                   </div>
                 </div>
@@ -514,13 +576,21 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
               {/* Right Column - Topology Tree Explorer & Detail Pane */}
               <div className="flex-1 flex min-w-0">
                 {/* Tree Section */}
-                <div className="flex-1 overflow-y-auto p-6 min-w-0 scrollbar-hide space-y-4">
-                  <div className="text-[10px] font-black uppercase tracking-wider text-[var(--text-muted)] pl-1">
-                    Resource Topology tree
+                <div className="flex-1 overflow-y-auto p-4 pt-2 min-w-0 scrollbar-hide space-y-2">
+                  <div className="text-[10px] font-black uppercase tracking-wider text-[var(--text-muted)] flex items-center justify-between">
+                    <span>Resource Topology tree</span>
+                    <button
+                      onClick={refresh}
+                      disabled={isRefreshing}
+                      title="Refresh tree"
+                      className="p-1 rounded-md transition-all hover:bg-[var(--bg-stage)] hover:text-[var(--text-main)] disabled:opacity-40"
+                    >
+                      <RefreshCw size={12} className={isRefreshing ? "animate-spin-lite" : ""} />
+                    </button>
                   </div>
 
                   {/* Dynamic Interactive Tree Outline */}
-                  <div className="space-y-1 select-none font-mono text-[10px]">
+                  <div className="space-y-1 select-none font-mono text-[10px] -mx-2">
                     {/* 1. Root: Project Node */}
                     <div className="flex flex-col">
                       <div
@@ -547,7 +617,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                       </div>
 
                       {expandedNodes.project && (
-                        <div className="pl-4 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-3.5 mt-0.5 space-y-1">
+                        <div className="pl-2 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-2.5 mt-0.5 space-y-1">
                           <FrameTreeNodes
                             frames={metrics.frames}
                             expandedNodes={expandedNodes}
@@ -573,6 +643,13 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                             setSelectedNode={setSelectedNode}
                             setHoveredAsset={setHoveredAsset}
                           />
+                          <StoreAuditTreeNode
+                            storeAudit={metrics.storeAudit}
+                            expandedNodes={expandedNodes}
+                            selectedNodeId={selectedNode?.id || null}
+                            toggleNode={toggleNode}
+                            setSelectedNode={setSelectedNode}
+                          />
                           <ModelCacheTreeNode
                             modelCache={modelCache}
                             expandedNodes={expandedNodes}
@@ -585,7 +662,7 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                 </div>
 
                 {/* Details Inspector Pane (Right Part of Tree Explorer) */}
-                <div className="w-[300px] border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] p-6 flex flex-col gap-5 overflow-y-auto bg-[var(--bg-stage)] custom-scrollbar relative select-none">
+                <div className="w-[300px] border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] p-4 flex flex-col gap-5 overflow-y-auto bg-[var(--bg-stage)] custom-scrollbar relative select-none">
                   {selectedNode ? (
                     <>
                       {/* Header */}
@@ -945,17 +1022,12 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                               </span>
                             </div>
 
-                            <div className="mt-4 pt-4 border-t border-[var(--border-subtle)] dark:border-t-white/[0.06] flex gap-2">
-                              <button
-                                onClick={() =>
-                                  copyAssetUsages(selectedNode.data)
-                                }
-                                className="flex-1 py-1.5 px-3 rounded-lg bg-indigo-550/10 hover border border-indigo-200 text-indigo-600 font-bold text-[8px] font-black uppercase tracking-wider text-center"
-                              >
-                                Copy Usages
-                              </button>
-                            </div>
                           </div>
+                        )}
+
+                        {/* Store entry (IndexedDB audit) Attributes */}
+                        {selectedNode.type === "store" && (
+                          <StoreAuditDetails entry={selectedNode.data as Prot.StoreAuditEntryView} />
                         )}
 
                         {/* History moment Attributes */}

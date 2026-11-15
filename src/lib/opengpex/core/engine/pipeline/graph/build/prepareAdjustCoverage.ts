@@ -18,10 +18,10 @@
  */
 
 /**
- * prepareAMaskSources.ts — GPU build step for the ADJUSTMENT-MASK grade
+ * prepareAdjustCoverage.ts — GPU build step for the ADJUSTMENT-MASK grade
  * chain's coverage: every confined stage (`AdjustStageDesc.coverage`) of every
  * scene layer is baked over the layer's UNION window into the shared
- * frozen-selection cache ( `prepareConfinementSources.ts`, `adjust:` namespace)
+ * frozen-selection cache ( `prepareConfinedSources.ts`, `adjust:` namespace)
  * and gathered into ONE `texture_2d_array` per layer (array layer i = the
  * i-th confined stage in chain order — the same numbering `packAdjustChain`
  * assigns). `texture_2d_array` layers share one size, which is why the whole
@@ -32,7 +32,7 @@
  * output map — the chain group then binds the default white array and every
  * stage grades the whole layer.
  *
- * @module core/gpu/graph/build/prepareAMaskSources
+ * @module core/gpu/graph/build/prepareAdjustCoverage
  */
 
 import type { CompiledScene } from '../SceneCompiler';
@@ -44,7 +44,7 @@ import {
   confinementContentToken,
   prepareFrozenSelectionBake,
   sweepFrozenSelectionNamespace,
-} from './prepareConfinementSources';
+} from './prepareConfinedSources';
 import type { AdjustStageDesc, VectorSubMask } from '../../scene/Scene';
 import type { AdjustCoverageBinding } from '../support/adjustBindGroup';
 import { GPUTextureUsage } from '@opengpex/editor/core/engine/gpu/constants';
@@ -116,7 +116,7 @@ export function resolveAdjustCoverageWindow(
  *
  * @param exportScale physical-texels-per-logical-px (same semantics as the vmask bake).
  */
-export function prepareAdjustCoverageSources(
+export function prepareAdjustCoverage(
   encoder: GPUCommandEncoder,
   compiled: CompiledScene,
   ctx: BuildContext,

@@ -29,12 +29,12 @@ interface AssetPoolResult {
  */
 export const useFrameMetrics = (
   assetPoolResult: AssetPoolResult | null,
-  structuralSignature: string
+  _structuralSignature: string // former render gate; kept for call-site arity (the empty-document audit is now valid)
 ): P.FrameMetric[] => {
   const { state } = useEditorState();
 
   return useMemo(() => {
-    if (!assetPoolResult || !structuralSignature) return [];
+    if (!assetPoolResult) return [];
 
     const { pool, buildAssetMetric } = assetPoolResult;
 
@@ -97,5 +97,5 @@ export const useFrameMetrics = (
         sourceFormat: f.metadata?.sourceFormat,
       };
     });
-  }, [assetPoolResult, structuralSignature, state.frames.order, state.frames.byId, state.history.byFrameId]);
+  }, [assetPoolResult, state.frames.order, state.frames.byId, state.history.byFrameId]);
 };

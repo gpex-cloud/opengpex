@@ -29,6 +29,7 @@ import { isBoundingRing, point2dToLocalShape, shapeToPoint2D } from '@opengpex/e
 import { trimTransparentMargins } from '@opengpex/editor/core/engine/utils/pixel-utils';
 import { LayerFactory, computeFragmentFeathering } from '../../factory';
 import { LayerUtils } from '@opengpex/editor/core/layer/utils';
+import { getLayerKind } from '@opengpex/editor/core/layer/kinds';
 
 /**
  * createFragmentOperations: Factory that creates all fragment-related operations
@@ -89,10 +90,14 @@ export function createFragmentOperations(
     if (feather > 0) return 'physical';
     if ((layer.bitmapMasks ?? []).some(m => m.enabled)) return 'physical';
     if ((layer.vectorMasks ?? []).some(m => m.enabled && (m.feather ?? 0) > 0)) return 'physical';
-    // Text / vector content has no croppable bitmap: any partial cut bakes.
-    if (layer.type === 'text' || layer.type === 'vector') return 'physical';
-    // Group containers have no pixels — nothing to cut.
-    if (layer.type === 'group') return undefined;
+    // The type half of the gate lives in the LayerKind table's `clippable`
+    // column: 'bake' types (text/vector) have no croppable bitmap — any partial
+    // cut bakes; 'none' types (group) have no pixels — nothing to cut;
+    // 'logical'-capable types (image/paint/color) fall through to the
+    // shape-intersection decision below.
+    const clippable = getLayerKind(layer.type).clippable;
+    if (clippable === 'bake') return 'physical';
+    if (clippable === 'none') return undefined;
     const box = getClipBox(frame);
     if (!box) return 'logical';
     const { shape, invertedRegular } = resolveCutShape(
@@ -187,7 +192,7 @@ export function createFragmentOperations(
     if (intersection) {
       // ═══ Tight crop: same source image, narrowed visibleShape ═══
       const { id: _oldId, ...layerData } = layer;
-      newLayer = LayerFactory.getNewLayer({
+      newLayer = LayerFactory.createLayer(layer.type, {
         ...layerData,
         // The intersection already folded every enabled hole / clip mask into
         // the geometry; inheriting them again would subtract the holes a
@@ -225,7 +230,7 @@ export function createFragmentOperations(
       // layer holds the selection: keep the full bounds and show the
       // selection through an inverted mask (pixel-perfect inner contour).
       const { id: _id, hostId: _pid, role: _role, locked: _locked, interactive: _inter, ...layerData } = layer;
-      newLayer = LayerFactory.getNewLayer({
+      newLayer = LayerFactory.createLayer(layer.type, {
         ...layerData,
         name: LayerFactory.getNewLayerName(frame.layers.order.map(id => frame.layers.byId[id])),
         vectorMasks: [
@@ -462,9 +467,8 @@ export function createFragmentOperations(
     // vector source yields an image layer, not a half-updated original type.
     const { id: _id, textData: _t, markerData: _m, strokeData: _sd, strokes: _st, penData: _p, penStyle: _ps, ...layerData } = layer as Layer & Record<string, unknown>;
     // A baked product is a NEW layer: it must not inherit the source's own cut link.
-    const newLayer = LayerFactory.getNewLayer({
+    const newLayer = LayerFactory.createLayer('image', {
       ...layerData,
-      type: 'image',
       src: assetUrl,
       assetId: assetId,
       vectorMasks: [],

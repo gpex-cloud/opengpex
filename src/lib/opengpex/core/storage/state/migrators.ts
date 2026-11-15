@@ -185,6 +185,35 @@ const LEGACY_GRADE_KEYS = [
  * present (nothing to confine); a record that already carries `adjustMasks`
  * only has the legacy keys deleted (idempotent on re-hydration).
  */
+/**
+ * P5 kind merge: the dedicated `paint` layer kind was folded into `image`.
+ * Persisted layers (live frames AND undo-history snapshots) carrying
+ * `type:'paint'` rewrite to `image` verbatim — `metadata.sourceTool` stamps
+ * ride forward untouched, so mosaic canvases and brush-provenance icons keep
+ * working on the merged kind. Gates on its own precondition; no-op on modern
+ * records (post-P5 writers never emit 'paint').
+ */
+/**
+ * P2 review: fillColor was hoisted from `metadata.fillColor` to a top-level
+ * Layer field. Persisted layers (frames AND undo-history snapshots) carrying
+ * the old carrier rewrite verbatim; a metadata object left empty by the move
+ * is dropped. Gates on its own precondition; no-op on modern records.
+ */
+export function migrateLegacyFillColorCarrier(result: Record<string, unknown>): void {
+  const meta = result['metadata'] as Record<string, unknown> | undefined;
+  if (meta && meta['fillColor'] !== undefined) {
+    if (result['fillColor'] === undefined) result['fillColor'] = meta['fillColor'];
+    delete meta['fillColor'];
+    if (Object.keys(meta).length === 0) delete result['metadata'];
+  }
+}
+
+export function migrateLegacyPaintType(result: Record<string, unknown>): void {
+  if (result['type'] === 'paint') {
+    result['type'] = 'image';
+  }
+}
+
 export function migrateLegacyLayerGrade(result: Record<string, unknown>): void {
   // Layer-record signature gate (see doc above) — cheap and shape-independent.
   if (

@@ -99,7 +99,7 @@ export const LayerMergeCommands = {
       const { activeFrame, activeLayer, layers, actions } = ctx;
       if (!activeFrame || !activeLayer) return;
 
-      const hostLayers = layers.getHostLayers(activeFrame.layers.order.map(id => activeFrame.layers.byId[id]));
+      const hostLayers = layers.factory.getHostLayers(activeFrame.layers.order.map(id => activeFrame.layers.byId[id]));
       const activeIndex = hostLayers.findIndex(l => l.id === activeLayer.id);
 
       if (activeIndex === 0) {
@@ -116,7 +116,7 @@ export const LayerMergeCommands = {
       if (!acquireMergeLock()) return;
       try {
         // The shared merge entry: the pair bakes into the bottom layer.
-        await layers.mergeLayers(activeFrame, participants, { errorHud: 'Merge down failed.' });
+        await layers.bake.mergeLayers(activeFrame, participants, { errorHud: 'Merge down failed.' });
       } finally {
         releaseMergeLock();
       }
@@ -131,7 +131,7 @@ export const LayerMergeCommands = {
       const { activeFrame, layers, actions } = ctx;
       if (!activeFrame) return;
 
-      const hostLayers = layers.getHostLayers(activeFrame.layers.order.map(id => activeFrame.layers.byId[id]));
+      const hostLayers = layers.factory.getHostLayers(activeFrame.layers.order.map(id => activeFrame.layers.byId[id]));
       const visibleLayers = hostLayers.filter(l => l.visible);
 
       if (visibleLayers.length < 2) {
@@ -150,7 +150,7 @@ export const LayerMergeCommands = {
       }
       if (!acquireMergeLock()) return;
       try {
-        await layers.mergeLayers(activeFrame, mergeable, {
+        await layers.bake.mergeLayers(activeFrame, mergeable, {
           errorHud: 'Merge visible failed.',
         });
       } catch (err) {
@@ -188,7 +188,7 @@ export const LayerMergeCommands = {
           return;
         }
 
-        await layers.mergeLayers(activeFrame, participants, { physicalSuccessHud: `Merged ${participants.length} layers.` });
+        await layers.bake.mergeLayers(activeFrame, participants, { physicalSuccessHud: `Merged ${participants.length} layers.` });
       } finally {
         releaseMergeLock();
       }
@@ -211,9 +211,9 @@ export const LayerMergeCommands = {
 
       try {
         // Shared bake primitive (services/baking.ts): composite → register → warm.
-        const bake = await layers.bakeToAsset(activeFrame, [layer]);
+        const bake = await layers.bake.bakeToAsset(activeFrame, [layer]);
 
-        layers.updateLayer(activeFrame.id, (tx) => {
+        layers.factory.updateLayer(activeFrame.id, (tx) => {
           tx.edit(layer.id)
             .setAsset({ assetId: bake.assetId, url: bake.url })
             .resetWithBounds(bake.bounds.w, bake.bounds.h, bake.bounds.x + bake.bounds.w / 2, bake.bounds.y + bake.bounds.h / 2);
@@ -355,7 +355,7 @@ export const LayerMergeCommands = {
         // sub-layers internally). The holes were removed above; touch no
         // mask — a plain delete would rewrite them from this snapshot,
         // unlinked.
-        layers.removeLayers(activeFrame.id, fragmentsToRemove, { cutLinks: 'ignore-link' });
+        layers.factory.removeLayers(activeFrame.id, fragmentsToRemove, { cutLinks: 'ignore-link' });
 
       } catch (err) {
         console.error('[MergeBack] Failed:', err);

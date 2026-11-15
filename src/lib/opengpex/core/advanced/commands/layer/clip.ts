@@ -66,7 +66,7 @@ async function clipToClipboard(
     return;
   }
 
-  const result = await ctx.layers.clipFragment(activeFrame, latestLayer, { mode });
+  const result = await ctx.layers.clip.clipFragment(activeFrame, latestLayer, { mode });
   if (!result.newLayer || !result.clipboardUrl) {
     if (result.hud) actions.setInteraction({ hud: { message: result.hud, type: 'error' } });
     return;
@@ -85,7 +85,7 @@ async function clipToClipboard(
     // ordinary source content, like any hole whose fragment was deleted
     // (deletion never heals).
     const sourceMask = result.sourceMask;
-    ctx.layers.updateLayer(activeFrame.id, tx => {
+    ctx.layers.factory.updateLayer(activeFrame.id, tx => {
       tx.edit(latestLayer.id).patch({
         vectorMasks: [...(latestLayer.vectorMasks || []), sourceMask],
       });
@@ -238,7 +238,7 @@ export const LayerClipCommands = {
         // ═══ Step 3B: Paste as a layer into the active frame ═══
         if (!activeFrame) return; // target 'layer' implies an open frame
         const targetGroupId = activeLayer?.type === 'group' ? activeLayer.id : activeLayer?.groupId;
-        const insertIndex = ctx.layers.getInsertIndexAbove(activeFrame, activeLayer?.id);
+        const insertIndex = ctx.layers.factory.getInsertIndexAbove(activeFrame, activeLayer?.id);
 
         // Availability probe: same-frame references the pooled source directly
         // (no probing). Cross-frame requires EVERY asset the layer references —
@@ -304,10 +304,10 @@ export const LayerClipCommands = {
           const pose = sameCanvas
             ? { cx: source.cx, cy: source.cy }
             : { cx: centered.x, cy: centered.y };
-          const smartName = ctx.layers.getNewLayerName(
+          const smartName = ctx.layers.factory.getNewLayerName(
             activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), `${source.name} Copy`
           );
-          const newLayer = ctx.layers.getNewLayer({
+          const newLayer = ctx.layers.factory.createLayer(layerWithoutId.type, {
             ...layerWithoutId,
             metadata: pastedMetadata,
             cx: pose.cx,
@@ -316,7 +316,7 @@ export const LayerClipCommands = {
             groupId: targetGroupId,
             name: smartName,
           });
-          ctx.layers.addLayer(activeFrame.id, newLayer, insertIndex);
+          ctx.layers.factory.addLayer(activeFrame.id, newLayer, insertIndex);
         } else if (blob) {
           // ── Physical fallback: 8-bit blob re-ingest ──
           if (sourceLayer?.type === 'image') {
@@ -324,11 +324,11 @@ export const LayerClipCommands = {
               hud: { message: 'Pasted as 8-bit — original layer data is unavailable', type: 'info' }
             });
           }
-          const newLayer = await ctx.layers.createLayerFromBlob(blob, activeFrame);
+          const newLayer = await ctx.layers.factory.createLayerFromBlob(blob, activeFrame);
           if (targetGroupId) {
             newLayer.groupId = targetGroupId;
           }
-          ctx.layers.addLayer(activeFrame.id, newLayer, insertIndex);
+          ctx.layers.factory.addLayer(activeFrame.id, newLayer, insertIndex);
         } else if (sourceLayer?.type === 'image') {
           // Degraded payload with no blob at all — nothing to materialize.
           actions.setInteraction({
@@ -411,7 +411,7 @@ export const LayerClipCommands = {
       // multi-ring evenodd supported). All variants become a VectorMask via
       // applyMask → getNewVectorMask, appended to vectorMasks. No BitmapMask is
       // produced here anymore.
-      layers.updateLayer(activeFrame.id, tx => {
+      layers.factory.updateLayer(activeFrame.id, tx => {
         tx.edit(targetLayer.id).applyMask(localShape, { feather });
       });
 
@@ -462,7 +462,7 @@ export const LayerClipCommands = {
           ? polygonToShape(geometry.polygon.frameLocalToLayerLocal(box, activeFrame, latestLayer))
           : geometry.shape.frameLocalToLayerLocal(drillShape, activeFrame, latestLayer);
 
-        ctx.layers.updateLayer(activeFrame.id, tx => {
+        ctx.layers.factory.updateLayer(activeFrame.id, tx => {
           tx.edit(latestLayer.id).applyMask(localShape, { inverted: true, feather });
         });
 

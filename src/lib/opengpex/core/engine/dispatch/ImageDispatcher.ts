@@ -28,21 +28,21 @@
  *   - ensureAsset / evict (Worker cache lifecycle)
  *
  * Design:
- *   - Cache-first: returns from SourceBitmapCache on hit.
+ *   - Cache-first: returns from ImageBitmapCache on hit.
  *   - In-flight dedup: concurrent requests for the same src share one Worker job.
  *   - High-quality resample via Worker (bicubic interpolation).
  *
  * Architecture: facade → ImageDispatcher → WorkerBridge → Worker (DecoderHandler / ResampleHandler)
  */
 
-import { sourceBitmapCache } from '../sources/SourceBitmapCache';
+import { imageBitmapCache } from '../sources/ImageBitmapCache';
 import { WorkerBridge } from './bridge/WorkerBridge';
 import type { ResampledImage } from '../types';
 import type { PixelResultData } from '../protocol/results';
 import type { AssetService, ColorIdentity, GamutId, Rect } from '@opengpex/editor/core/types';
 
-/** Inferred type of the SourceBitmapCache singleton (class not exported — singleton pattern). */
-type SourceBitmapCache = typeof sourceBitmapCache;
+/** Inferred type of the ImageBitmapCache singleton (class not exported — singleton pattern). */
+type ImageBitmapCache = typeof imageBitmapCache;
 
 /** Shape returned by Worker for BITMAP subType */
 interface DecodeBitmapResult {
@@ -89,7 +89,7 @@ export class ImageDispatcher {
   private inflight = new Map<string, Promise<ImageBitmap>>();
 
   constructor(
-    private cache: SourceBitmapCache,
+    private cache: ImageBitmapCache,
     private bridge: WorkerBridge,
     private assets: AssetService,
   ) {}
@@ -148,6 +148,13 @@ export class ImageDispatcher {
    * Ensure an asset is available in the Worker cache.
    * Called by EditorContext when AssetService registers/hydrates an asset.
    */
+  /** DEV AUDIT (debt ⑧a): the worker-realm cachePerf counters live in the
+   * worker's own module instance, unreachable from the main thread except
+   * through this request. Read-only. */
+  async workerCachePerf(): Promise<Record<string, number>> {
+    return this.bridge.request<Record<string, number>>({ type: 'CACHE_PERF_SNAPSHOT' });
+  }
+
   async ensureAsset(hash: string, blob: Blob): Promise<void> {
     await this.bridge.request<boolean>({
       type: 'ENSURE_ASSET',
@@ -161,7 +168,7 @@ export class ImageDispatcher {
    *
    * Returns the cached ImageBitmap if already decoded, otherwise kicks off
    * a background decode and returns undefined. Equivalent to the old
-   * sourceBitmapCache.getOrFetch() but exposed through the Dispatcher layer.
+   * imageBitmapCache.getOrFetch() but exposed through the Dispatcher layer.
    *
    * Use case: BrushOverlay mask initialization on gesture hot-path where
    * awaiting is not acceptable.
@@ -188,7 +195,7 @@ export class ImageDispatcher {
    */
   async imageData(hash: string, rect?: Rect): Promise<ImageData> {
     // Ensure the Worker has this asset in its cache.
-    // AssetService.onRegistered → ensureAsset warms WorkerCache on register,
+    // AssetService.onLoaded → ensureAsset warms WorkerCache on register,
     // but the bitmap may have been LRU-evicted during long sessions.
     // workerCache.ingest() is idempotent — immediate no-op on cache hit.
     const entry = this.assets.get(hash);
@@ -249,7 +256,7 @@ export class ImageDispatcher {
    *
    * Accepts either `targetSize` (exact) or `maxSize` (scale longest edge, maintain ratio)
    * or `scale` (uniform factor on the source's true pixel dimensions).
-   * When `maxSize` / `scale` is provided, source dimensions are resolved from SourceBitmapCache
+   * When `maxSize` / `scale` is provided, source dimensions are resolved from ImageBitmapCache
    * (cache hit = zero cost) or via loadBitmap (triggers Worker decode on miss).
    *
    * Uses high-quality bicubic interpolation in the Worker.
@@ -326,7 +333,7 @@ export class ImageDispatcher {
       dimensions: { w: data.width, h: data.height },
       precomputedHash: data.hash,
       dprScale: data.dprScale,
-      highDepthSource: data.highDepthSource,
+      highDepthData: data.highDepthSource?.data,
     };
   }
 
@@ -334,7 +341,7 @@ export class ImageDispatcher {
 
   /** Sync probe: returns cached bitmap or null (zero cost). */
   private resolveSourceDimensions(src: string): ImageBitmap | null {
-    return sourceBitmapCache.get(src) ?? null;
+    return imageBitmapCache.get(src) ?? null;
   }
 
   /** Async fallback: triggers decode if not in cache. */

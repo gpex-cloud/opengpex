@@ -23,7 +23,7 @@
  * everything between "the scene names a gain-map asset" and "the view pass
  * samples a decoded, eased map":
  *
- *   - GPU residency: the decoded CPU payload (`gainMapSourceCache`) is
+ *   - GPU residency: the decoded CPU payload (`gainMapCache`) is
  *     uploaded to an r8unorm texture ONCE per asset and reused every present;
  *   - the gain ease (the gradual brighten macOS Photos applies when an
  *     Adaptive-HDR image opens): one strength, eased over GAIN_RAMP_MS toward
@@ -52,7 +52,7 @@
  */
 
 import { GPUTextureUsage } from '@opengpex/editor/core/engine/gpu/constants';
-import { gainMapSourceCache } from '@opengpex/editor/core/engine/sources/GainMapSource';
+import { gainMapCache } from '@opengpex/editor/core/engine/sources/GainMapCache';
 
 /** Everything the view pass needs to reconstruct the HDR rendition. The uv
  * placement is derived separately at present (RenderGraph folds the ROI); the
@@ -115,7 +115,7 @@ export class GainPresenter {
    */
   resolve(assetId: string | undefined): PresentGainMap | undefined {
     const dimming = this.dimDone !== null;
-    const src = assetId ? gainMapSourceCache.get(assetId) : undefined;
+    const src = assetId ? gainMapCache.get(assetId) : undefined;
     const device = this.deps.getDevice();
     if (!assetId || !src || !device || (!dimming && !this.deps.isHdrActive())) {
       this.settle(0);
@@ -167,7 +167,7 @@ export class GainPresenter {
 
   /**
    * Device loss / teardown: the textures belonged to the dead device (the CPU
-   * payload in gainMapSourceCache survives, so the next resolve re-uploads and
+   * payload in gainMapCache survives, so the next resolve re-uploads and
    * re-runs the ease).
    */
   release(): void {

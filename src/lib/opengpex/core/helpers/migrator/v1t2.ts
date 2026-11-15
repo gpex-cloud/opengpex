@@ -203,13 +203,17 @@ export function sanitizeLayer(layer: Record<string, unknown>): boolean {
     }
   }
 
-  // 4. metadata.fillColor
-  if (layer.metadata && typeof layer.metadata === 'object') {
-    const meta = layer.metadata as Record<string, unknown>;
-    if (meta.fillColor !== undefined && !isColorValueLike(meta.fillColor)) {
-      meta.fillColor = migrateToColorValue(meta.fillColor);
-      changed = true;
-    }
+  // 4. fillColor (P2 review: hoisted to a top-level Layer field)
+  const legacyFill = (layer.metadata as Record<string, unknown> | undefined)?.fillColor
+    ?? (layer as Record<string, unknown>).fillColor;
+  if (legacyFill !== undefined && !isColorValueLike(legacyFill)) {
+    (layer as Record<string, unknown>).fillColor = migrateToColorValue(legacyFill);
+    changed = true;
+  }
+  const legacyMeta = layer.metadata as Record<string, unknown> | undefined;
+  if (legacyMeta && 'fillColor' in legacyMeta) {
+    delete legacyMeta.fillColor;
+    changed = true;
   }
 
   // 5. Bounding defensive healing: ensure layer.bounding conforms to layer.rect

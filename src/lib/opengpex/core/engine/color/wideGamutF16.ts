@@ -56,7 +56,7 @@ import { gammaToLinear, ADOBE_RGB_GAMMA, PROPHOTO_GAMMA, rec2020ToLinear } from 
 import { linearFloatToFloat16 } from './float16';
 import { pqToSceneLinear, hlgToSceneLinear } from './hdr/hdrTransfer';
 
-/** Shape of the `highDepthSource` a wide-gamut degamma produces (mirrors DecodeResult). */
+/** Shape of the high-depth line a wide-gamut degamma produces (consumers take `.data`). */
 export interface WideGamutHighDepth {
   data: Uint16Array;
   width: number;
@@ -93,7 +93,7 @@ function degammaToF16Linear(
  * Reroute a wide-gamut 8-bit source onto the raw f16-linear line.
  *
  * Takes the SOURCE-ENCODED 8-bit RGBA readback (from `createImageBitmap(none)` +
- * `getImageData`, or vips color-agnostic decode) and produces a `highDepthSource`
+ * `getImageData`, or vips color-agnostic decode) and produces the high-depth line
  * identical in contract to a 16-bit wide-gamut source, so the existing GPU raw
  * upload line and shader `gamut_to_working(2u/3u)` handle it with ZERO changes.
  *

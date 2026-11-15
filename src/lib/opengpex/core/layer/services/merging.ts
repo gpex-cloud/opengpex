@@ -52,7 +52,6 @@
  */
 
 import { EditorActions, Frame, GeometryService, Layer, LayerService } from '@opengpex/editor/core/types';
-import { matchRule, type DecisionRule } from '@opengpex/editor/core/helpers/decision-table';
 
 export type MergeStrategyOp = 'bake' | 'noop';
 
@@ -190,35 +189,13 @@ export interface MergeDeps {
  * The bake branch never sees group participants (the guard intercepts them),
  * so this table is total over craft/image/vector mixes.
  */
-type MergedTypeContext = { readonly types: readonly Layer['type'][] };
-type MergedProductType = 'paint' | 'image';
-
-const CRAFT_TYPES: readonly Layer['type'][] = ['paint', 'text', 'color'];
-const MERGED_TYPE_FIELDS: readonly (keyof MergedTypeContext)[] = ['types'];
-
-export const MERGED_TYPE_RULES: readonly DecisionRule<MergedTypeContext, MergedProductType>[] = [
-  // Subset relation MUST be a function predicate: the shared runtime's array
-  // pattern means "admits any listed member", not "subset of the set".
-  {
-    id: 'R1',
-    condition: { types: (t) => t.every(x => CRAFT_TYPES.includes(x)) },
-    action: 'paint',
-  },
-  { id: 'R2', condition: { types: '*' }, action: 'image' },
-];
-
-/**
- * Product type of a bake merge, from the participants' deduped type set.
- * Pure craft mixes merge into `paint`; anything involving image or vector
- * degrades to `image`.
- */
-export function resolveMergedType(types: readonly Layer['type'][]): MergedProductType {
-  const deduped = [...new Set(types)].sort();
-  return matchRule(MERGED_TYPE_RULES, { types: deduped }, MERGED_TYPE_FIELDS, 'merged-type').action;
-}
+// P5: the paint kind merged into image — every bake merge product is an
+// image layer; provenance (mosaic canvas etc.) lives in `metadata.sourceTool`
+// stamps, and cross-kind payload hygiene still runs through
+// `craftPayloadStrip` below.
 
 /** Craft payload keys that must not ride forward on a baked product. */
-const CRAFT_PAYLOAD_KEYS = ['textData', 'markerData', 'strokeData', 'strokes', 'penData', 'penStyle'] as const;
+const CRAFT_PAYLOAD_KEYS = ['textData', 'markerData', 'strokeData', 'strokes', 'penData', 'penStyle', 'fillColor'] as const;
 
 /** Spreadable patch clearing every craft payload (explicit undefined removes). */
 export function craftPayloadStrip(): Record<string, undefined> {
@@ -261,7 +238,7 @@ export async function physicalMerge(
 
   try {
     // Shared bake primitive (services/baking.ts): composite → register → warm.
-    const bake = await layers.bakeToAsset(frame, [...participants]);
+    const bake = await layers.bake.bakeToAsset(frame, [...participants]);
 
     // The survivor is no longer "the piece cut from S" — it is a composite.
     // Strip its cut-link pointers in the same transaction (resetWithBounds
@@ -273,7 +250,7 @@ export async function physicalMerge(
       const { sourceLayerId: _src, assocMaskId: _mask, ...rest } = metadata ?? {};
       return rest;
     };
-    layers.updateLayer(frame.id, (tx) => {
+    layers.factory.updateLayer(frame.id, (tx) => {
       tx.edit(target.id)
         .setAsset({ assetId: bake.assetId, url: bake.url })
         .resetWithBounds(bake.bounds.w, bake.bounds.h, bake.bounds.x + bake.bounds.w / 2, bake.bounds.y + bake.bounds.h / 2)
@@ -286,7 +263,7 @@ export async function physicalMerge(
     // The composite burnt every participant's grade chain and payload into
     // the merged pixels; the survivor must not carry any of it forward.
     actions.updateLayer(frame.id, target.id, {
-      type: resolveMergedType(participants.map(l => l.type)),
+      type: 'image',
       ...craftPayloadStrip(),
       bitmapMasks: [],
       adjustMasks: undefined,
@@ -302,7 +279,7 @@ export async function physicalMerge(
     // snapshot would write the survivor's OLD holes back onto the baked
     // layer (the survivor is often the source of the removed fragments).
     // Holes on other sources keep dead-end ids, which nothing resolves.
-    layers.removeLayers(frame.id, items.map(item => item.id), { cutLinks: 'ignore-link' });
+    layers.factory.removeLayers(frame.id, items.map(item => item.id), { cutLinks: 'ignore-link' });
 
     // End the cut relationships the bake consumed: layers OUTSIDE the set
     // whose source is a participant (the survivor, whose holes are gone with
@@ -321,7 +298,7 @@ export async function physicalMerge(
       actions.updateLayer(frame.id, id, { metadata: stripLineage(layer.metadata) });
     }
 
-    layers.activate(frame.id, target.id);
+    layers.factory.activate(frame.id, target.id);
 
     // A stacking change outranks the plain success message: the merge did
     // succeed, but the picture may differ from what the user was looking at.

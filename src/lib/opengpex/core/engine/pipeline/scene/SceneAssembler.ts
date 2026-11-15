@@ -41,20 +41,17 @@ import type {
   VectorMask,
   LocalShape,
   BitmapMaskOverrideMap,
-  GamutId,
 } from '@opengpex/editor/core/types';
 import { snapCanvasRect } from '@opengpex/editor/core/geometry/operators/snapping';
 import { resolveLayerGeometry } from '@opengpex/editor/core/engine/pipeline/graph/support/layerGeometry';
 import { translatePathData } from '@opengpex/editor/core/geometry/operators/shape';
 import { shapeToPoint2D } from '@opengpex/editor/core/geometry/operators/point2d';
-import { sourceBitmapCache } from '@opengpex/editor/core/engine/sources';
-import { buildSolidColorSource, SOLID_COLOR_SOURCE_FORMAT, type SolidColorSource } from '@opengpex/editor/core/engine/sources/SolidColorSource';
-import type { Scene, SceneContent, LayerNode, BitmapMaskDesc, BitmapMaskRecord, VectorMaskDesc, VectorSubMask, Mat3, SceneChannelMask } from './Scene';
+import type { Scene, SceneContent, LayerNode, LayerSource, BitmapMaskDesc, BitmapMaskRecord, VectorMaskDesc, VectorSubMask, Mat3, SceneChannelMask } from './Scene';
 import { CHANNEL_MASK_RGB } from './Scene';
 import type { IEngine, UploadSource, LutUpload } from '@opengpex/editor/core/engine/pipeline/IEngine';
-import type { HighDepthSource } from '@opengpex/editor/core/engine/sources/HighDepthSource';
+import type { HighDepthSource } from '@opengpex/editor/core/engine/sources/HighDepthCache';
 import { translateLayerAdjustments } from './adjustments';
-import { layerToVectorSource } from './vectorSources';
+import { translateLayer } from './translators';
 import { WORKING_GAMUT } from '@opengpex/editor/core/engine/color/gamut';
 import { resolveCompositeDensity } from '@opengpex/editor/core/engine/pipeline/graph/support/densityComposite';
 
@@ -63,25 +60,16 @@ import { resolveCompositeDensity } from '@opengpex/editor/core/engine/pipeline/g
  * high-precision layer source onto the engine's one `{kind:'raw'}` upload
  * contract (`UploadSource`, WebGpuEngine).
  *
- * The two producers are HETEROGENEOUS BY ORIGIN but identical downstream:
- *  - `SolidColorSource` (core/color) — a synthesized 1×1 pure-colour fill.
- *  - `HighDepthSource`  (core/engine/cache) — a decoded 16/32-bit image buffer.
- * Both reduce to naked float texels + a `{w,h,format}` descriptor, so the engine
- * (and the RenderGraph beyond it) never needs to know which produced a texture.
- * Keeping this reduction in ONE pure function is why the assembler has a single
- * raw branch instead of one hand-written mapping per producer.
- *
- * `solid` wins when both are present (a `color` layer owns no real bitmap /
- * high-depth asset). Returns undefined when neither applies — an 8-bit source
- * then stays on the zero-copy `{kind:'bitmap'}` path.
+ * The producer is `HighDepthSource` (core/engine/cache) — a decoded 16/32-bit
+ * image buffer reduced to naked float texels + a `{w,h,format}` descriptor, so
+ * the engine (and the RenderGraph beyond it) never needs to know which decoder
+ * produced the texture. (A declarative solid fill is NOT an upload producer —
+ * it carries no bytes at all.) Returns undefined for an 8-bit source, which
+ * stays on the zero-copy `{kind:'bitmap'}` path.
  */
 function toRawUpload(
-  solid: SolidColorSource | undefined,
   highDepth: HighDepthSource | undefined,
 ): Extract<UploadSource, { kind: 'raw' }> | undefined {
-  if (solid) {
-    return { kind: 'raw', data: solid.texels, desc: { w: 1, h: 1, format: SOLID_COLOR_SOURCE_FORMAT } };
-  }
   if (highDepth) {
     return {
       kind: 'raw',
@@ -208,7 +196,7 @@ export interface AssetUpload {
  * layer's source asset, that layer uploads via `{ kind: 'raw' }` → `rgba16float`;
  * when absent, the layer stays on the 8-bit `{ kind: 'bitmap' }` path.
  */
-export type { HighDepthSource } from '@opengpex/editor/core/engine/sources/HighDepthSource';
+export type { HighDepthSource } from '@opengpex/editor/core/engine/sources/HighDepthCache';
 
 /**
  * The CAMERA-INDEPENDENT inputs to assembly — everything that determines the
@@ -231,6 +219,17 @@ export interface SceneContentOptions {
    * The dispatch judges ONLY the single source's bit depth here — NEVER `frame.bitDepth`.
    */
   readonly getHighDepthSource?: (assetId: string) => HighDepthSource | undefined;
+  /**
+   * 8-bit read seam (the `getHighDepthSource` twin for the decoded-bitmap
+   * axis): given a resolved src URL, returns the cached `ImageBitmap` or
+   * undefined, kicking the one-shot decode on a miss (subscribers notified →
+   * next-frame dirty rebuild — see the source-resolution stage note below for
+   * why hidden I/O inside this reduction is sound). Injected as a direct cache read
+   * (`getHighDepthSource: (id) => highDepthCache.get(id)`). Omitted
+   * (engine-less test assembly) ⇒ no 8-bit source ever resolves and those
+   * layers carry no upload.
+   */
+  readonly getBitmapSource?: (src: string) => ImageBitmap | undefined;
   /**
    * Live-pose seam (LIVE-EDIT stamp discipline, same family as
    * `needIncreComp`): returns the GESTURE-TIME pose override for a layer —
@@ -278,19 +277,10 @@ export interface SceneViewOptions {
   readonly needIncreComp?: (layerId: string) => boolean;
 }
 
-/**
- * The gamut an asset's 8-bit display bitmap is ACTUALLY encoded in. Browser
- * canvases can only encode sRGB or Display P3, so every decoder writes its
- * 8-bit proxy as sRGB for sRGB assets and as Display P3 for everything wider
- * (Adobe RGB, ProPhoto, BT.2020 masters fold to P3 — the widest
- * canvas-representable gamut). The asset's own gamut describes its HIGH-DEPTH
- * master; tagging the bitmap with it would read P3 bytes as e.g. ProPhoto and
- * massively oversaturate the frame shown before the master is resident.
- */
-export function proxyBitmapGamut(assetGamut: GamutId | undefined): GamutId {
-  if (!assetGamut || assetGamut === 'srgb') return 'srgb';
-  return 'display-p3';
-}
+// (proxyBitmapGamut moved to `translators/raster.ts` — the raster identity
+// adjudication's canvas-fold rule lives with the rest of the raster arm;
+// re-imported above for the TRANSFER-time upload tag below, whose SYNC
+// contract with the RENDER-time tag is documented there.)
 
 /**
  * Gain-map presentation eligibility — the view-pass single-source ruling. The
@@ -396,6 +386,41 @@ export class SceneAssembler {
    * identity is a safe reuse key that can only ever be falsely-DIRTY (a wasted
    * rebuild), never falsely-CLEAN. Pure w.r.t. the
    * engine: `options.engine` is ignored; the caller flushes `uploads`.
+   *
+   * HIDDEN-I/O CONTRACT (the one deliberate impurity): the source-resolution
+   * stage probes the read seams (`getBitmapSource` / `getHighDepthSource`),
+   * and a cache MISS kicks a one-shot async decode + notifies subscribers —
+   * side effects inside a reduction that is memoized by reference. This is
+   * sound because of three cooperating facts:
+   *   1. Each cache dedups in-flight fetches (`pending` map) and lands the
+   *      result once — a repeated probe is a cheap map hit, never a repeat
+   *      decode.
+   *   2. The cache `notify()` reaches the stage's dirty flag
+   *      (`needsRenderRef` → `SceneContentCache` `dirty` input), forcing a
+   *      rebuild on the next tick even though `f.layers` did not change —
+   *      the never-false-clean proof in SceneContentCache covers exactly
+   *      this class of content change.
+   *   3. A miss resolves to `undefined` THIS frame (layer renders as the
+   *      8-bit fallback / unmasked) and upgrades on the rebuild — the
+   *      degrade-then-upgrade path is part of the seam contracts, not a
+   *      memoization hazard.
+   *
+   * The per-layer loop body is organized into five NAMED STAGES (a readability
+   * scaffolding over ONE single reduction — the reduction shape, statement
+   * order and side-effect interleaving are the memoize invariant and must not
+   * be restructured):
+   *   1. GEOMETRY & CULL      — snapshot, live-pose override, canvas cull,
+   *                             local matrix, content dims, crop.
+   *   2. SOURCE RESOLUTION    — vector translation, kind synthesize + identity
+   *                             registration, bitmap / high-depth probes
+   *                             (the hidden-I/O point), drift guard.
+   *   3. UPLOAD PLAN          — raw/bitmap source uploads + bmask record
+   *                             uploads (order is observable by the engine's
+   *                             flush loop; keep stable).
+   *   4. MASK & GRADE DESCRIPTORS — bmask/vmask descriptors + adjustment
+   *                             stage list (declarative, GPU-consumed).
+   *   5. NODE ASSEMBLY        — the LayerNode literal consuming every prior
+   *                             stage's outputs + LUT plan dedup.
    */
   static buildContent(options: SceneContentOptions): { content: SceneContent; uploads: AssetUpload[]; lutUploads: LutUpload[] } {
     const {
@@ -403,6 +428,7 @@ export class SceneAssembler {
       geometry,
       assets,
       getBitmapMaskOverride,
+      getBitmapSource,
       getHighDepthSource,
       getLayerPoseOverride,
       hdr = false,
@@ -460,6 +486,9 @@ export class SceneAssembler {
 
     // Traverse layers bottom-to-top
     for (const layerId of f.layers.order) {
+      // ═══ STAGE 1 · GEOMETRY & CULL ═══
+      // In:  layer record, getLayerPoseOverride, geometry, canvas rect.
+      // Out: latestLayer, transform, layerWidth/Height, crop — or `continue`.
       const layer = f.layers.byId[layerId];
       if (!layer || !layer.visible) continue;
 
@@ -512,26 +541,34 @@ export class SceneAssembler {
       const layerWidth = latestLayer.bounding.w;
       const layerHeight = latestLayer.bounding.h;
 
-      // Vector spine (architecture B): a `vector` layer is rendered analytically on
-      // the GPU instead of the CPU Canvas2D bitmap path. `layerToVectorSource`
-      // (vectorSources.ts — the sole business→vector boundary; the engine knows
-      // NO tool, translators register into its contributor registry) maps the
-      // layer's tool payload ONCE to one of the renderer strategies:
-      //   • SDF payload    → `renderer: 'sdf'`    (analytic fragment solve)
-      //   • stroke payload → `renderer: 'stroke'` (compute-extruded ribbon)
-      //   • text payload   → `renderer: 'text'`   (GPU glyph quads over a coverage atlas;
-      //     CPU layout runs in the translator, the GPU side never re-computes layout)
-      // `size`/bounding MUST match the LayerNode dims below (SDF translators take
-      // them explicitly; stroke/text read `layer.bounding` internally — same
-      // source). When defined, the layer skips the bitmap upload entirely and its
-      // `source` becomes the `{ kind: 'vector', ... }` descriptor; the shared tail
-      // (transform / crop / mask / adjust / opacity / blend / clip) is identical to
-      // a raster's. Working gamut is WORKING_GAMUT (see colorSpace below).
-      const vectorSource = layerToVectorSource(latestLayer, WORKING_GAMUT, {
-        width: layerWidth,
-        height: layerHeight,
+      // ═══ STAGE 2 · SOURCE RESOLUTION ═══
+      // ONE call: translateLayer (translators/index — the SceneTranslator)
+      // resolves the layer's LayerSource across the three arms
+      // (vector → solid → raster) and runs the raster arm's probes through the
+      // injected seams (the HIDDEN-I/O point — see the buildContent JSDoc
+      // contract). Declarative arms (vector/solid) short-circuit the probes:
+      // there is no asset behind the declaration, and a legacy persisted id
+      // resolving to nothing is the normal path, never a decode attempt.
+      // Out: translated.source (the push site reads it verbatim) +
+      //      translated.raster (raster-arm probe results → the upload plan).
+      // NOTE (solid × crop): the crop STAYS on solid layers — it carries the
+      // quad's localOffset, which for a logical color fragment is the
+      // source-continued coordinate offset (D6 contract) that places the fill
+      // at the cut position. The shared 1×1 white texture's UV stays pinned to
+      // [0,0,1,1] in `resolveLayerGeometry` (a 1-px texture has no croppable
+      // content; normalizing the crop against it once put the UVs far beyond 1
+      // and the layer shader's bitmap-extent gate zeroed the whole layer —
+      // 2026-11-12 finding).
+      const translated = translateLayer(latestLayer, {
+        workingSpace: WORKING_GAMUT,
+        dims: { width: layerWidth, height: layerHeight },
+        resolveSrc: assets ? (assetId, src) => assets.resolve(assetId, src) : undefined,
+        getBitmapSource,
+        getHighDepthSource,
+        getAssetRecord: assets ? (assetId) => assets.get(assetId) : undefined,
+        rawStyleOn: f.rawStyle !== false,
       });
-      const isVectorLayer = vectorSource !== undefined;
+      const rasterArm = translated.raster;
 
       let crop: { x: number; y: number; w: number; h: number } | undefined;
       if (latestLayer.visibleShape) {
@@ -543,112 +580,67 @@ export class SceneAssembler {
         };
       }
 
-      // A `color` layer is a PURE FILL — synthesize a 1×1
-      // wide-gamut solid source from its ColorValue instead of leaning on an
-      // uploaded bitmap (whose only resident asset is the transparent-pixel
-      // placeholder). The texels are working-LINEAR rgba16float (converted by
-      // the builder), so the scene node tags them `trc: 'linear'` + working
-      // gamut and the sampling shader applies neither a TRC decode nor a gamut
-      // alignment.
-      const fillColor = latestLayer.type === 'color' ? latestLayer.metadata?.fillColor : undefined;
-      const solid = fillColor ? buildSolidColorSource(fillColor, WORKING_GAMUT) : undefined;
-      // NOTE (solid × crop): the crop STAYS on solid layers — it carries the
-      // quad's localOffset, which for a logical color fragment is the
-      // source-continued coordinate offset (D6 contract) that places the fill
-      // at the cut position. The 1×1 stretched texel's UV is pinned to
-      // [0,0,1,1] in `resolveLayerGeometry` instead (a 1-px texture has no
-      // croppable content; normalizing the crop against it once put the UVs
-      // far beyond 1 and the layer shader's bitmap-extent gate zeroed the
-      // whole layer — 2026-11-12 finding).
-
-      // Resolve source bitmap
-      const currentSrc = layer.src
-        ? assets
-          ? assets.resolve(layer.assetId, layer.src)
-          : layer.src
-        : null;
-
-      const rawImg = currentSrc ? sourceBitmapCache.getOrFetch(currentSrc) : null;
-
-      // Upload bitmap to GPU resident texture.
-      // Key by `assetId` (source content hash), NOT `layer.id`,
-      // so a cut fragment and its origin share ONE resident GPUTexture. Per-layer
-      // differences (uv_rect / localOffset / mask) live in the LayerNode, not the
-      // shared texture.
-      //
-      // Zero-transfer pan/zoom: the upload is ALWAYS recorded
-      // and the engine dedups by bitmap reference / version at flush time. We
-      // deliberately do NOT skip via `engine.has()`: without a per-layer
-      // `pixelsDirty` flag that would suppress re-transfer after a genuine pixel
-      // edit (draw/erase/filter yields a fresh ImageBitmap), leaving a stale image
-      // on screen. The engine's reference check is both zero-transfer on pan/zoom
-      // AND correct on edit (a new bitmap ref → re-DMA).
-      const sourceAssetId = solid ? solid.assetId : layer.assetId || layer.id;
-      // A DPR-aware rasterized texture (e.g. a resampled
-      // layer bitmap sized `bounding × dpr`) tags its asset with `dprScale = dpr`. `crop` here is in LOGICAL (document)
-      // pixels, so the crop→UV mapping in `resolveLayerGeometry` needs this
-      // factor to sample the physical texture correctly. Bitmap / fragment
-      // assets have `dprScale` undefined → treated as 1 (crop already in source
-      // pixels), so their UV is unchanged.
-      const sourceDprScale = assets?.get(sourceAssetId)?.dprScale ?? 1;
-      // Per-layer precision dispatch: judge THIS layer's source bit depth
-      // (via the ingest-axis seam), never `frame.bitDepth`. A 16/32-bit source
-      // uploads its naked pixels as `{ kind: 'raw' }` → rgba16float/rgba32float;
-      // an 8-bit source stays on the zero-copy `{ kind: 'bitmap' }` path. Logical
-      // layers (copy/cut/paste, Cmd+J) reuse the source assetId, so precision is
-      // inherited for free.
-      const highDepth = getHighDepthSource ? getHighDepthSource(sourceAssetId) : undefined;
-
       // Dev-only drift guard, HIGH-DEPTH
       // ONLY: the naked buffer is EXIF-uprighted at decode, so its dims must equal
       // this layer's bounding (at DPR 1). A mismatch means a decoder skipped
       // `rotateNakedRgba` and we're about to upload a mis-oriented / mis-strided
-      // texture. Guarded to DPR 1 to avoid false alarms on HiDPI rasters. (A solid
-      // source is 1×1 by construction — nothing to check.) A FRAGMENT layer
+      // texture. Guarded to DPR 1 to avoid false alarms on HiDPI rasters. A
+      // FRAGMENT layer
       // (copy/cut logical path) shares the source assetId and samples a
       // SUB-RECT of the full texture via its narrowed `visibleShape` — its
       // bounding is smaller than the texture by design, so the guard only
       // applies to layers that claim the whole asset.
+      const highDepth = rasterArm?.highDepth;
       if (
-        highDepth && process.env.NODE_ENV !== 'production' && sourceDprScale === 1 &&
+        highDepth && process.env.NODE_ENV !== 'production' && (rasterArm?.dprScale ?? 1) === 1 &&
         !latestLayer.visibleShape
       ) {
         console.assert(
           highDepth.width === layerWidth && highDepth.height === layerHeight,
           `SceneAssembler: high-depth texture ${highDepth.width}×${highDepth.height} ≠ ` +
-          `layer bounding ${layerWidth}×${layerHeight} for asset ${sourceAssetId} — ` +
+          `layer bounding ${layerWidth}×${layerHeight} for asset ${(translated.source as { assetId: string }).assetId} — ` +
           `naked buffer not EXIF-uprighted`,
         );
       }
 
-      // Single raw-upload branch: both high-precision producers (solid fill /
-      // high-depth image) converge through `toRawUpload` onto `{kind:'raw'}`. An
-      // 8-bit source yields none and falls through to the zero-copy bitmap path.
-      // A vector layer has NO bitmap source at all (GPU-analytic) — skip every
-      // upload; RenderGraph renders it into a transient from its `source`.
-      const rawUpload = isVectorLayer ? undefined : toRawUpload(solid, highDepth);
-      if (rawUpload) {
-        uploads.push({ assetId: sourceAssetId, source: rawUpload });
-      } else if (!isVectorLayer && rawImg && typeof (rawImg as ImageBitmap).close === 'function') {
-        const resolvedGamut = proxyBitmapGamut(assets?.get(sourceAssetId)?.gamut);
+      // ═══ STAGE 3 · UPLOAD PLAN ═══
+      // In:  stage-2 resolutions (rasterArm probes — highDepth / bitmap),
+      //      proxyBitmapGamut via assets, getBitmapMaskOverride + bmask records.
+      // Out: uploads.push entries — the raw/bitmap source upload FIRST, then
+      //      live-override mask uploads, then baked-record uploads. Push order
+      //      is consumed by `syncAssets` verbatim; keep it stable.
+      //
+      // Single raw-upload branch: high-precision image sources converge through
+      // `toRawUpload` onto `{kind:'raw'}`. An 8-bit source yields none and falls
+      // through to the zero-copy bitmap path. The declarative arms (vector /
+      // solid) upload NOTHING — `rasterArm` is undefined there (vector renders
+      // GPU-analytically into a transient; solid's colour rides the layer
+      // uniform with the shared 1×1 white formality).
+      if (rasterArm) {
+        // The source is the raster arm's by construction here; narrow once and
+        // read the upload keys/tags off it (they are NOT duplicated on the
+        // probes — see RasterPayload).
+        const rasterSource = translated.source as Extract<LayerSource, { kind: 'raster' }>;
+        const rawUpload = toRawUpload(rasterArm.highDepth);
+        if (rawUpload) {
+          uploads.push({ assetId: rasterSource.assetId, source: rawUpload });
+        } else if (rasterArm.bitmap && typeof rasterArm.bitmap.close === 'function') {
         uploads.push({
-          assetId: sourceAssetId,
+          assetId: rasterSource.assetId,
           // Tag the 8-bit color raster with the asset's OWN
           // colorIdentity.gamut (StoredAsset is the sole owner of per-asset color
           // truth) so the upload copy
           // is an identity when the source is already in the working gamut.
-          // Falls back to `'srgb'` only if the asset entry can't be resolved
-          // (shouldn't happen for a registered asset — defensive only). The frame
-          // no longer carries a colour space to fall back to, and sRGB is what an
-          // untagged raster means everywhere else (`DEFAULT_COLOR_IDENTITY`,
-          // `WebGpuEngine`'s untagged-source default).
           // SYNC ⚠️: this is the TRANSFER-time tag (steers copyExternalImageToTexture
-          // into an identity copy). It MUST stay equal to the RENDER-time tag on the
-          // scene layer's `source.gamut` below — both go through `proxyBitmapGamut`.
-          // They are two independent channels (upload identity vs. shader
-          // gamut_to_working); diverging them double-converts or fails to align.
-          source: { kind: 'bitmap', data: rawImg as ImageBitmap, gamut: resolvedGamut },
+          // into an identity copy). It MUST stay equal to the RENDER-time tag inside
+          // the built source — both come from the translator's
+          // `proxyBitmapGamut` fold (raster.ts documents the twin-channel
+          // contract; diverging them double-converts or fails to align).
+          // SYNC ⚠️: the TRANSFER-time tag = the RENDER-time source.gamut on this
+          // 8-bit path — both are the proxyBitmapGamut fold (raster.ts).
+          source: { kind: 'bitmap', data: rasterArm.bitmap, gamut: rasterSource.gamut },
         });
+        }
       }
 
       // Resolve optional mask — SPLIT model. A layer can
@@ -714,7 +706,7 @@ export class SceneAssembler {
         const maskSrc = assets
           ? assets.resolve(activeMask.assetId, activeMask.src)
           : activeMask.src;
-        const maskImg = sourceBitmapCache.getOrFetch(maskSrc);
+        const maskImg = getBitmapSource ? getBitmapSource(maskSrc) : null;
         if (maskImg && typeof (maskImg as ImageBitmap).close === 'function') {
           bmaskRecords.push({
             maskId: activeMask.id,
@@ -742,7 +734,7 @@ export class SceneAssembler {
         const rec = enabled[i];
         if (overriddenMaskIds.has(rec.id) || rec.id === anchorMaskId) continue;
         const recSrc = assets ? assets.resolve(rec.assetId, rec.src) : rec.src;
-        const recImg = sourceBitmapCache.getOrFetch(recSrc);
+        const recImg = getBitmapSource ? getBitmapSource(recSrc) : null;
         if (!recImg || typeof (recImg as ImageBitmap).close !== 'function') continue;
         bmaskRecords.push({
           maskId: rec.id,
@@ -754,6 +746,11 @@ export class SceneAssembler {
           source: { kind: 'bitmap', data: recImg as ImageBitmap, channel: 'r' },
         });
       }
+      // ═══ STAGE 4 · MASK & GRADE DESCRIPTORS ═══
+      // In:  bmaskRecords (from stage 3's enumeration), vectorMasks +
+      //      visibleShape, adjustment chain.
+      // Out: bmaskDesc, vmaskDesc, adjustStages — declarative GPU-consumed
+      //      descriptors, no CPU rasterization, no uploads here.
       if (bmaskRecords.length > 0) {
         // Every record's pixels are uploaded AS-IS (no CPU combine — the GPU
         // combine pass applies each record's hard/family semantics), as
@@ -841,62 +838,30 @@ export class SceneAssembler {
         )
         : adjustmentResult.adjustStages;
 
+      // ═══ STAGE 5 · NODE ASSEMBLY ═══
+      // In:  every prior stage's outputs (transform / source / crop / masks /
+      //      grade chain / dims / blend / clip).
+      // Out: one LayerNode pushed into sceneLayers + the per-layer LUT plan
+      //      deduped into lutUploads.
       sceneLayers.push({
         id: layer.id,
-        source: vectorSource ?? {
-          kind: 'raster',
-          // Must match the resident-texture key used in the upload above:
-          // the source content hash, so fragments sharing an origin
-          // resolve to the same GPUTexture in RenderGraph.
-          assetId: sourceAssetId,
-          // The asset's colour DOMAIN, judged per-asset from the decoder's
-          // reported interpretation. 8-bit bitmap assets have no high-depth entry, so
-          // this stays undefined ⇒ 'srgb-trc' (correct: browser decoders always emit
-          // sRGB-encoded pixels). NEVER derived from `frame.trc` — see LayerSource.trc.
-          // A solid-colour source carries WORKING-LINEAR texels (the builder
-          // converted the ColorValue), so it tags 'linear' — the shader must
-          // skip the TRC decode, or a non-sRGB colour is decoded with the
-          // wrong curve (2026-11-12 finding: the fill painted dark).
-          trc: fillColor ? 'linear' : highDepth?.trc ?? 'srgb-trc',
-          // Forwarding terminus: the per-asset source gamut the GPU sampling
-          // shader converts to the working space (ProPhoto RGB). High-depth sources
-          // carry their own decoded gamut; 8-bit bitmap sources (no high-depth
-          // entry) read the asset's OWN colorIdentity.gamut (StoredAsset is the
-          // sole owner of per-asset color truth, not the frame),
-          // matching the identity upload tag above, so gamut_id resolves to
-          // srgb(1)/p3(0) and the shader aligns srgb→P3 (p3 is a no-op).
-          // Falls back to `'srgb'` only if the asset entry can't be resolved — the
-          // frame carries no colour space to fall back to, and sRGB is
-          // the universal meaning of an untagged raster.
-          // SYNC ⚠️ (8-bit): this RENDER-time tag must equal the TRANSFER-time
-          // `UploadSource.gamut` set above — keep both sourced from
-          // `proxyBitmapGamut`.
-          // A solid-colour source is already IN the working space (the
-          // builder converted to working-linear), so its gamut tag resolves
-          // to the passthrough id — the shader applies no alignment.
-          gamut: fillColor
-            ? WORKING_GAMUT
-            : highDepth?.gamut ?? proxyBitmapGamut(assets?.get(sourceAssetId)?.gamut),
-          // Forwarding terminus: the per-asset raw white domain. Its PRESENCE is
-          // the render intent — only scene-linear sources (camera RAW) carry a
-          // high-depth entry with a domain; 8-bit bitmaps have no high-depth
-          // entry ⇒ undefined ⇒ SDR passthrough. Carried forward from the
-          // asset's color identity, NEVER re-sniffed here.
-          rawWhiteDomain: highDepth?.rawWhiteDomain,
-          // The RAW style preset toggle (frame.rawStyle, undefined/ON = on),
-          // resolved ONCE at assembly so the render-intent nibble flips with
-          // the document switch without touching pixels. Filled only on
-          // scene-linear sources — display-referred layers stay undefined and
-          // the resolver's domain-presence gate keeps the style unreachable.
-          rawStyleOn: highDepth?.rawWhiteDomain !== undefined
-            ? f.rawStyle !== false
-            : undefined,
-        },
+        // Source dispatch priority: vector spine (analytic payload) → declarative
+        // solid (fill payload) → resident raster (asset pool). The solid
+        // declaration carries its own colour identity — working-LINEAR in the
+        // working gamut by construction (`layerToSolidSource` converted the
+        // ColorValue), so the renderer skips both the TRC decode and the gamut
+        // alignment; no pool-record lookup ever happens for it (the 2026-11-12
+        // fill-painted-dark class of bug is structurally gone: there is no
+        // identity to evict or mis-tag).
+        // The push site reads the translator's verdict verbatim — the ONE
+        // source call happened at stage 2 (its raster probes had to precede
+        // the upload plan above).
+        source: translated.source,
         transform,
         width: layerWidth,
         height: layerHeight,
         crop,
-        dprScale: vectorSource ? 1 : sourceDprScale,
+        dprScale: rasterArm ? rasterArm.dprScale : 1,
         opacity: typeof layer.opacity === 'number' ? layer.opacity : 1.0,
         blendMode: layer.blendMode || 'source-over',
         bmask: bmaskDesc,

@@ -77,7 +77,7 @@ export const FILE_LOADER_COMMANDS = {
 
             if (!choice || choice === 'cancel') continue; // Cancel → skip this file
             if (choice === 'overwrite') {
-              ctx.layers.removeFrame(existingFrame.id);
+              ctx.layers.factory.removeFrame(existingFrame.id);
             }
             // 'new' → fall through to import as a new frame
           }

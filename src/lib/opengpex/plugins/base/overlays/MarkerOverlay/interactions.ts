@@ -525,7 +525,7 @@ export const createMarkerRotateHandler = (): InteractionHandler => {
  *   onStart: record drag start (canvas-local), set drawing signal
  *   onMove:  compute geometry via MARKER_REGISTRY[kind].computeFromDrag, write
  *            the live preview (rendered by the SVG overlay via core markerToSvg)
- *   onEnd:   finalize → LayerFactory.getNewLayer(type:'vector') → place command;
+ *   onEnd:   finalize → LayerFactory.createLayer(type:'vector') → place command;
  *            discard if the drag is below MIN_DRAG_PX (mis-click guard)
  */
 export const createMarkerDrawHandler = (): InteractionHandler => {
@@ -633,9 +633,8 @@ export const createMarkerDrawHandler = (): InteractionHandler => {
       const baseName = def.layerName ? def.layerName(finalData) : def.label;
       const smartName = LayerFactory.getNewLayerName(layersArray, baseName);
 
-      const markerLayer = LayerFactory.getNewLayer({
+      const markerLayer = LayerFactory.createLayer('vector', {
         name: smartName,
-        type: 'vector',
         cx: worldCenter.x,
         cy: worldCenter.y,
         bounding: { w: alignedRect.w, h: alignedRect.h },

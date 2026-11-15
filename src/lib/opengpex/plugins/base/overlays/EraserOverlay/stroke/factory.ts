@@ -263,10 +263,7 @@ export function findEraserTarget(frame: Frame): { layer: Layer; isNew: boolean }
   if (!activeLayer || activeLayer.locked || !activeLayer.visible) return null;
 
   // Image/paint layers: require src (has pixel content)
-  if (
-    (activeLayer.type === 'image' || activeLayer.type === 'paint') &&
-    activeLayer.src
-  ) {
+  if (activeLayer.type === 'image' && activeLayer.src) {
     return { layer: activeLayer, isNew: false };
   }
 

@@ -51,7 +51,7 @@ async function clipToNewLayer(
     return;
   }
 
-  const result = await ctx.layers.clipFragment(activeFrame, latestLayer, { mode });
+  const result = await ctx.layers.clip.clipFragment(activeFrame, latestLayer, { mode });
   if (!result.newLayer) {
     if (result.hud) actions.setInteraction({ hud: { message: result.hud, type: 'error' } });
     return;
@@ -59,14 +59,14 @@ async function clipToNewLayer(
 
   if (result.sourceMask) {
     const sourceMask = result.sourceMask;
-    ctx.layers.updateLayer(activeFrame.id, (tx) => {
+    ctx.layers.factory.updateLayer(activeFrame.id, (tx) => {
       tx.edit(latestLayer.id).patch({
         vectorMasks: [...(latestLayer.vectorMasks || []), sourceMask],
       });
     });
   }
-  const insertAt = ctx.layers.getInsertIndexAbove(activeFrame, latestLayer.id);
-  ctx.layers.addLayer(activeFrame.id, result.newLayer, insertAt);
+  const insertAt = ctx.layers.factory.getInsertIndexAbove(activeFrame, latestLayer.id);
+  ctx.layers.factory.addLayer(activeFrame.id, result.newLayer, insertAt);
 
   // Selection lifecycle on landing — same rule as the clipboard family: a
   // Cut to Layer dissolves the selection unless the preference keeps the

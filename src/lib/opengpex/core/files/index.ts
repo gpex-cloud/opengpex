@@ -415,11 +415,13 @@ export function createFileService(
           ? result.pages[pageIndex]
           : result.pages[0];
 
-        if (page.colorIdentity.dataFormat && page.highDepthSource) {
+        if (page.colorIdentity.dataFormat && page.highDepthData) {
           return {
-            data: page.highDepthSource.data,
-            width: page.highDepthSource.width,
-            height: page.highDepthSource.height,
+            data: page.highDepthData,
+            // Geometry authority is the page's own display dims (the naked
+            // buffer is uprighted to match by contract).
+            width: page.width,
+            height: page.height,
             dataFormat: page.colorIdentity.dataFormat,
             trc: page.colorIdentity.trc,
             gamut: page.colorIdentity.gamut ?? lightRecord?.gamut ?? 'srgb',
@@ -428,11 +430,11 @@ export function createFileService(
         }
       }
 
-      // decodeAsset failed, or the page it produced carries no highDepthSource.
+      // decodeAsset failed, or the page it produced carries no highDepthData.
       // No further fallback: for the channels this matters most (`libraw`,
       // `libheif-proxy`) the raw source bytes are exactly what the browser's native
       // decode already can't read, so re-attempting a bare readback here would
-      // just fail the same way. The caller (HighDepthTextureCache) negative-
+      // just fail the same way. The caller (HighDepthCache) negative-
       // caches this and degrades to the 8-bit display path.
       return null;
     },

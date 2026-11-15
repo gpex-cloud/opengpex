@@ -62,7 +62,7 @@
  */
 
 import type { Scene, LayerNode, BitmapMaskDesc, VectorMaskDesc, VectorParams } from './Scene';
-import { strokeSourceFingerprint } from './vectorSources';
+import { strokeSourceFingerprint } from './translators';
 
 export interface CompositeSignatureOptions {
   /**
@@ -172,6 +172,11 @@ function layerSig(layer: LayerNode, opts: CompositeSignatureOptions): string {
     if (layer.source.rawStyleOn !== undefined) {
       srcSig += layer.source.rawStyleOn ? ':style1' : ':style0';
     }
+  } else if (layer.source.kind === 'solid') {
+    // DECLARATIVE SOLID: no asset, no epoch — the working-LINEAR colour tuple
+    // IS the pixels. Plain-number JSON is deterministic; any fill edit changes
+    // the tuple and re-composites.
+    srcSig = `solid:${layer.source.color[0]},${layer.source.color[1]},${layer.source.color[2]},${layer.source.color[3]}`;
   } else {
     // Vector source: no asset epoch — the geometry/colour params ARE the pixels.
     // Signature shape is each renderer's own concern (routed via

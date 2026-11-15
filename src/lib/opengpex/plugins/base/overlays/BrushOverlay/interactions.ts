@@ -222,9 +222,8 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
     const frame = e.activeFrame;
     const layersArray = frame.layers.order.map((id) => frame.layers.byId[id]);
 
-    return LayerFactory.getNewLayer({
+    return LayerFactory.createLayer('vector', {
       name: LayerFactory.getNewLayerName(layersArray, 'Stroke'),
-      type: 'vector',
       cx: geom.cx,
       cy: geom.cy,
       bounding: { w: geom.w, h: geom.h },

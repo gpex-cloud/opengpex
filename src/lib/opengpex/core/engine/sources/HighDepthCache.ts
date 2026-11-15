@@ -18,10 +18,10 @@
  */
 
 /**
- * HighDepthTextureCache — main-thread cache of decoded 16/32-bit source pixels,
+ * HighDepthCache — main-thread cache of decoded 16/32-bit source pixels,
  * keyed by asset id.
  *
- * The precision-axis sibling of `SourceBitmapCache`: where that holds 8-bit
+ * The precision-axis sibling of `ImageBitmapCache`: where that holds 8-bit
  * `ImageBitmap`s, this holds GPU-ready float naked pixels (`HighDepthSource`)
  * for 16/32-bit sources, so `SceneAssembler` can dispatch a `{ kind: 'raw' }`
  * upload → an `rgba16float` / `rgba32float` resident texture (invariant A).
@@ -45,10 +45,10 @@
  * probed exactly once and thereafter stays on the zero-copy bitmap path
  * (invariant A: no needless f16 fattening).
  *
- * @module core/engine/sources/HighDepthSource
+ * @module core/engine/sources/HighDepthCache
  */
 
-import type { GamutId } from '@opengpex/editor/core/types';
+import { recordCacheRead } from './cachePerf';
 
 /** Decoded high-bit-depth naked pixels, GPU-ready for a direct float upload. */
 export interface HighDepthSource {
@@ -68,73 +68,28 @@ export interface HighDepthSource {
    */
   readonly dataFormat: 'rgba16float' | 'rgba32float';
   /**
-   * The pixels' TRANSFER CHARACTERISTIC (linear light composite invariant).
-   *
-   * The GPU composites in linear light, so it must know whether to decode
-   * sRGB→linear when sampling this asset. Comes from the decoder's reported vips
-   * `interpretation`, defaulting to `'srgb-trc'` — 16-bit TIFF/PNG in the wild are
-   * almost always sRGB-encoded, just with more levels.
-   *
-   * ⚠️ This is deliberately a PER-ASSET field, NOT read from `frame.trc`: that
-   * document-level field defaults to `'linear'` for any bitDepth>=16 document (a v1
-   * VipsBackend-era convention unrelated to real pixel encoding) while the importer
-   * hard-codes `'srgb-trc'` — using it would skip the decode for ordinary sRGB
-   * 16-bit TIFFs and wash the image out. This is handled as a per-layer judgement.
-   *
-   * Optional for backward compatibility with legacy cache entries;
-   * consumers MUST treat `undefined` as `'srgb-trc'`.
+   * ⚠️ NO IDENTITY FIELDS HERE (trc / gamut / rawWhiteDomain were removed —
+   * 2026-11-15): colour identity belongs to the asset's `ColorIdentity` (the
+   * pool record — the SINGLE authority), and the scene assembly reads it from
+   * there. `proxyBitmapGamut` derives the 8-bit proxy's canvas-representable
+   * identity from the same record (the DNG proxy-cast lesson: identity is
+   * PER-PIXEL-FORM — the proxy folds to Display P3, the master stays in its
+   * source gamut). The entry carries only the attributes the naked bytes
+   * cannot exist without.
    */
-  readonly trc?: 'srgb-trc' | 'linear';
-  /**
-   * The pixels' SOURCE PHYSICAL COLOR GAMUT. Omitted ⇒ `'srgb'`.
-   *
-   * Lazily tagged from the decoder's detected color space; consumed by the GPU
-   * per-asset gamut→working matrix conversion.
-   */
-  readonly gamut?: GamutId;
-  /**
-   * The pixels' PER-FILE filmic knee white domain (decoded RAW only).
-   * Omitted ⇒ `FILMIC_WHITE_DOMAIN` — and absence IS the SDR-passthrough
-   * intent: the former `RenderIntent` tag was deleted because 'filmic' was set
-   * by exactly the decode that produces this domain. Forwarded verbatim from
-   * the asset's `ColorIdentity` (decode-sampled from the anchored luma
-   * histogram) so `SceneAssembler` carries it onto the `LayerSource` and the
-   * GPU knee — and any re-run of the CPU display proxy — knees identically
-   * with the canvas.
-   */
-  readonly rawWhiteDomain?: number;
 }
 
 /** Fetches + decodes the raw source for `assetId`, or null if it is not high-depth. */
 export type HighDepthFetcher = (assetId: string) => Promise<HighDepthSource | null>;
 
-/** A positive cache slot: the decoded source plus whether it is safe to evict. */
 interface PositiveEntry {
   readonly source: HighDepthSource;
-  /**
-   * Whether this entry's bytes are confirmed durably persisted (IDB `dec:` write
-   * succeeded) — only a `persisted: true` entry may be reclaimed by the byte
-   * budget. An entry landed without this confirmation is pinned (never silently
-   * dropped), since losing it would mean data that exists nowhere else.
-   */
+  /** Confirmed-durable `dec:` persistence — only then may the byte budget evict. */
   readonly persisted: boolean;
 }
 
-/** Input to `selectEvictions` — one candidate per positive (non-negative) entry. */
-export interface EvictionCandidate {
-  readonly id: string;
-  readonly byteLength: number;
-  readonly persisted: boolean;
-}
-
-/**
- * Pure eviction decision: given candidates in oldest-first (LRU) order and the
- * current/budget byte totals, returns which ids to evict and the resulting
- * byte count. Extracted as a pure function so budget-overflow logic can be
- * unit-tested with tiny byte counts instead of allocating real ~200MB buffers.
- */
 export function selectEvictions(
-  entriesOldestFirst: readonly EvictionCandidate[],
+  entriesOldestFirst: Array<EvictionCandidate>,
   usedBytes: number,
   budgetBytes: number,
 ): { evictIds: string[]; remainingBytes: number } {
@@ -153,29 +108,31 @@ function byteLengthOf(source: HighDepthSource): number {
   return source.data.byteLength;
 }
 
-/** Default resident byte budget for decoded high-depth sources (2GB). */
 export const DEFAULT_HIGH_DEPTH_BUDGET_BYTES = 2 * 1024 * 1024 * 1024;
 
-class HighDepthTextureCache {
-  private static instance: HighDepthTextureCache;
+export interface EvictionCandidate {
+  id: string;
+  byteLength: number;
+  persisted: boolean;
+}
+
+export class HighDepthCache {
+  private static instance: HighDepthCache;
   /** assetId → entry. A stored `null` is a NEGATIVE entry (known ≤8-bit), exempt
    * from byte accounting, recency and eviction. Map iteration/insertion order
    * doubles as recency order (oldest first) for the LRU sweep. */
-  private cache: Map<string, PositiveEntry | null> = new Map();
-  private pending: Map<string, Promise<HighDepthSource | null>> = new Map();
-  private listeners: Set<() => void> = new Set();
+  private cache = new Map<string, PositiveEntry | null>();
+  private pending = new Map<string, Promise<HighDepthSource | null>>();
+  private listeners = new Set<() => void>();
   private usedBytes = 0;
   private budgetBytes = DEFAULT_HIGH_DEPTH_BUDGET_BYTES;
-
   private constructor() {}
-
-  static getInstance(): HighDepthTextureCache {
-    if (!HighDepthTextureCache.instance) {
-      HighDepthTextureCache.instance = new HighDepthTextureCache();
+  static getInstance(): HighDepthCache {
+    if (!HighDepthCache.instance) {
+      HighDepthCache.instance = new HighDepthCache();
     }
-    return HighDepthTextureCache.instance;
+    return HighDepthCache.instance;
   }
-
   /**
    * TEST SEAM — override the byte budget so the eviction/LRU/warn behaviour can
    * be exercised with a few tiny buffers instead of allocating real
@@ -188,28 +145,25 @@ class HighDepthTextureCache {
     this.budgetBytes = bytes;
     this.evictIfNeeded();
   }
-
-  // Subscription (mirrors SourceBitmapCache: late decode → redraw).
+  // Subscription (mirrors ImageBitmapCache: late decode → redraw).
   subscribe(callback: () => void): () => void {
     this.listeners.add(callback);
     return () => {
       this.listeners.delete(callback);
     };
   }
-
   private notify(): void {
     this.listeners.forEach((cb) => cb());
   }
-
   /** Sync lookup — returns the high-depth source, or undefined (missing OR negative). */
   get(assetId: string): HighDepthSource | undefined {
     const entry = this.cache.get(assetId);
     if (entry === undefined) return undefined;
     if (entry === null) return undefined; // negative entry — never touched
     this.touch(assetId, entry);
+    recordCacheRead(entry.source.dataFormat === 'rgba32float' ? 'highDepth32fHits' : 'highDepth16fHits');
     return entry.source;
   }
-
   /**
    * Import-time warm: store a decoded source so the first render is full-precision.
    *
@@ -221,13 +175,11 @@ class HighDepthTextureCache {
     this.landPositive(assetId, source, options?.persisted ?? false);
     this.notify();
   }
-
   /** Moves a positive entry to the end of the Map (= most-recently-used). */
   private touch(assetId: string, entry: PositiveEntry): void {
     this.cache.delete(assetId);
     this.cache.set(assetId, entry);
   }
-
   /** Shared landing path for `set` and fetcher resolution: accounts bytes, touches recency, evicts if needed. */
   private landPositive(assetId: string, source: HighDepthSource, persisted: boolean): void {
     const prior = this.cache.get(assetId);
@@ -238,32 +190,27 @@ class HighDepthTextureCache {
     this.pending.delete(assetId);
     this.evictIfNeeded();
   }
-
   private evictIfNeeded(): void {
     if (this.usedBytes <= this.budgetBytes) return;
-
     const candidates: EvictionCandidate[] = [];
     for (const [id, entry] of this.cache) {
       if (entry === null) continue; // negative entries are exempt
       candidates.push({ id, byteLength: byteLengthOf(entry.source), persisted: entry.persisted });
     }
-
     const { evictIds, remainingBytes } = selectEvictions(candidates, this.usedBytes, this.budgetBytes);
     for (const id of evictIds) {
       this.cache.delete(id); // full delete, never null — must not lock the asset onto the 8-bit path
     }
     this.usedBytes = remainingBytes;
-
     if (this.usedBytes > this.budgetBytes) {
-      console.warn('[HighDepthTextureCache] working set exceeds budget; nothing left to evict', {
+      console.warn('[HighDepthCache] working set exceeds budget; nothing left to evict', {
         usedBytes: this.usedBytes,
         budgetBytes: this.budgetBytes,
       });
     }
   }
-
   /**
-   * Sync-return + async-fetch contract (mirrors SourceBitmapCache.getOrFetch):
+   * Sync-return + async-fetch contract (mirrors ImageBitmapCache.getOrFetch):
    *   - Cached (positive or negative) → return the value synchronously.
    *   - Missing → kick off a one-shot `fetcher` decode; subscribers are notified
    *     when it lands (positive result); returns undefined for now.
@@ -276,10 +223,11 @@ class HighDepthTextureCache {
     if (hit !== undefined) {
       if (hit === null) return undefined; // negative — never touched
       this.touch(assetId, hit);
+      recordCacheRead(hit.source.dataFormat === 'rgba32float' ? 'highDepth32fHits' : 'highDepth16fHits');
       return hit.source;
     }
     if (this.pending.has(assetId)) return undefined;
-
+    recordCacheRead('highDepthColdMisses');
     const promise = fetcher(assetId);
     this.pending.set(assetId, promise);
     promise.then(
@@ -296,12 +244,11 @@ class HighDepthTextureCache {
       },
       (err) => {
         if (this.pending.get(assetId) === promise) this.pending.delete(assetId);
-        console.warn('[HighDepthTextureCache] decode failed for', assetId, err);
+        console.warn('[HighDepthCache] decode failed for', assetId, err);
       },
     );
     return undefined;
   }
-
   /**
    * Await-and-return contract for one-shot consumers (export/bake) that must
    * have the source resident BEFORE a synchronous read, unlike `getOrFetch`'s
@@ -320,7 +267,6 @@ class HighDepthTextureCache {
       this.touch(assetId, hit);
       return hit.source;
     }
-
     let promise = this.pending.get(assetId);
     if (!promise) {
       promise = fetcher(assetId);
@@ -338,25 +284,22 @@ class HighDepthTextureCache {
         },
         (err) => {
           if (this.pending.get(assetId) === promise) this.pending.delete(assetId);
-          console.warn('[HighDepthTextureCache] decode failed for', assetId, err);
+          console.warn('[HighDepthCache] decode failed for', assetId, err);
         },
       );
     }
-
     try {
       return (await promise) ?? undefined;
     } catch {
       return undefined; // already warned above; caller degrades to the 8-bit path
     }
   }
-
   delete(assetId: string): void {
     const entry = this.cache.get(assetId);
     if (entry) this.usedBytes -= byteLengthOf(entry.source);
     this.cache.delete(assetId);
     this.pending.delete(assetId);
   }
-
   clear(): void {
     this.cache.clear();
     this.pending.clear();
@@ -364,5 +307,11 @@ class HighDepthTextureCache {
   }
 }
 
-export const highDepthTextureCache = HighDepthTextureCache.getInstance();
+export const highDepthCache = HighDepthCache.getInstance();
+
+// (The former createHighDepthChannelSeam read/write factory is gone — the
+// declarative-solid batch removed the seam's only WRITE producer (the solid
+// 1×1 registration) and the read side was a pure passthrough of `get`.
+// Consumers wire `getHighDepthSource: (id) => highDepthCache.get(id)`
+// directly; `set(..., { persisted })` remains the ingest-side write door.)
 

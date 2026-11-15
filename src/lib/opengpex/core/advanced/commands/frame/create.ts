@@ -179,7 +179,8 @@ export const FrameCreateCommands = {
         // WebP straight from the Worker: skips a PNG encode/decode round-trip,
         // and the returned hash describes the stored artifact.
         const thumbResult = await pixels.image.resample(bundle.url, { maxSize: 512, format: 'image/webp', quality: 0.9 });
-        const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbResult.displayBlob, {
+        const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register({
+          displayBlob: thumbResult.displayBlob,
           width: thumbResult.width,
           height: thumbResult.height,
           precomputedHash: thumbResult.precomputedHash,
@@ -195,7 +196,7 @@ export const FrameCreateCommands = {
         );
         const canvasClipBox = getDefaultCanvasClipBox({ w: composited.width, h: composited.height });
 
-        const baseLayer = LayerFactory.getNewLayer({
+        const baseLayer = LayerFactory.createLayer('image', {
           name: 'Background',
           src: bundle.url,
           assetId: bundle.assetId,

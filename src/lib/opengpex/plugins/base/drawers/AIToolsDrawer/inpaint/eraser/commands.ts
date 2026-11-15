@@ -140,7 +140,7 @@ const { runCommand, abortCommand } = createToolCommand<
     const blob = await patchCanvas.convertToBlob({ type: 'image/png' });
 
     // Register as Asset
-    const { assetId, url } = await ctx.assets.register(blob, { width: patchW, height: patchH });
+    const { assetId, url } = await ctx.assets.register({ displayBlob: blob, width: patchW, height: patchH });
 
     // Read output mode from config
     const inpaintConfig = getInpaintConfig(ctx);
@@ -166,7 +166,7 @@ const { runCommand, abortCommand } = createToolCommand<
 
       // Convert composited result to a new asset
       const compositeBlob = await compositeCanvas.convertToBlob({ type: 'image/png' });
-      const compositeAsset = await ctx.assets.register(compositeBlob, { width: srcW, height: srcH });
+      const compositeAsset = await ctx.assets.register({ displayBlob: compositeBlob, width: srcW, height: srcH });
 
       // Update source layer in-place
       actions.updateLayer(frameId, layerId, { src: compositeAsset.url, assetId: compositeAsset.assetId });
@@ -180,8 +180,8 @@ const { runCommand, abortCommand } = createToolCommand<
 
       // Create a new patch Layer
       const layersArray = targetFrame.layers.order.map(id => targetFrame.layers.byId[id]);
-      const newLayer = ctx.layers.getNewLayer({
-        name: ctx.layers.getNewLayerName(layersArray, 'AI-Eraser'),
+      const newLayer = ctx.layers.factory.createLayer('image', {
+        name: ctx.layers.factory.getNewLayerName(layersArray, 'AI-Eraser'),
         src: url,
         assetId,
         cx,
@@ -191,7 +191,7 @@ const { runCommand, abortCommand } = createToolCommand<
       });
 
       // Insert above source layer
-      ctx.layers.addLayer(frameId, newLayer);
+      ctx.layers.factory.addLayer(frameId, newLayer);
     }
 
     if (workerResult.debug) {

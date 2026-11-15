@@ -26,7 +26,7 @@
  */
 
 import type { ColorIdentity, Rect } from '@opengpex/editor/core/types';
-import type { HighDepthSource } from '@opengpex/editor/core/engine/sources/HighDepthSource';
+import type { HighDepthSource } from '@opengpex/editor/core/engine/sources/HighDepthCache';
 
 /**
  * Worker-produced result payload.
@@ -43,7 +43,7 @@ export interface PixelResultData {
   /**
    * Bake-precision settlement: when a composite produced a 16/32-bit
    * product, this carries the STRAIGHT LINEAR-light naked pixels (half-float) so
-   * `PixelResult.toAsset()` can warm `HighDepthTextureCache[assetId]` — the same
+   * `PixelResult.toAsset()` can warm `HighDepthCache[assetId]` — the same
    * residency the on-screen preview reads. The `blob` remains an 8-bit sRGB PNG
    * display fallback (shown only if the high-depth cache is ever cold). Absent for
    * ≤8-bit products, which stay on the zero-copy bitmap path (invariant A).

@@ -55,7 +55,7 @@
  * OUTPUT ENTRY: `{ sourceIsLinear/sourceIsWorkingGamut/sourceIntentApplied: true }`
  * so the downstream `drawLayer` packs flags that SKIP sRGB-decode / gamut-convert /
  * tone-map — the colours were already resolved to working-gamut linear light by the
- * scene-assembly mapper (`vectorSources.ts`).
+ * scene-assembly mapper (translators/vector).
  *
  * @module core/gpu/graph/build/prepareVectorSources
  */
@@ -75,7 +75,7 @@ import {
   sweepFrozenSelectionNamespace,
   confinementContentToken,
   CONFINEMENT_SOURCE_STROKE,
-} from './prepareConfinementSources';
+} from './prepareConfinedSources';
 import type { BuildContext, PreparedSource } from './types';
 
 const CLEAR_COLOR: GPUColor = { r: 0, g: 0, b: 0, a: 0 };

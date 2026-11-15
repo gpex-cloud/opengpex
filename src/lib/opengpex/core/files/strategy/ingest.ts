@@ -105,7 +105,7 @@ export function colorSpaceToGamut(cs: ColorSpaceId): GamutId {
  * Unified ingest decision output.
  *
  * `colorIdentity` IS the on-disk `AssetStore.ts::ColorIdentity` shape, so a
- * consumer can spread `...colorIdentity` straight into `AssetInputOptions`.
+ * consumer can pass `colorIdentity` straight into the register input.
  *
  * ⚠️ The working/compositing colour space is NOT part of this decision — it is
  * an engine environment invariant (a fixed ProPhoto RGB rgba16float linear-light

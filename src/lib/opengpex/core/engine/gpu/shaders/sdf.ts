@@ -31,7 +31,7 @@
  *
  * This shader knows ONLY engine-neutral geometry primitives (`prim` ids below); it
  * has no notion of any business model — business payloads are mapped to these
- * primitives by the vector-source translators (vectorSources.ts registry).
+ * primitives by the vector-source translators (translators/vector registry).
  *
  * ── ALPHA CONVENTION (load-bearing) ──
  * The whole composite chain samples STRAIGHT (un-premultiplied) alpha: `layer.wgsl`

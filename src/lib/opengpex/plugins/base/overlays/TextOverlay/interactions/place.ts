@@ -34,6 +34,18 @@ import {
   findTextLayerAtPoint,
 } from './shared';
 
+/**
+ * Normalize a persisted pending colour into a FOREGROUND colour for fresh
+ * content (same semantics as the fill's): a layer's own opacity governs its
+ * coverage, so a persisted alpha — e.g. an eyedropper sample over a
+ * transparent region landing on alpha 0 — must not leak into new content and
+ * render it invisible (2026-11-12 finding). Pure + exported for the
+ * identity-channel acceptance tests.
+ */
+export function normalizePendingColor(color: ColorValue | undefined): ColorValue {
+  return { ...(color ?? fromHex('#FFFFFF')), alpha: 1 };
+}
+
 // ─── TextPlaceHandler ──────────────────────────────────────────────────────────
 
 /** Pointer travel (px, canvas space) below which a press is a click, not a drag. */
@@ -74,12 +86,7 @@ export const createTextPlaceHandler = (): InteractionHandler => {
 
   const readPendingColor = (e: InteractionEvent): ColorValue => {
     const colorConfig = e.state.pluginConfig[ColorOptionsAPI.configKey] as { pendingColor?: ColorValue } | undefined;
-    // The pending colour is a FOREGROUND colour (same semantics as the fill's):
-    // a layer's own opacity governs its coverage, so a persisted alpha — e.g. an
-    // eyedropper sample over a transparent region landing on alpha 0 — must not
-    // leak into new text and render it invisible (2026-11-12 finding).
-    const color = colorConfig?.pendingColor ?? fromHex('#FFFFFF');
-    return { ...color, alpha: 1 };
+    return normalizePendingColor(colorConfig?.pendingColor);
   };
 
   const buildTextLayer = (
@@ -90,9 +97,8 @@ export const createTextPlaceHandler = (): InteractionHandler => {
     const frame = e.activeFrame;
     const { pending, fontSize, lineHeight } = readPendingStyle(e);
     const layersArray = frame.layers.order.map(id => frame.layers.byId[id]);
-    return LayerFactory.getNewLayer({
+    return LayerFactory.createLayer('text', {
       name: LayerFactory.getNewLayerName(layersArray, 'Text'),
-      type: 'text',
       cx: geometry.cx,
       cy: geometry.cy,
       bounding: { w: geometry.w, h: geometry.h },

@@ -57,9 +57,9 @@ export const LAYERS_COMMANDS = {
             if (layer?.type === 'group') {
                 // Deleting a group → also delete all children that belong to this group
                 const childIds = frame.layers.order.filter(id => frame.layers.byId[id].groupId === layerId);
-                ctx.layers.removeLayers(frameId, [layerId, ...childIds]);
+                ctx.layers.factory.removeLayers(frameId, [layerId, ...childIds]);
             } else {
-                ctx.layers.removeLayers(frameId, layerId);
+                ctx.layers.factory.removeLayers(frameId, layerId);
             }
         }
     } as EditorCommand<{ frameId?: string; layerId?: string }, void>,
@@ -227,20 +227,16 @@ export const LAYERS_COMMANDS = {
             const activeLayer = activeFrame.activeLayerId ? activeFrame.layers.byId[activeFrame.activeLayerId] : undefined;
             const targetGroupId = activeLayer?.type === 'group' ? activeLayer.id : activeLayer?.groupId;
 
-            const newLayer = LayerFactory.getNewLayer({
+            const newLayer = LayerFactory.createLayer('blank', {
                 name,
-                type: 'image',
                 groupId: targetGroupId,
                 bounding: activeFrame.canvas,
                 visibleShape: asLocalShape({ x: 0, y: 0, w: activeFrame.canvas.w, h: activeFrame.canvas.h }),
-                cx: 0,
-                cy: 0,
-                locked: false,
             });
 
             // Insert above the currently active layer (or highest child if group)
             const insertAt = LayerFactory.getInsertIndexAbove(activeFrame, activeFrame.activeLayerId);
-            ctx.layers.addLayer(activeFrame.id, newLayer, insertAt);
+            ctx.layers.factory.addLayer(activeFrame.id, newLayer, insertAt);
         }
     } as EditorCommand<void, void>,
 
@@ -273,7 +269,7 @@ export const LAYERS_COMMANDS = {
                 metadata = restMeta;
             }
 
-            const newLayer = LayerFactory.getNewLayer({
+            const newLayer = LayerFactory.createLayer(layerData.type, {
                 ...layerData,
                 metadata,
                 name: newName,
@@ -284,7 +280,7 @@ export const LAYERS_COMMANDS = {
 
             // Insert directly above the original layer
             const insertAt = LayerFactory.getInsertIndexAbove(activeFrame, targetId);
-            ctx.layers.addLayer(activeFrame.id, newLayer, insertAt);
+            ctx.layers.factory.addLayer(activeFrame.id, newLayer, insertAt);
         }
     } as EditorCommand<{ layerId?: string } | undefined, void>,
 
@@ -434,7 +430,7 @@ export const LAYERS_COMMANDS = {
 
             // Smart naming
             const groupName = LayerFactory.getNewLayerName(hostLayers, 'Group');
-            const group = LayerFactory.getNewGroup({ name: groupName });
+            const group = LayerFactory.createLayer('group', { name: groupName });
 
             if (hasSelection) {
                 // Group selected layers: insert group right BELOW the bottommost
@@ -457,7 +453,7 @@ export const LAYERS_COMMANDS = {
                 // Insert the group header just below the bottommost selected layer.
                 const orderArr = activeFrame.layers.order;
                 const bottomIdx = Math.min(...validIds.map(id => orderArr.indexOf(id)));
-                ctx.layers.addLayer(activeFrame.id, group, bottomIdx);
+                ctx.layers.factory.addLayer(activeFrame.id, group, bottomIdx);
             } else {
                 // No selection: create empty group below the active layer
                 // (header sits at the bottom of where its future members will go).
@@ -466,11 +462,11 @@ export const LAYERS_COMMANDS = {
                 const activeOrderIdx = activeId ? orderArr.indexOf(activeId) : -1;
 
                 if (activeOrderIdx < 0) {
-                    ctx.layers.addLayer(activeFrame.id, group);
+                    ctx.layers.factory.addLayer(activeFrame.id, group);
                     return;
                 }
 
-                ctx.layers.addLayer(activeFrame.id, group, activeOrderIdx);
+                ctx.layers.factory.addLayer(activeFrame.id, group, activeOrderIdx);
             }
         }
     } as EditorCommand<{ layerIds?: string[] } | undefined, void>,
@@ -501,7 +497,7 @@ export const LAYERS_COMMANDS = {
             }
 
             // Remove the group layer itself
-            ctx.layers.removeLayers(activeFrame.id, payload.groupId);
+            ctx.layers.factory.removeLayers(activeFrame.id, payload.groupId);
         }
     } as EditorCommand<{ groupId: string }, void>,
 

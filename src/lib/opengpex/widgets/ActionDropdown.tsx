@@ -218,13 +218,14 @@ export default function ActionDropdown({
                           className={`
                             flex items-center justify-between gap-3 w-full px-2 py-1.5 rounded-lg
                             text-[9px] font-black uppercase tracking-tight text-left cursor-pointer
+                            transition-all
                             ${opt.variant === 'danger'
-                              ? 'text-rose-500'
+                              ? 'text-rose-500 hover:bg-rose-500/10'
                               : opt.variant === 'warning'
-                                ? 'text-amber-500'
+                                ? 'text-amber-500 hover:bg-amber-500/10'
                                 : opt.variant === 'success'
-                                  ? 'text-emerald-500'
-                                  : 'text-zinc-600 dark:text-zinc-300'
+                                  ? 'text-emerald-500 hover:bg-emerald-500/10'
+                                  : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/5 hover:text-zinc-900 dark:hover:text-zinc-100'
                             }
                           `}
                         >

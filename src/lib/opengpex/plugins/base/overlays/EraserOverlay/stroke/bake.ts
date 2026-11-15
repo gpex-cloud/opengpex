@@ -50,7 +50,7 @@ async function executeMaskBake(request: MaskBakeRequest, e: InteractionEvent): P
   try {
     // Register every record's blob as an asset (parallel — independent uploads)
     const assets = await Promise.all(records.map(async (rec) => {
-      const asset = await e.assets.register(rec.blob, { width: maskBounds.w, height: maskBounds.h });
+      const asset = await e.assets.register({ displayBlob: rec.blob, width: maskBounds.w, height: maskBounds.h });
       // Pre-warm the decode cache for the baked mask asset
       await e.pixels.image.cacheBitmap(asset.url, rec.blob);
       return asset;

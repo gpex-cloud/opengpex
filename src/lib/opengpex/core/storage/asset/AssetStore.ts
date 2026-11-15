@@ -87,41 +87,20 @@ export interface ColorIdentity {
 }
 
 /**
- * HighDepthBuffer — the bare high-depth naked-pixel payload attached to an
- * `ImageAssetPayload`. Deliberately carries ONLY the pixel bytes + their own
- * geometry, which is EXIF-uprighted to match the payload's display
- * `width`/`height` (the file decoders rotate the naked buffer alongside the
- * display proxy — see `core/files` `rotateNakedRgba`) — colour identity
- * (`dataFormat` element-type discriminator, `trc`, `gamut`) is NOT duplicated
- * here, it lives on the sibling `ImageAssetPayload.colorIdentity`, the single
- * authority.
+ * ImageAssetInput — the single ingest shape: display bytes, geometry, the
+ * optional high-depth naked-pixel track, and an OPTIONAL partial colour
+ * identity. One representation everywhere (one nested object — never flat
+ * spread fields, so the identity cannot be stated twice); the STRONG/WEAK
+ * axis is expressed purely by optionality: weak callers (plain 8-bit bakes,
+ * thumbnails) may omit fields and `AssetService.register` falls back to
+ * `DEFAULT_COLOR_IDENTITY` per field; strong producers narrow it to the
+ * required full object in `ImageAssetPayload` (below).
  */
-export interface HighDepthBuffer {
-  readonly data: Uint16Array | Float32Array;
-  readonly width: number;
-  readonly height: number;
-}
-
-/**
- * ImageAssetPayload — the general image-asset ingest contract that
- * `AssetService.storeBundle` consumes. Lives here, in the base storage layer,
- * specifically so `storage/asset` never has to import a producer-side type
- * (e.g. `core/files`'s `DecodedImage`) to know what it is being asked to
- * store — every producer (file decode, layer-composite bake, brush/text
- * rasterization) implements this same shape instead, converging on one
- * golden ingest path.
- */
-export interface ImageAssetPayload {
+export interface ImageAssetInput {
   /** 8-bit display-ready bitmap (Canvas2D / WebGPU texture upload). */
   readonly displayBlob: Blob;
   readonly width: number;
   readonly height: number;
-
-  /** Authoritative colour + bit-depth identity (gamut, trc, bitDepth, dataFormat). */
-  readonly colorIdentity: ColorIdentity;
-
-  /** 16/32-bit float naked pixels, present when `colorIdentity.dataFormat` is set. */
-  readonly highDepthSource?: HighDepthBuffer;
 
   /** Physical/logical pixel ratio for HiDPI assets. */
   readonly dprScale?: number;
@@ -129,6 +108,47 @@ export interface ImageAssetPayload {
   readonly precomputedHash?: string;
   /** Original file name if available (e.g. from file decode/import). */
   readonly sourceFileName?: string;
+
+  /**
+   * 16/32-bit float naked pixels, present when the payload's colour identity
+   * declares `dataFormat`. BARE bytes only — geometry is NOT carried here:
+   * the naked buffer is EXIF-uprighted to match `width`/`height` (the file
+   * decoders rotate it alongside the display proxy — see `core/files`
+   * `rotateNakedRgba`), so these dims are its dims by construction (single
+   * geometry authority). The colour identity that names its container
+   * (`dataFormat`) and tags it (`trc`/`gamut`) lives in whichever identity
+   * form the concrete ingest shape declares.
+   */
+  readonly highDepthData?: Uint16Array | Float32Array;
+
+  /**
+   * OPTIONAL partial colour identity — the WEAK form's slot. A caller that
+   * knows some axes hands them; omitted axes fall back to
+   * `DEFAULT_COLOR_IDENTITY` in `AssetService.register` (an ordinary 8-bit
+   * sRGB asset genuinely IS that, so this is a correct default, not a lossy
+   * one). Producers with an adjudicated identity use `ImageAssetPayload`,
+   * which narrows this to the required full object.
+   */
+  readonly colorIdentity?: Partial<ColorIdentity>;
+}
+
+/**
+ * ImageAssetPayload — the STRONG ingest contract that `AssetService.storeBundle`
+ * consumes: a producer that has ALREADY adjudicated the colour identity hands
+ * it over as ONE REQUIRED FULL object — the single colour authority for the
+ * whole downstream pipeline (light record, cache identity, bundle return).
+ * The narrowing from the base's optional partial is the compile-time guard:
+ * a payload producer who forgot the identity fails tsc instead of silently
+ * degrading high-depth content to sRGB at render time. Lives here, in the
+ * base storage layer, specifically so `storage/asset` never has to import a
+ * producer-side type (e.g. `core/files`'s `DecodedImage`) to know what it is
+ * being asked to store — every producer (file decode, layer-composite bake,
+ * brush/text rasterization) implements this same shape instead, converging on
+ * one golden ingest path.
+ */
+export interface ImageAssetPayload extends ImageAssetInput {
+  /** Authoritative colour + bit-depth identity (gamut, trc, bitDepth, dataFormat). */
+  readonly colorIdentity: ColorIdentity;
 }
 
 /**

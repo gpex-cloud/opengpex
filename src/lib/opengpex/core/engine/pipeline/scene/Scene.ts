@@ -136,7 +136,7 @@ export interface ViewConfig {
 /**
  * The engine-owned geometry primitive an {@link SdfShapeParams} describes. A
  * RENDER-CORE enum, deliberately DISTINCT from any business discriminant: the
- * vector-source translators (vectorSources.ts registry) translate business kinds
+ * vector-source translators (translators/vector registry) translate business kinds
  * into these primitive names, so nothing under `gpu/` / `pipeline/graph/` /
  * `shaders/` ever imports a business model.
  */
@@ -151,7 +151,7 @@ export type SdfPrimitive =
 
 /**
  * Analytic SDF description of a vector primitive — PURE GPU maths, no business
- * model. Produced by the scene-assembly layer (`vectorSources.ts`) and consumed
+ * model. Produced by the scene-assembly layer (translators/vector) and consumed
  * by `SdfRenderer` as a compact uniform. Colours are already in the document WORKING
  * gamut (Display-P3) LINEAR light, so the offscreen render feeds the compositor as an
  * already-linear / already-working-gamut source.
@@ -204,7 +204,7 @@ export interface SdfShapeParams {
  * `computeTextLayout`) plus the font identity the renderer needs to
  * rasterize glyphs into the atlas at the target density band. Colours are
  * already in the document WORKING gamut (ProPhoto RGB) LINEAR light, straight
- * alpha, resolved by the scene-assembly mapper (`vectorSources.ts`).
+ * alpha, resolved by the scene-assembly mapper (translators/vector).
  */
 export interface TextParams {
   /** Pure CPU layout — box-local logical px. The renderer NEVER re-computes layout. */
@@ -305,7 +305,7 @@ export interface StrokeParams {
   /** Bounding height in LOGICAL pixels (see {@link StrokeParams.width}). */
   readonly height: number;
   /**
-   * Normalized by the scene mapper (`vectorSources.ts`, `!== false`): `true`
+   * Normalized by the scene mapper (translators/vector, `!== false`): `true`
    * keeps the analytic smoothstep AA edge, `false` selects binary capsule
    * coverage (hard edge, `dn <= 1`) in `fs_paint`. Required — never `undefined`
    * by the time params reach the renderer.
@@ -402,7 +402,25 @@ export type LayerSource =
    * Carries NO texture — the shape is derived from its params at draw time
    * (zero upload, zero CPU rasterization), so it must NOT be conflated with a raster.
    */
-  | ({ readonly kind: 'vector' } & VectorParams);
+  | ({ readonly kind: 'vector' } & VectorParams)
+  /**
+   * A DECLARATIVE solid fill — the layer's `fillColor` is a mathematical
+   * description rendered analytically, NOT a pixel asset. The color is
+   * working-gamut (ProPhoto RGB) LINEAR straight-alpha RGBA, converted ONCE by
+   * the scene-assembly translator (translators/solid), and the sampling shader
+   * reads it from the layer uniform's tail vec4 (flagged by
+   * `LAYER_FLAG_SOURCE_SOLID`) instead of sampling a texture: no texels, no
+   * upload, no cache entry, no asset identity. The quad's PLACEMENT is
+   * unchanged from a raster's — `resolveLayerGeometry` still derives
+   * `localOffset = crop.xy` (the D6 source-continued coordinate contract for
+   * logical fragments) and pins the sampled uv to [0,1] via the shared 1×1
+   * white texture (a stretched constant has no croppable content), so masks,
+   * blending, opacity and the crop→local_to_world chain all reuse the raster
+   * mechanics verbatim. The color being already working-LINEAR is why the
+   * composite packs `LAYER_FLAG_SOURCE_LINEAR` + gamut 0 alongside the solid
+   * flag: the normalize step must pass the value through untouched.
+   */
+  | { readonly kind: 'solid'; readonly color: readonly [number, number, number, number] };
 
 // ────────────────────────────────────────────────────────────
 // Masks

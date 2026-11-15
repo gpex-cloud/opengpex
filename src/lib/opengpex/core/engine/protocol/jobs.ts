@@ -107,6 +107,12 @@ export interface HistogramJob {
   src: string;  // content hash (WorkerCache key)
 }
 
+/** DEV AUDIT (debt ⑧a): dump the worker-realm cachePerf counters to the
+ * main thread. Read-only; harmless in production (unused there). */
+export interface CachePerfSnapshotJob {
+  type: 'CACHE_PERF_SNAPSHOT';
+}
+
 // ─── Job union ───
 
 export type Job =
@@ -115,4 +121,5 @@ export type Job =
   | EnsureAssetJob
   | ForgetJob
   | ExtractPixelsJob
-  | HistogramJob;
+  | HistogramJob
+  | CachePerfSnapshotJob;

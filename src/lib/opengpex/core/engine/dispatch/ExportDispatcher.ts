@@ -47,8 +47,9 @@
 
 import { getGpuEngine } from '@opengpex/editor/core/engine/pipeline/WebGpuEngine';
 import { SceneAssembler } from '@opengpex/editor/core/engine/pipeline/scene/SceneAssembler';
-import { highDepthTextureCache } from '@opengpex/editor/core/engine/sources/HighDepthSource';
-import type { HighDepthFetcher } from '@opengpex/editor/core/engine/sources/HighDepthSource';
+import { highDepthCache } from '@opengpex/editor/core/engine/sources/HighDepthCache';
+import { imageBitmapCache } from '@opengpex/editor/core/engine/sources/ImageBitmapCache';
+import type { HighDepthFetcher } from '@opengpex/editor/core/engine/sources/HighDepthCache';
 import { unpremultiplyEncodeLinearF16, unpremultiplyEncodeGamut, unpremultiplyEncodePq10, unpremultiplyLinearF32 } from '@opengpex/editor/core/engine/utils/export-utils';
 import { applyGainToF32, quantizeGainMapPair } from '@opengpex/editor/core/engine/color/hdr/gainMap';
 import { WORKING_GAMUT } from '@opengpex/editor/core/engine/color/gamut';
@@ -115,7 +116,7 @@ export interface ExportResultSource {
 export class ExportDispatcher {
   /**
    * `files` is the whole `FileService`; `warmHighDepth` reads `files.recover`
-   * as the cold-recovery fetcher for `HighDepthTextureCache.ensure`. Injected at
+   * as the cold-recovery fetcher for `HighDepthCache.ensure`. Injected at
    * construction by `createPixelFacade`. `undefined` (a test double that omits
    * it) degrades to the pre-existing zero-recovery behaviour, not a throw.
    */
@@ -129,7 +130,7 @@ export class ExportDispatcher {
    * Best-effort pre-warm: for every non-group layer whose asset claims a
    * `dataFormat` (the light record's persisted "a dec: truth exists"
    * predicate — the same one `FileService.recover` tier-1 keys off), block
-   * until `HighDepthTextureCache` actually holds it (or the recovery attempt
+   * until `HighDepthCache` actually holds it (or the recovery attempt
    * failed/found nothing). Without this, the `getHighDepthSource` callback
    * below is a synchronous `.get()` with no chance to fetch, so a cold cache
    * miss would otherwise silently fall back to the 8-bit path.
@@ -140,7 +141,7 @@ export class ExportDispatcher {
     await Promise.all(
       layers
         .filter((l) => l.type !== 'group' && this.assets.get(l.assetId)?.dataFormat)
-        .map((l) => highDepthTextureCache.ensure(l.assetId, recover)),
+        .map((l) => highDepthCache.ensure(l.assetId, recover)),
     );
   }
 
@@ -171,7 +172,8 @@ export class ExportDispatcher {
       // blocked on `ensure()` for every high-depth-truth layer, so this plain
       // `.get()` is a guaranteed hit for them; a genuine 8-bit source still
       // reads undefined and takes the 8-bit bitmap path (unchanged).
-      getHighDepthSource: (assetId: string) => highDepthTextureCache.get(assetId) ?? undefined,
+      getHighDepthSource: (assetId: string) => highDepthCache.get(assetId),
+      getBitmapSource: (src: string) => imageBitmapCache.getOrFetch(src),
     });
     SceneAssembler.syncAssets(uploads, engine, lutUploads);
 

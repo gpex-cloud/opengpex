@@ -26,6 +26,8 @@ import {
   migrateLegacyClipBoxes,
   migrateLegacyLayerGrade,
   migrateLegacyStrokeCollection,
+  migrateLegacyPaintType,
+  migrateLegacyFillColorCarrier,
 } from './migrators';
 
 /**
@@ -271,6 +273,8 @@ export const Hydrating = {
     // so they simply run on every object the recursion meets (undo-history
     // snapshots migrate identically to live frames).
     migrateLegacyLayerGrade(result);
+    migrateLegacyPaintType(result);
+    migrateLegacyFillColorCarrier(result);
     migrateLegacyStrokeCollection(result);
     migrateLegacyClipBoxes(result);
     migrateLegacyBmaskInverted(result);

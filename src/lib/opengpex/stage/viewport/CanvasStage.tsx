@@ -19,29 +19,28 @@
 
 'use client';
 
-import React, { useRef, useEffect, useLayoutEffect, useState } from 'react';
-import type { Frame, CameraState, TransformLayer } from '@opengpex/editor/core/types';
+import React, { useRef, useLayoutEffect, useEffect, useCallback } from 'react';
 import { PERF_MON } from '@opengpex/editor/core/helpers/config';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { useFastSync } from '@opengpex/editor/core/state/volatile';
 import { useOverlayRotationSync } from '@opengpex/editor/core/motion/hooks/animation';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
-import { WORKING_GAMUT } from '@opengpex/editor/core/engine/color';
 import {
-  sourceBitmapCache,
-  getGpuEngine,
-  highDepthTextureCache,
-  gainMapSourceCache,
   GpuDevice,
-  SceneAssembler,
-  SceneContentCache,
   DISPLAY_CHANNEL_SIGNAL_KEY,
-  CHANNEL_MASK_RGB,
-  type SceneChannelMask,
 } from '@opengpex/editor/core/engine';
+import { RenderController } from '@opengpex/editor/core/engine/RenderController';
 
 /**
- * CanvasStage: Industrial-grade high-performance rendering stage (WebGPU v2 Core)
+ * CanvasStage: the React binding shell for the render loop (WebGPU v2 Core).
+ *
+ * This component owns ONLY what React must own — the canvas element, the
+ * session signals that feed the loop (channel mask, active frame, viewport
+ * size, services) and the mount/unmount lifecycle. Every engine
+ * responsibility (dirty state, cache subscriptions, HDR presentation
+ * sequencing, buffer sizing, the per-tick assemble→upload→view→render body)
+ * lives in the framework-free {@link RenderController}; this shell merely
+ * forwards intents into it.
  */
 export default function CanvasStage() {
   const { state, activeFrame } = useEditorState();
@@ -52,100 +51,69 @@ export default function CanvasStage() {
   useOverlayRotationSync(canvasRef, activeFrame);
 
   // [Display Transform] Read the 4-bit channel-visibility mask signal (written by
-  // the LayersDrawer Channels panel). Absent → normal RGB.
-  const channelMaskSignal = state.interaction.signals[DISPLAY_CHANNEL_SIGNAL_KEY];
-  const channelMask: SceneChannelMask =
-    typeof channelMaskSignal === 'number' ? channelMaskSignal : CHANNEL_MASK_RGB;
+  // the LayersDrawer Channels panel). Absent → normal RGB. Flows into
+  // renderTick as a per-tick input — the controller diffs it itself, no
+  // out-of-band dirty signaling needed.
+  const channelMask = state.interaction.signals[DISPLAY_CHANNEL_SIGNAL_KEY];
 
-  /**
-   * renderLoop: Core synchronized rendering logic
-   */
-  const needsRenderRef = useRef(true); // Default to first render
-  const _renderCountRef = useRef(0); // Cold-start counter for perf warning suppression
-
-  // ─── [PERF_MON] diagnostics: split assemble vs render + frame cadence ───
-  // Only allocated/used when PERF_MON is on; zero cost otherwise. These let a
-  // real-machine capture answer the question ("is the 120→100 dip in the CPU
-  // assemble or in the GPU render?") and see the inter-frame cadence jitter
-  // ("irregular fluctuations") that a single-frame threshold gate cannot.
-  const _lastTickTsRef = useRef(0); // previous tick timestamp (for inter-frame gap)
-  const _perfWindowRef = useRef<{
-    n: number;
-    assembleSum: number;
-    assembleMax: number;
-    renderSum: number;
-    renderMax: number;
-    gapSum: number;
-    gapMax: number;
-    over83: number; // frames exceeding the 120Hz budget (~8.3ms end-to-end)
-    lastFlush: number;
-  }>({ n: 0, assembleSum: 0, assembleMax: 0, renderSum: 0, renderMax: 0, gapSum: 0, gapMax: 0, over83: 0, lastFlush: 0 });
-
-  const gpuEngine = getGpuEngine();
-  const isGpuReadyRef = useRef(false);
-
-  // ─── Per-document HDR presentation switch (render filter) ───
-  // `frame.hdrRender === true` — defaults OFF even for HDR sources; HDR is a
-  // per-document user opt-in, not a file-driven auto-default. The switch
-  // selects the SURFACE mode (SDR: bgra8unorm + white clamp, byte-identical to
-  // the A-phase terminal state; HDR: rgba16float + extended + unclamped-tail
-  // view variant) — it never touches pixel data. Re-running the layout effect
-  // on this value makes the GpuDevice reconfigure (format + toneMapping)
-  // before the next ticker frame.
+  // ─── [Per-document HDR presentation switch] ───
+  // `frame.hdrRender === true` selects the SURFACE mode (SDR: bgra8unorm +
+  // white clamp; HDR: rgba16float + extended + unclamped-tail view variant).
+  // The controller owns the settled mode end-to-end (surface reconfigure is
+  // applied by the controller itself at the sequenced moment) — the stage
+  // only forwards the REQUEST.
   const hdrRequested = activeFrame ? activeFrame.hdrRender === true : false;
 
-  // Surface HDR lags the switch on the way OFF: the gain first eases back to
-  // the SDR base on the still-HDR surface (the dim mirrors the reveal), then
-  // the surface reconfigures — switching the surface first would clip the
-  // highlights in one frame. A frame change or a re-enable mid-dim applies
-  // immediately.
-  const [hdrPresentation, setHdrPresentation] = useState(hdrRequested);
-  const dimFrameRef = useRef(activeFrame?.id);
-  useEffect(() => {
-    const sameFrame = dimFrameRef.current === activeFrame?.id;
-    dimFrameRef.current = activeFrame?.id;
-    if (hdrRequested || !sameFrame || !gpuEngine.isReady()) {
-      gpuEngine.gainPresenter.cancelDim();
-      setHdrPresentation(hdrRequested);
-      return;
+  // The controller outlives every render: its dirty flag, cache subscriptions
+  // and HDR sequencing must NOT be reset by a re-render. Created lazily on
+  // first use (all its inputs are module singletons), disposed on unmount —
+  // StrictMode's mount→cleanup→mount cycle therefore gets a fresh controller
+  // with fresh subscriptions.
+  const controllerRef = useRef<RenderController | null>(null);
+  // Empty dependency array: the constructor takes no arguments, so the lazy
+  // factory has no reactive inputs at all.
+  const getController = useCallback(() => {
+    if (!controllerRef.current) {
+      controllerRef.current = new RenderController();
     }
-    let live = true;
-    void gpuEngine.gainPresenter.beginDim().then(() => {
-      if (live) setHdrPresentation(false);
-    });
-    return () => { live = false; };
-  }, [gpuEngine, activeFrame?.id, hdrRequested]);
+    return controllerRef.current;
+  }, []);
+  useEffect(() => {
+    return () => {
+      controllerRef.current?.dispose();
+      controllerRef.current = null;
+    };
+  }, []);
+
+  // Forward the HDR request; the controller sequences dim → settled mode.
+  useLayoutEffect(() => {
+    getController().setHdrRequested(hdrRequested, activeFrame?.id);
+  }, [getController, hdrRequested, activeFrame?.id]);
 
   // ─── WebGPU Canvas Mount & Surface Configuration ───
   // The swapchain gamut is NOT passed: it is a hard invariant (WORKING_GAMUT,
-  // hardcoded in `GpuDevice.configureSurface`), so `SurfaceConfig` carries only
-  // `hdr`. Neither effect depends on any document colour field;
-  // `hdrPresentation` is the one presentation-mode input, deliberately in
-  // the dependency list so a toggle reconfigures the surface synchronously.
+  // hardcoded in `GpuDevice.configureSurface`). HDR presentation-mode flips
+  // never come through here — the controller reconfigures the surface
+  // directly at the sequenced moment (dim settle / frame change).
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !GpuDevice.isSupported()) return;
-
-    // Synchronously bind new or remounted canvas in layout phase before fastSync ticker fires
-    if (gpuEngine.isReady()) {
-      gpuEngine.attachCanvas(canvas, { hdr: hdrPresentation });
-      isGpuReadyRef.current = true;
-      needsRenderRef.current = true;
-    }
-  }, [gpuEngine, activeFrame?.id, hdrPresentation]);
+    // Synchronously bind new or remounted canvas in layout phase before
+    // fastSync ticker fires. Engine readiness is the CONTROLLER's concern —
+    // attachCanvas no-ops on a cold engine (initCanvas below boots it).
+    getController().attachCanvas(canvas);
+  }, [getController]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !GpuDevice.isSupported()) return;
 
     let cancelled = false;
-
-    void gpuEngine
-      .init(canvas, { hdr: hdrPresentation })
+    const controller = getController();
+    void controller
+      .initCanvas(canvas)
       .then((caps) => {
         if (cancelled) return;
-        isGpuReadyRef.current = true;
-        needsRenderRef.current = true;
         if (PERF_MON) {
           console.info('[CanvasStage] WebGPU engine mounted to canvas:', caps);
         }
@@ -158,280 +126,27 @@ export default function CanvasStage() {
     return () => {
       cancelled = true;
     };
-  }, [gpuEngine, activeFrame?.id, hdrPresentation]);
+  }, [getController]);
 
-  // [Display Transform] Mark dirty when channel mask changes.
-  const channelMaskRef = useRef(channelMask);
-  useLayoutEffect(() => {
-    if (channelMaskRef.current !== channelMask) {
-      channelMaskRef.current = channelMask;
-      needsRenderRef.current = true;
-      _renderCountRef.current = 0; // suppress perf warning for warmup frames
-    }
-  }, [channelMask]);
-
-  // 2. Subscribe to cache changes; mark redraw needed once slices or full images load
-  useEffect(() => {
-    const unsubImages = sourceBitmapCache.subscribe(() => {
-      needsRenderRef.current = true;
-    });
-    // Ingest axis: a late high-depth decode (cold reload) must trigger a
-    // redraw so the base layer upgrades from its 8-bit display fallback to the
-    // rgba16float raw texture — mirrors the sourceBitmapCache late-arrival path.
-    const unsubHighDepth = highDepthTextureCache.subscribe(() => {
-      needsRenderRef.current = true;
-    });
-    // Gain-map axis: the first eligible frame kicks the aux decode and presents
-    // the SDR base; when the map lands the next frame flips bright.
-    const unsubGainMap = gainMapSourceCache.subscribe(() => {
-      needsRenderRef.current = true;
-    });
-
-    return () => {
-      unsubImages();
-      unsubHighDepth();
-      unsubGainMap();
-    };
-  }, []);
-
-  // 3. State synchronization: trigger redraw when active frame changes
-  useLayoutEffect(() => {
-    needsRenderRef.current = true;
-  }, [activeFrame]);
-
-  const lastFrameRef = useRef<Frame | null>(null);
-  const lastCamRef = useRef<CameraState | null>(null);
-
-  // CPU-side compose-once/view-many: memoize the camera-independent
-  // content half so pan/zoom frames skip the O(layers) re-assembly and run only
-  // the cheap view fold. See SceneContentCache for the never-false-clean proof.
-  const contentCacheRef = useRef<SceneContentCache>(new SceneContentCache());
-
-  // [Performance Optimization] Integrates with unified sync pipeline (60fps Ticker)
+  // [Performance] Unified sync pipeline ticker (60fps): the tick body lives in
+  // the controller; this shell only feeds it the session-side inputs.
   useFastSync(canvasRef, true, (v, f, cam) => {
     const canvas = canvasRef.current;
     if (!canvas || !f || !cam) return;
-
-    // Physical viewport synchronization and Retina high-DPI adaptation
-    const { w, h } = state.ui.viewportDim;
-    const dpr = window.devicePixelRatio || 1;
-    let bufferResized = false;
-
-    if (w > 0 && h > 0) {
-      // Sync CSS display size
-      if (canvas.style.width !== `${w}px`) canvas.style.width = `${w}px`;
-      if (canvas.style.height !== `${h}px`) canvas.style.height = `${h}px`;
-
-      // Sync buffer pixel dimensions (HiDPI)
-      const targetW = Math.floor(w * dpr);
-      const targetH = Math.floor(h * dpr);
-      if (canvas.width !== targetW || canvas.height !== targetH) {
-        canvas.width = targetW;
-        canvas.height = targetH;
-        bufferResized = true; // Buffer resize clears canvas — must repaint
-      }
-    }
-
-    const isDirty = needsRenderRef.current || bufferResized;
-
-    // Skip render if scene is completely static
-    if (
-      !isDirty &&
-      f === lastFrameRef.current &&
-      cam === lastCamRef.current
-    ) {
-      return;
-    }
-
-    if (!gpuEngine.isReady()) {
-      return;
-    }
-
-    const isInteracting = v.activeState.interacting;
-    let _frameT0 = 0;
-    let _assembleT0 = 0;
-    if (PERF_MON) {
-      _frameT0 = performance.now();
-    }
-
-    // Update snapshot
-    lastFrameRef.current = f;
-    lastCamRef.current = cam;
-    needsRenderRef.current = false;
-
-    if (PERF_MON) {
-      _assembleT0 = performance.now();
-    }
-
-    // Assemble immutable Scene descriptor from state + volatile fast-track
-    //
-    // CPU compose-once/view-many: the camera-INDEPENDENT content half
-    // (layers/masks/uploads) is memoized on a reference-identity key; only the
-    // cheap view fold (`composeView`) runs every frame. On a cam-only frame the
-    // key is unchanged → same content object → the O(layers) loop is skipped.
-    // `dirty` (needsRender/bufferResize) forces a rebuild, and any genuine edit
-    // (incl. a committed layer rotation) yields a new `f.layers` reference (see
-    // SceneContentCache). Canvas ±90° rotation animates via a DOM-transform
-    // compensation (stage/viewport swapRotate), NOT a per-frame scene rebuild.
-    //
-    // ⚠️ REAL-MACHINE FINDING (2026-09): the "pan/zoom 120→100" that prompted
-    // the investigation was a DevTools measurement artifact — with F12 closed the pipeline holds
-    // ~120 (min 116) and PERF_MON reports assemble≈0.01ms / render≈0.07ms. This
-    // memo is therefore a defence-in-depth win for heavy (many-layer / masked)
-    // scenes, NOT a fix for a per-frame CPU defect on the common 2-layer case.
-    const { content, uploads, lutUploads } = contentCacheRef.current.get(
-      {
-        layersRef: f.layers,
-        canvasW: f.canvas.w,
-        canvasH: f.canvas.h,
-        // Mirrors `SceneContent.colorSpace`, which `SceneAssembler.buildContent`
-        // assembles as the WORKING_GAMUT invariant — NOT a document field.
-        // Constant today, so it never forces a rebuild; kept so the
-        // key stays a faithful 1:1 image of SceneContent's inputs.
-        colorSpace: WORKING_GAMUT,
-        dirty: isDirty,
-        animating: false,
-      },
-      () =>
-        SceneAssembler.buildContent({
-          frame: f,
-          geometry,
-          assets,
-          getBitmapMaskOverride: (layerId: string) => {
-            const compositeKey = `${f.id}:${layerId}`;
-            const draft = v.buffered.layers[compositeKey];
-            return draft?.mask || undefined;
-          },
-          // Live fragment-transform scale (LIVE-EDIT stamp discipline): the
-          // gesture streams its magnification through the `fragmentTransform`
-          // transient — no Layer field, no caching, no composite-signature
-          // participation. Committed frames carry no transient → undefined.
-          getLayerPoseOverride: (layerId: string) => {
-            const t = v.transient['fragmentTransform'] as Partial<TransformLayer> | undefined;
-            if (!t || t.layerId !== layerId || typeof t.scaleX !== 'number') return undefined;
-            // Hand-over guard: once the bake lands the layer on its new
-            // (already magnified) asset, the preview scale must not apply.
-            if (t.sourceAssetId && f.layers.byId[layerId]?.assetId !== t.sourceAssetId) return undefined;
-            return {
-              scale: t.scaleX,
-              scaleY: typeof t.scaleY === 'number' ? t.scaleY : t.scaleX,
-              // LOCAL-frame slots (selection-driven scale): both ride
-              // together; absent ⇒ the override stays bare `O · S`.
-              ...(typeof t.rotationDeg === 'number' && typeof t.sourceAngle === 'number'
-                ? { rotation: t.rotationDeg, sourceAngle: t.sourceAngle }
-                : {}),
-            };
-          },
-          // Per-layer precision: serve decoded 16/32-bit source pixels so
-          // the base layer uploads as rgba16float. Import-time warm makes this a
-          // sync hit; on a cold reload `getOrFetch` decodes from the IDB raw blob
-          // once (negative-caching ≤8-bit sources) and notifies → next-frame
-          // upgrade. Judged purely on the single source's true depth, never
-          // frame.bitDepth.
-          getHighDepthSource: (assetId: string) =>
-            highDepthTextureCache.getOrFetch(assetId, (id) => files.recover(id)),
-        }),
-    );
-
-    // Flush the (possibly empty on a cache hit) upload plan into the engine.
-    SceneAssembler.syncAssets(uploads, gpuEngine, lutUploads);
-
-    // Fold the camera-dependent view onto the content to get the final Scene.
-    const scene = SceneAssembler.composeView(content, {
+    getController().renderTick({
+      canvas,
       frame: f,
       camera: cam,
       viewportDim: state.ui.viewportDim,
-      dpr,
-      // Fixed composite density (zoom-free): adaptive rendering bakes at
-      // ceil(dpr) texels per document pixel so 100% stays crisp on retina;
-      // off bakes at exactly 1 (strict WYSIWYG). Read synchronously — the
-      // presets factory is O(1) per frame.
-      adaptiveDensity: presets.get('COMPOSITE_ADAPTIVE_DENSITY') !== false,
-      geometry,
+      dpr: window.devicePixelRatio || 1,
       channelMask,
-      // LIVE-EDIT probe (session → engine seam): while a vector edit gesture is
-      // in flight (brush stroke, marker shape, …), its transaction streams
-      // source-defining patches into `buffered.layers[frameId:layerId]` and
-      // DECLARED it at open (`useIncreComp` — the writer's opt-in to Incremental
-      // Compositing). composeView stamps the topmost vector layer of a declared
-      // draft as `useIncreComp` — a RENDER-SCHEDULING hint only ("this layer's
-      // transient is re-rendered every frame; give it special care"): the engine
-      // routes that layer's canvas-spanning transient through the exact-size
-      // resident cache instead of the POT pool's largest block, and drives the
-      // below-cache fast path. Tool-agnostic by construction: the stage knows
-      // nothing about which tool produced the layer. Committed layers never
-      // carry a live draft and stay on the ordinary path.
-      needIncreComp: (layerId) => {
-        if (!v.activeState.interacting) return false;
-        // The writer declaration, not a payload-field sniff: move drags, slider
-        // streams and eraser mask previews never declare it.
-        return !!v.buffered.layers[`${f.id}:${layerId}`]?.useIncreComp;
-      },
+      // Fixed composite density (zoom-free), read synchronously — O(1).
+      adaptiveDensity: presets.get('COMPOSITE_ADAPTIVE_DENSITY') !== false,
+      volatile: v,
+      geometry,
+      assets,
+      files,
     });
-
-    // Gain-map presentation warm: when this frame is gain-eligible, probe the
-    // source cache once — a miss decodes the metadata-carried map
-    // (`raw.gainMap`, extracted at ingest; one createImageBitmap, no source
-    // blob) and this frame presents SDR; the subscription above flips the
-    // next frame bright.
-    if (scene.display.gainMapAssetId && activeFrame?.metadata) {
-      gainMapSourceCache.getOrFetch(scene.display.gainMapAssetId, () =>
-        files.decodeGainMap(activeFrame.metadata!));
-    }
-
-    let _renderT0 = 0;
-    if (PERF_MON) {
-      _renderT0 = performance.now();
-    }
-
-    // Render directly to WebGPU Swapchain. The live-edit hint travels in the
-    // scene (`composeView` stamped it from the draft probe above).
-    gpuEngine.render(scene);
-
-    if (PERF_MON) {
-      const _now = performance.now();
-      const _assembleDuration = _renderT0 - _assembleT0; // CPU scene assembly
-      const _renderDuration = _now - _renderT0; // engine.render (compose?/present)
-      const _frameDuration = _now - _frameT0; // end-to-end work this tick
-      const _gap = _lastTickTsRef.current > 0 ? _frameT0 - _lastTickTsRef.current : 0;
-      _lastTickTsRef.current = _now;
-      _renderCountRef.current++;
-
-      // Accumulate a rolling window and flush a summary ~1×/sec so the console
-      // shows the AVERAGE/MAX split + cadence jitter rather than noisy per-frame
-      // spikes. The 120Hz budget is ~8.3ms end-to-end; count frames over it.
-      const win = _perfWindowRef.current;
-      if (win.lastFlush === 0) win.lastFlush = _now;
-      if (_renderCountRef.current > 3) {
-        win.n++;
-        win.assembleSum += _assembleDuration;
-        win.renderSum += _renderDuration;
-        win.gapSum += _gap;
-        if (_assembleDuration > win.assembleMax) win.assembleMax = _assembleDuration;
-        if (_renderDuration > win.renderMax) win.renderMax = _renderDuration;
-        if (_gap > win.gapMax) win.gapMax = _gap;
-        if (_frameDuration > 8.3) win.over83++;
-      }
-
-      if (win.n > 0 && _now - win.lastFlush >= 1000) {
-        console.warn(
-          `[CanvasStage.WebGPU] window(${win.n}f) ` +
-            `assemble avg=${(win.assembleSum / win.n).toFixed(2)}ms max=${win.assembleMax.toFixed(2)}ms | ` +
-            `render avg=${(win.renderSum / win.n).toFixed(2)}ms max=${win.renderMax.toFixed(2)}ms | ` +
-            `gap avg=${(win.gapSum / win.n).toFixed(2)}ms max=${win.gapMax.toFixed(2)}ms | ` +
-            `over8.3ms=${win.over83}/${win.n} layers=${scene.layers.length} interacting=${isInteracting}`,
-        );
-        win.n = 0;
-        win.assembleSum = 0;
-        win.assembleMax = 0;
-        win.renderSum = 0;
-        win.renderMax = 0;
-        win.gapSum = 0;
-        win.gapMax = 0;
-        win.over83 = 0;
-        win.lastFlush = _now;
-      }
-    }
   });
 
   if (!activeFrame) return null;

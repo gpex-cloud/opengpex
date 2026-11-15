@@ -17,6 +17,7 @@ import { useAssetPool } from './useAssetPool';
 import { useFrameMetrics } from './useFrameMetrics';
 import { useHistoryMetrics } from './useHistoryMetrics';
 import { useShardMetrics } from './useShardMetrics';
+import { useStoreAudit } from './useStoreAudit';
 import * as P from '../protocols';
 
 /**
@@ -51,6 +52,7 @@ export const useStorageMetrics = () => {
   const frames = useFrameMetrics(assetPoolResult, structuralSignature);
   const history = useHistoryMetrics(isEnabled);
   const { shards, stateBytes } = useShardMetrics(isEnabled, structuralSignature);
+  const { storeAudit } = useStoreAudit(isEnabled, refreshKey);
 
   // Combine into final summary
   const summary = useMemo<P.StorageSummary | null>(() => {
@@ -59,7 +61,9 @@ export const useStorageMetrics = () => {
     const { pool, activeAssetIds, buildAssetMetric } = assetPoolResult;
 
     const detached: P.AssetMetric[] = Object.entries(pool)
-      .filter(([id]) => !activeAssetIds.has(id))
+      // The transparent-pixel placeholder is a SYSTEM-owned entry (every
+      // pixel-less layer's `src` points at it) — never user dead weight.
+      .filter(([id]) => id !== 'asset-transparent-pixel' && !activeAssetIds.has(id))
       .map(([id, entry]) => buildAssetMetric(id, entry))
       .sort((a, b) => b.size - a.size);
 
@@ -70,9 +74,13 @@ export const useStorageMetrics = () => {
       shards,
       frames,
       history,
-      detached
+      detached,
+      // STORE-level truth (IndexedDB incl. raw:/dec:) — the pool only ever
+      // knows what THIS session hydrated, so the store audit is the layer
+      // that can see orphans on an empty/failed workspace.
+      storeAudit
     };
-  }, [isEnabled, assetPoolResult, frames, history, shards, stateBytes]);
+  }, [isEnabled, assetPoolResult, frames, history, shards, stateBytes, storeAudit]);
 
   return { summary, refresh, isRefreshing };
 };

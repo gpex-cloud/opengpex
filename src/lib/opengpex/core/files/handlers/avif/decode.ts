@@ -25,7 +25,7 @@
  *     isolated jsquash/libavif wasm decoder delivers bit-exact NATIVE-depth
  *     pixels (ramp probes round-trip with zero error; 12MP ≈ 0.57s). ONE
  *     decode feeds both outputs:
- *       • highDepthSource = f16, left-shifted to the 65535 scale (lossless:
+ *       • highDepthData = f16, left-shifted to the 65535 scale (lossless:
  *         10-bit << 6, 12-bit << 4 ⇒ value = native / (2^bit − 1)) — srgb-trc
  *         rows keep the source encoding; the wide-gamut rows were deleted (2026-10-18),
  *         the standing wideGamut16ToF16;
@@ -63,7 +63,7 @@ export async function decodeAvif(
 
   let displayBlob: Blob = file;
   let dimensions: { w: number; h: number };
-  let highDepthSource: DecodedPayload['highDepthSource'];
+  let highDepthData: DecodedPayload['highDepthData'];
 
   switch (decision.decodeChannel) {
     case 'image-bitmap': {
@@ -102,11 +102,7 @@ export async function decodeAvif(
       // presentation switch owns rendering semantics).
       const transfer = metadata.raw?.transfer;
       if (transfer === 'pq' || transfer === 'hlg') {
-        highDepthSource = {
-          data: hdrTransfer16ToF16(naked, transfer),
-          width: native.width,
-          height: native.height,
-        };
+        highDepthData = hdrTransfer16ToF16(naked, transfer);
 
         // SDR display proxy: source-gamut scene-linear → display-p3 linear
         // (projection) → direct-pass shoulder down-render (display domain,
@@ -141,14 +137,10 @@ export async function decodeAvif(
         // the true-linear f16 line (PNG/TIFF row-8 semantics — the wide-gamut
         // standing rule). rec2020 de-gammas through the BT.709/BT.2020 OETF.
         const lifted = wideGamut16ToF16(naked, native.width, native.height, gamut);
-        highDepthSource = { data: lifted.data, width: lifted.width, height: lifted.height };
+        highDepthData = lifted.data;
       } else {
         // 15b: srgb-trc — f16 keeps the source encoding, plain normalization.
-        highDepthSource = {
-          data: normalizedUint16ToFloat16(naked),
-          width: native.width,
-          height: native.height,
-        };
+        highDepthData = normalizedUint16ToFloat16(naked);
       }
 
       // Display proxy: 8-bit truncation of the SAME native pixels (verbatim
@@ -168,5 +160,5 @@ export async function decodeAvif(
       throw new Error(`decodeAvif: unexpected decodeChannel '${decision.decodeChannel}'`);
   }
 
-  return [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0, highDepthSource }];
+  return [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0, highDepthData }];
 }

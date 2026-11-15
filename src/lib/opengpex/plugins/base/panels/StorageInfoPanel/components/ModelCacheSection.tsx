@@ -48,7 +48,7 @@ export function ModelCacheTreeNode({
       </div>
 
       {expandedNodes.models && (
-        <div className="pl-4 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-3.5 space-y-1 mt-0.5">
+        <div className="pl-2 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-2.5 space-y-1 mt-0.5">
           {modelCache.groups.length > 0 ? (
             <>
               {modelCache.groups.map((group) => {
@@ -72,7 +72,7 @@ export function ModelCacheTreeNode({
                       </span>
                     </div>
                     {isGroupExpanded && (
-                      <div className="pl-4 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-2.5 space-y-0.5 mt-0.5">
+                      <div className="pl-2 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-2.5 space-y-0.5 mt-0.5">
                         {group.files.map((file, idx) => (
                           <div
                             key={`${group.modelId}-${idx}`}

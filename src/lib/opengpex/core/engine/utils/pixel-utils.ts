@@ -205,7 +205,7 @@ export function calculateContentBoundsFromImageData(
  *
  * Ported from the retired `CompositeResult.trimmed()` OOP wrapper.
  * Only the 8-bit `displayBlob` is scanned/cropped —
- * `highDepthSource`, if present, is dropped from the result, matching the
+ * `highDepthData`, if present, is dropped from the result, matching the
  * original's behavior (it never carried high-depth pixels through trimming either).
  *
  * Returns `null` when the image is fully transparent (no content to trim to).
@@ -277,14 +277,14 @@ export async function trimTransparentMargins(
   // the dims contract, the track is DROPPED instead of sliced misaligned, and
   // the identity claims that referenced it (dataFormat, linear trc) are
   // stripped: the trimmed asset must never claim a truth that is not there.
-  let highDepthSource = image.highDepthSource;
+  let highDepthData = image.highDepthData;
   let colorIdentity = image.colorIdentity;
-  if (highDepthSource) {
-    const naked = sliceNakedBuffer(highDepthSource, left, top, trimW, trimH, width, height);
+  if (highDepthData) {
+    const naked = sliceNakedBuffer(highDepthData, left, top, trimW, trimH, width, height);
     if (naked) {
-      highDepthSource = naked;
+      highDepthData = naked;
     } else {
-      highDepthSource = undefined;
+      highDepthData = undefined;
       colorIdentity = { ...image.colorIdentity, dataFormat: undefined, trc: 'srgb-trc' };
     }
   } else if (image.colorIdentity.dataFormat) {
@@ -308,7 +308,7 @@ export async function trimTransparentMargins(
       width: trimW,
       height: trimH,
       colorIdentity,
-      highDepthSource,
+      highDepthData,
       bounds: { x: image.bounds.x + left, y: image.bounds.y + top, w: trimW, h: trimH },
     },
     offset: { x: left, y: top },
@@ -318,28 +318,30 @@ export async function trimTransparentMargins(
 /**
  * sliceNakedBuffer — crop a naked high-depth RGBA buffer to the given window,
  * row by row, preserving the source element type (Uint16Array or Float32Array)
- * via its own constructor. Returns `null` when the buffer's dimensions do not
+ * via its own constructor. Returns `null` when the buffer's BYTE LENGTH does not
  * match the expected `fullW × fullH` display space — callers must drop the
  * high-depth track in that case rather than slice misaligned rows.
  */
 export function sliceNakedBuffer(
-  naked: { data: Uint16Array | Float32Array; width: number; height: number },
+  naked: Uint16Array | Float32Array,
   left: number,
   top: number,
   trimW: number,
   trimH: number,
   fullW: number,
   fullH: number,
-): { data: Uint16Array | Float32Array; width: number; height: number } | null {
-  if (naked.width !== fullW || naked.height !== fullH) return null;
+): Uint16Array | Float32Array | null {
+  // Byte-length guard (the naked buffer carries no dims of its own): a
+  // wrong-sized payload would slice misaligned rows, so refuse instead.
+  if (naked.length !== fullW * fullH * 4) return null;
 
-  const ArrayCtor = naked.data.constructor as new (length: number) => Uint16Array | Float32Array;
+  const ArrayCtor = naked.constructor as new (length: number) => Uint16Array | Float32Array;
   const trimmedData = new ArrayCtor(trimW * trimH * 4);
   for (let row = 0; row < trimH; row++) {
-    const srcOffset = ((top + row) * naked.width + left) * 4;
-    trimmedData.set(naked.data.subarray(srcOffset, srcOffset + trimW * 4), row * trimW * 4);
+    const srcOffset = ((top + row) * fullW + left) * 4;
+    trimmedData.set(naked.subarray(srcOffset, srcOffset + trimW * 4), row * trimW * 4);
   }
-  return { data: trimmedData, width: trimW, height: trimH };
+  return trimmedData;
 }
 
 /**

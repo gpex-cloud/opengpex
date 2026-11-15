@@ -247,8 +247,7 @@ const CraftPanelButtonGroup = React.memo(function CraftPanelButtonGroup() {
  * - others -> generic tip
  */
 export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
-  const { activeCraft, activeLayerIsText, activeLayerIsBrush, activeLayerIsMarker, activeLayerIsMosaic, activeLayerIsPen } =
-    useCraftDrawer();
+  const { activeCraft, inferredCraft } = useCraftDrawer();
   const { actions } = useEditorServices();
 
   const handleOpenSettings = React.useCallback(() => {
@@ -256,31 +255,25 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
     actions.setStateSignal(SettingsPanelAPI.signals.open, true);
   }, [actions]);
 
-  // Mutually exclusive panel decisions (priority from high to low)
-  const showTextPanel =
-    activeCraft === "text" || (activeCraft === null && activeLayerIsText);
-
-  const showMarkerPanel =
-    activeCraft === "marker" || (activeCraft === null && activeLayerIsMarker);
-
-  const showMosaicPanel =
-    activeCraft === "mosaic" || (activeCraft === null && activeLayerIsMosaic);
-
-  const showPenPanel =
-    activeCraft === "pen" || (activeCraft === null && activeLayerIsPen);
-
-  const showBrushPanel =
-    activeCraft === "brush" ||
-    activeCraft === "eraser" ||
-    activeCraft === "restore" ||
-    (activeCraft === null && activeLayerIsBrush);
-
-  const showPlaceholder =
-    !showTextPanel &&
-    !showBrushPanel &&
-    !showMosaicPanel &&
-    !showMarkerPanel &&
-    !showPenPanel;
+  // Effective panel owner: an explicitly active tool wins; with no tool
+  // active, the selected layer's LayerKind `ui` inference fills in (null on
+  // both → placeholder). eraser/restore share the brush panel — encoded as
+  // table data, not an ||-chain. Brush strokes commit as vector layers
+  // (inferring no panel) and no code path stamps 'brush' onto a paint layer,
+  // so those three only ever arrive via an ACTIVE tool.
+  const PANEL_FOR_CRAFT: Partial<Record<CraftType, React.ComponentType>> = {
+    text: TextPanel,
+    marker: MarkerPanel,
+    mosaic: MosaicPanel,
+    pen: PenPanel,
+    brush: BrushPanel,
+    eraser: BrushPanel,
+    restore: BrushPanel,
+  };
+  const ActivePanel: React.ComponentType | undefined =
+    (activeCraft ?? inferredCraft) !== null
+      ? PANEL_FOR_CRAFT[(activeCraft ?? inferredCraft) as CraftType]
+      : undefined;
 
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
@@ -309,37 +302,13 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
         </div>
       </motion.div>
 
-      {showTextPanel && (
+      {ActivePanel && (
         <motion.div layout="position" className="flex flex-col">
-          <TextPanel />
+          <ActivePanel />
         </motion.div>
       )}
 
-      {showMosaicPanel && (
-        <motion.div layout="position" className="flex flex-col">
-          <MosaicPanel />
-        </motion.div>
-      )}
-
-      {showMarkerPanel && (
-        <motion.div layout="position" className="flex flex-col">
-          <MarkerPanel />
-        </motion.div>
-      )}
-
-      {showPenPanel && (
-        <motion.div layout="position" className="flex flex-col">
-          <PenPanel />
-        </motion.div>
-      )}
-
-      {showBrushPanel && (
-        <motion.div layout="position" className="flex flex-col">
-          <BrushPanel />
-        </motion.div>
-      )}
-
-      {showPlaceholder && (
+      {!ActivePanel && (
         <motion.div
           layout="position"
           className="flex flex-col bg-[var(--bg-stage)] p-4 rounded-xl border border-[var(--border-subtle)] items-center justify-center py-8 text-center gap-2"

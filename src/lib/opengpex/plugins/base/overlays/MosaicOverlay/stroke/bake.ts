@@ -140,7 +140,8 @@ async function executePaintBake(request: PaintBakeRequest, e: InteractionEvent):
   });
 
   // ── Phase 3: Finalize on main thread (<2ms) ──
-  const asset = await e.assets.register(result.blob, {
+  const asset = await e.assets.register({
+    displayBlob: result.blob,
     width: result.cropW,
     height: result.cropH,
     precomputedHash: result.hash,

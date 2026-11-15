@@ -42,7 +42,7 @@
  *   the subset layers so the ROI's top-left lands on the canvas origin. A rigid
  *   translation of `cx/cy` changes only WHERE a layer lands, never its pixels.
  *   The synthetic frame reuses the SAME `layer.assetId`s, the SAME
- *   `HighDepthTextureCache`, and the SAME working format the preview warmed, so
+ *   `HighDepthCache`, and the SAME working format the preview warmed, so
  *   `SceneAssembler.syncAssets` dedups by residency and `engine.export`
  *   runs the identical compile + `RenderGraph.composite` path as `render()`.
  *   Hence composite pixels ≡ preview pixels for the same layers.
@@ -52,8 +52,9 @@
 
 import { getGpuEngine } from '@opengpex/editor/core/engine/pipeline/WebGpuEngine';
 import { SceneAssembler } from '@opengpex/editor/core/engine/pipeline/scene/SceneAssembler';
-import { highDepthTextureCache } from '@opengpex/editor/core/engine/sources/HighDepthSource';
-import type { HighDepthSource, HighDepthFetcher } from '@opengpex/editor/core/engine/sources/HighDepthSource';
+import { highDepthCache } from '@opengpex/editor/core/engine/sources/HighDepthCache';
+import { imageBitmapCache } from '@opengpex/editor/core/engine/sources/ImageBitmapCache';
+import type { HighDepthSource, HighDepthFetcher } from '@opengpex/editor/core/engine/sources/HighDepthCache';
 import { unpremultiplyEncodeGamut, unpremultiplyEncodeLinearF16 } from '@opengpex/editor/core/engine/utils/export-utils';
 import { resampleBilinear } from '@opengpex/editor/core/engine/color/resampleHighDepth';
 import { WORKING_GAMUT } from '@opengpex/editor/core/engine/color/gamut';
@@ -141,7 +142,7 @@ export interface CompositeRequest {
 export class CompositeDispatcher {
   /**
    * `files` is the whole `FileService`; `warmHighDepth` reads `files.recover`
-   * as the cold-recovery fetcher for `HighDepthTextureCache.ensure`. Injected at
+   * as the cold-recovery fetcher for `HighDepthCache.ensure`. Injected at
    * construction by `createPixelFacade`. `undefined` (a test double that omits
    * it) degrades to the pre-existing zero-recovery behaviour, not a throw.
    */
@@ -153,7 +154,7 @@ export class CompositeDispatcher {
 
   /**
    * Best-effort pre-warm: for every non-group layer whose asset claims a
-   * `dataFormat`, block until `HighDepthTextureCache` actually holds it (or the
+   * `dataFormat`, block until `HighDepthCache` actually holds it (or the
    * recovery attempt failed/found nothing). Without this, the `getHighDepthSource`
    * callback below is a synchronous `.get()` with no chance to fetch, so a cold
    * cache miss would otherwise silently bake the 8-bit fallback into an
@@ -165,7 +166,7 @@ export class CompositeDispatcher {
     await Promise.all(
       layers
         .filter((l) => l.type !== 'group' && this.assets.get(l.assetId)?.dataFormat)
-        .map((l) => highDepthTextureCache.ensure(l.assetId, recover)),
+        .map((l) => highDepthCache.ensure(l.assetId, recover)),
     );
   }
 
@@ -265,7 +266,8 @@ export class CompositeDispatcher {
       dpr: 1,
       geometry: this.geometry,
       assets: this.assets,
-      getHighDepthSource: (assetId: string) => highDepthTextureCache.get(assetId) ?? undefined,
+      getHighDepthSource: (assetId: string) => highDepthCache.get(assetId),
+      getBitmapSource: (src: string) => imageBitmapCache.getOrFetch(src),
       ...(poseOverrides ? { getLayerPoseOverride: (layerId: string) => poseOverrides[layerId] } : {}),
     });
     SceneAssembler.syncAssets(uploads, engine, lutUploads);
@@ -338,7 +340,6 @@ export class CompositeDispatcher {
           width: outW,
           height: outH,
           dataFormat: 'rgba16float',
-          trc: 'linear',
         };
       } else {
         highDepthSource = {
@@ -346,9 +347,6 @@ export class CompositeDispatcher {
           width,
           height,
           dataFormat: 'rgba16float',
-          // The half-float pixels are STRAIGHT LINEAR light: tag 'linear' so
-          // SceneAssembler skips the sRGB→linear decode when this asset is sampled.
-          trc: 'linear',
         };
       }
     }
@@ -388,7 +386,7 @@ export class CompositeDispatcher {
       width: outW,
       height: outH,
       colorIdentity,
-      highDepthSource,
+      highDepthData: highDepthSource?.data,
       bounds: { x: roiRect.x, y: roiRect.y, w: outW, h: outH } as Rect,
     };
   }

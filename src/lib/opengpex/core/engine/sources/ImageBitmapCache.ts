@@ -18,7 +18,7 @@
  */
 
 /**
- * SourceBitmapCache — the SINGLE main-thread cache for decoded asset bitmaps.
+ * ImageBitmapCache — the SINGLE main-thread cache for decoded asset bitmaps.
  *
  * Engine V2 version — reused from v1 with identical API.
  * This is the main-thread "truth source" for all decoded ImageBitmaps:
@@ -34,9 +34,11 @@
  *   - transferable to Web Workers with zero copy
  *   - decoded only once per URL
  *
- * Invariant: SourceBitmapCache is the main-thread
+ * Invariant: ImageBitmapCache is the main-thread
  * ONLY bitmap truth source.
  */
+
+import { recordCacheRead } from './cachePerf';
 
 /**
  * Guard for non-browser (SSR / Node test) environments where
@@ -46,19 +48,19 @@ const isBitmapCapable =
   typeof globalThis !== 'undefined' &&
   typeof (globalThis as { createImageBitmap?: unknown }).createImageBitmap === 'function';
 
-class SourceBitmapCache {
-  private static instance: SourceBitmapCache;
+class ImageBitmapCache {
+  private static instance: ImageBitmapCache;
   private cache: Map<string, ImageBitmap> = new Map();
   private pending: Map<string, Promise<ImageBitmap>> = new Map();
   private listeners: Set<() => void> = new Set();
 
   private constructor() {}
 
-  static getInstance(): SourceBitmapCache {
-    if (!SourceBitmapCache.instance) {
-      SourceBitmapCache.instance = new SourceBitmapCache();
+  static getInstance(): ImageBitmapCache {
+    if (!ImageBitmapCache.instance) {
+      ImageBitmapCache.instance = new ImageBitmapCache();
     }
-    return SourceBitmapCache.instance;
+    return ImageBitmapCache.instance;
   }
 
   // ────────────────────────────────────────────────────────────
@@ -90,12 +92,25 @@ class SourceBitmapCache {
    *   - Cached → return immediately.
    *   - Missing → kick off fetch → blob → createImageBitmap;
    *     subscribers notified when bitmap lands; returns undefined.
+   *
+   * SAFE INSIDE THE SCENE REDUCTION: `SceneAssembler.buildContent` (a
+   * memoized-by-reference reduction) calls this through the injected
+   * `getBitmapSource` seam on every content frame. The hidden I/O is sound
+   * because a miss dedups through `pending` (never a repeat decode), the
+   * landing `notify()` reaches the stage's dirty flag and forces a rebuild
+   * next tick, and this frame simply renders the not-yet-loaded fallback —
+   * degrade-then-upgrade, never a stale memo. Full contract narrative on
+   * `SceneAssembler.buildContent` (HIDDEN-I/O CONTRACT).
    */
   public getOrFetch(src: string): ImageBitmap | undefined {
     const hit = this.cache.get(src);
-    if (hit) return hit;
+    if (hit) {
+      recordCacheRead('bitmapHits');
+      return hit;
+    }
     if (!isBitmapCapable) return undefined;
     if (this.pending.has(src)) return undefined;
+    recordCacheRead('bitmapColdMisses');
     this.startLoad(src);
     return undefined;
   }
@@ -147,7 +162,7 @@ class SourceBitmapCache {
       }
       this.set(src, bitmap);
     } catch (err) {
-      console.warn('[SourceBitmapCache] warmFromBlob failed for', src, err);
+      console.warn('[ImageBitmapCache] warmFromBlob failed for', src, err);
     }
   }
 
@@ -162,7 +177,7 @@ class SourceBitmapCache {
     try {
       return await createImageBitmap(hit);
     } catch (err) {
-      console.warn('[SourceBitmapCache] acquireOwned failed for', src, err);
+      console.warn('[ImageBitmapCache] acquireOwned failed for', src, err);
       return null;
     }
   }
@@ -227,10 +242,10 @@ class SourceBitmapCache {
         if (this.pending.get(src) === promise) {
           this.pending.delete(src);
         }
-        console.warn('[SourceBitmapCache] fetch failed for', src, err);
+        console.warn('[ImageBitmapCache] fetch failed for', src, err);
       },
     );
   }
 }
 
-export const sourceBitmapCache = SourceBitmapCache.getInstance();
+export const imageBitmapCache = ImageBitmapCache.getInstance();

@@ -64,7 +64,7 @@ export function createMosaicSession(e: InteractionEvent): StrokeSession | null {
   // Guard: mosaic is only meaningful when pixel content exists somewhere in the stack
   const hasPixelContent = frame.layers.order.some(id => {
     const l = frame.layers.byId[id];
-    return l.visible && !l.hostId && (l.type === 'image' || l.type === 'paint') && l.src;
+    return l.visible && !l.hostId && l.type === 'image' && l.src;
   });
   if (!hasPixelContent) {
     e.actions.notifyHUD('Mosaic needs visible image/paint content', 'error');

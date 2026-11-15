@@ -18,7 +18,7 @@
  */
 
 /**
- * prepareConfinementSources.ts — GPU compute fill-pass orchestration for
+ * prepareConfinedSources.ts — GPU compute fill-pass orchestration for
  * FROZEN-SELECTION coverage: selection snapshots frozen onto consumers as
  * plain even-odd coverage textures, baked by the same multiply fill pipeline
  * as polygon vmasks (`prepareVmaskSources.ts` owns that pipeline and the
@@ -30,7 +30,7 @@
  *     baked from prepareVectorSources) — coverage multiplies the stroke
  *     transient's alpha so a stroke paints only inside its snapshot;
  *   • adjustment masks (`AdjustStageDesc.coverage`, `adjust:` namespace,
- *     baked from `prepareAMaskSources.ts`, which owns its consumer-specific
+ *     baked from `prepareAdjustCoverage.ts`, which owns its consumer-specific
  *     array gathering on top of the shared bake) — the grading shaders blend
  *     `mix(original, graded, coverage)` so the grade only applies inside the
  *     snapshot and alpha is never clipped.
@@ -40,7 +40,7 @@
  * two consumers at the same layer id. Each consumer sweeps only its own prefix
  * through {@link sweepFrozenSelectionNamespace}.
  *
- * @module core/gpu/graph/build/prepareConfinementSources
+ * @module core/gpu/graph/build/prepareConfinedSources
  */
 
 import type { BuildContext } from './types';
@@ -115,7 +115,7 @@ export function prepareConfinementCoverage(
  * Bake (or reuse) one namespaced entry of the shared cache with an explicit
  * bake transform. The general shape behind {@link prepareConfinementCoverage}:
  * consumers that need their own windowing / per-entry sub-mask composition
- * (e.g. `prepareAMaskSources.ts`) drive the cache directly through this seam
+ * (e.g. `prepareAdjustCoverage.ts`) drive the cache directly through this seam
  * instead of the single-snapshot convenience wrapper.
  */
 export function prepareFrozenSelectionBake(
@@ -137,7 +137,7 @@ export function prepareFrozenSelectionBake(
  * frame. Stroke keys embed a per-stroke content token (index + rings digest),
  * so undo/redo churn would otherwise accumulate stale bakes forever — the
  * adjust namespace keys by layer + stage index and sweeps its own prefix in
- * `prepareAMaskSources.ts`.
+ * `prepareAdjustCoverage.ts`.
  */
 export function sweepFrozenSelectionNamespace(seen: Set<string>, prefix: string): void {
   confinementCache.sweep(seen, prefix);

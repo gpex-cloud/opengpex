@@ -44,13 +44,16 @@ export const useAssetPool = (isEnabled: boolean, refreshKey: number) => {
     if (!isEnabled) return '';
     const pool = assets.getPool();
     return `${Object.keys(pool).length}`;
-  }, [assets, isEnabled]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refreshKey is an intentional invalidation trigger (manual refresh must re-read the pool)
+  }, [assets, isEnabled, refreshKey]);
 
-  // Full asset topology audit
+  // Full asset topology audit. An EMPTY document (structuralSignature === '')
+  // is a VALID audit state — frames=[] and the pool still deserves reporting
+  // (a former `!structuralSignature → null` gate blinded the panel exactly
+  // when the workspace was empty, the moment orphan visibility matters most).
   const result = useMemo(() => {
-    if (!isEnabled || !structuralSignature) return null;
+    if (!isEnabled) return null;
 
-    console.log('🔍 [StorageInfo] Executing full asset topology audit - triggered by signature change...');
     const pool = assets.getPool();
     const usagesMap: Map<string, P.AssetUsage[]> = new Map();
     const tagsMap: Map<string, Set<P.AssetMetric['tags'][number]>> = new Map();

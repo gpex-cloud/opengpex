@@ -52,7 +52,7 @@ export const plugin: EditorPlugin = {
   },
 
   slot: "BR",
-  show: "frame-required",
+  show: "always-show",
   
   component: StorageInfoComponent,
 

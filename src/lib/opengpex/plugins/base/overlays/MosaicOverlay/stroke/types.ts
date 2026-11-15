@@ -57,7 +57,7 @@ export interface BakeWorkerResult {
 // ─── Bake Request Types ────────────────────────────────────────────────────────
 
 export interface PaintBakeRequest {
-  type: 'paint';
+  type: 'image';
   /** Stroke pixels as ImageBitmap (obtained via transferToImageBitmap, zero-copy) */
   strokeBitmap: ImageBitmap;
   /** Resolved target layer (existing or newly created) */

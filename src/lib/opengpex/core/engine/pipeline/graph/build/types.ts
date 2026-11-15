@@ -50,6 +50,16 @@ export type PreparedSource = {
    * texture is content-aligned with the full asset (historical behaviour).
    */
   contentWindow?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+  /**
+   * The source is an UNFILTERED DECLARATIVE SOLID — its colour rides the
+   * layer uniform's tail vec4 and `texture` is the shared 1×1 white
+   * binding formality (the shader discards the sample and reads the
+   * uniform). Stamped by `prepareFilteredSources` at the point where
+   * "materialized vs uniform" is decided; a FILTERED solid does NOT carry
+   * it (its transient holds real pixels). The compositor also requires
+   * `sourceIsLinear` alongside it, which the chain already sets.
+   */
+  solidUniform?: boolean;
 };
 
 /**

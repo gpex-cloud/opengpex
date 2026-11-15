@@ -475,7 +475,7 @@ export type LayerSourceTool =
 export interface Layer {
   id: string;
   name: string;
-  type: 'image' | 'text' | 'vector' | 'color' | 'paint' | 'group';
+  type: 'image' | 'text' | 'vector' | 'color' | 'group';
   /**
    * Layer nature — how this layer's pixels exist: `'physical'` owns a baked
    * bitmap (the fail-safe default; originals, imports, baked products), and
@@ -521,8 +521,13 @@ export interface Layer {
    */
   penStyle?: PenLayerStyle;
   
+  /**
+   * Color-fill content payload (type:'color' ONLY): the fill's ColorValue in
+   * WORKING_GAMUT. A first-class top-level field (P2 review — it is content,
+   * not provenance metadata; merged into the kind via `metadata.sourceTool`).
+   */
+  fillColor?: ColorValue;
   metadata?: {
-    fillColor?: ColorValue;
     /** Layers-panel icon provenance tag, display-only. See `LayerSourceTool`. */
     sourceTool?: LayerSourceTool;
     /** This layer was derived from which source layer (both copy and cut set this). */

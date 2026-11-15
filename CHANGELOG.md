@@ -2,6 +2,13 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.51
+
+- Image Formats: 16-bit images keep one authoritative color identity end to end — cold reload, resize and cache eviction all read the same record, and the high-depth cache now stores bare pixels only (no per-entry color copies that could drift or degrade)
+- Fills: solid-color layers are now drawn straight from their declared color with full working-linear precision — no intermediate pixel texture, no per-color cache entries, nothing that can be evicted, mis-tagged or churned by rebuilds (the fill-dark and fill-visibility classes of regressions are structurally gone). Fills keep their position and selection-cut behavior, keep working under blur and other filters, and stay correct across HDR on/off, export and cold reloads
+- Workspace: the storage panel gains an in-use vs orphan store audit with purge actions, a shard index and per-day grouping — orphaned cache entries can now be inspected and purged directly from the panel
+- Workspace: the layer service API is reorganized into `factory` / `clip` / `bake` namespaces with every call site migrated; the render pipeline gains a single translation seam that decides how every layer type becomes drawable (analytic geometry, declared colors and pixel assets resolve through one place); engine caches are renamed to ImageBitmapCache / HighDepthCache / GainMapCache and the render controller owns HDR surface switching directly
+
 ## 2.0.50
 
 - Clip & Cut: the four clip commands now share a single decision table driven by the product's nature — a covering "Layer via Cut" behaves exactly like a Cut, cutting without a selection works, a landed Cut dissolves the selection (a preference can keep it) and Copy keeps it with the marching ants converging onto the region that was actually taken

@@ -51,7 +51,7 @@ export function liftBaseToF16(
   rgba: Uint8ClampedArray,
   width: number,
   height: number,
-): DecodedPayload['highDepthSource'] {
+): DecodedPayload['highDepthData'] {
   const linear = new Float32Array(width * height * 4);
   for (let i = 0; i < linear.length; i += 4) {
     linear[i] = srgbToLinear(rgba[i] / 255);
@@ -59,7 +59,7 @@ export function liftBaseToF16(
     linear[i + 2] = srgbToLinear(rgba[i + 2] / 255);
     linear[i + 3] = rgba[i + 3] / 255;
   }
-  return { data: linearFloatToFloat16(linear), width, height };
+  return linearFloatToFloat16(linear);
 }
 
 // ─── RUNTIME: the metadata-carried plane decode ───

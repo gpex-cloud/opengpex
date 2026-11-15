@@ -225,8 +225,15 @@ export const AdjustmentDrawerComponent = React.memo(function AdjustmentDrawerCom
  * curve), so the panel only reports that they exist and whether the current
  * edit continues the latest step (hot tail) or will append a new one.
  * Rendered only when the category already has committed steps.
+ *
+ * HIDDEN (2026-11-16, product decision): the line exposes internal hot-tail
+ * jargon that reads as noise to users — it explains nothing they can act on.
+ * The component and its hook stay intact so a future surface (diagnostics /
+ * a friendlier wording) can re-enable it by removing the early return.
  */
 function ChainStatusLine({ tool }: { tool: GradingTool }) {
+  // Hidden: always render nothing (see the JSDoc above for the rationale).
+  return null;
   const { tailId, committedCount } = useHotTailGrade(toolCategory(tool));
   if (committedCount === 0) return null;
   const noun = committedCount === 1 ? "step" : "steps";

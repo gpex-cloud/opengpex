@@ -18,8 +18,8 @@
  */
 
 /**
- * GainMapSourceCache — main-thread cache of decoded gain-map payloads, keyed
- * by asset id. The presentation-side sibling of `HighDepthTextureCache`: where
+ * GainMapCache — main-thread cache of decoded gain-map payloads, keyed
+ * by asset id. The presentation-side sibling of `HighDepthCache`: where
  * that holds the resident f16 master pixels, this holds the low-resolution
  * log2 gain map the view pass samples to reconstruct the HDR rendition
  * (`engine/color/hdr/gainMap.ts` owns the math; the engine uploads the map to an
@@ -28,7 +28,7 @@
  * The map is deliberately NOT persisted with the asset: it is presentation
  * adjunct metadata, re-derivable from the retained source blob in one
  * container parse + one aux item decode (`FileService.decodeGainMap` — the
- * injected fetcher). Contract mirrors `HighDepthTextureCache.getOrFetch`:
+ * injected fetcher). Contract mirrors `HighDepthCache.getOrFetch`:
  *
  *   - sync hit → the decoded map (or undefined for a negative entry);
  *   - miss → kick the one-shot fetch, return undefined NOW (the presenting
@@ -41,11 +41,11 @@
  * 3024×4032 Apple form is ~12 MB single-channel), bounded by the number of
  * gain-map assets in the session.
  *
- * @module core/engine/sources/GainMapSource
+ * @module core/engine/sources/GainMapCache
  */
 
 /** Decoded gain map — structurally the files layer's `GainMapData`. */
-export interface GainMapSource {
+export interface GainMapData {
   /** Single-channel quantized samples, 0..255, row-major width × height. */
   readonly map: Uint8Array;
   readonly width: number;
@@ -58,14 +58,14 @@ export interface GainMapSource {
   readonly gamma: number;
 }
 
-export type GainMapFetcher = (assetId: string) => Promise<GainMapSource | null>;
+export type GainMapFetcher = (assetId: string) => Promise<GainMapData | null>;
 
-class GainMapSourceCache {
-  private cache: Map<string, GainMapSource | null> = new Map();
-  private pending: Map<string, Promise<GainMapSource | null>> = new Map();
+class GainMapCache {
+  private cache: Map<string, GainMapData | null> = new Map();
+  private pending: Map<string, Promise<GainMapData | null>> = new Map();
   private listeners: Set<() => void> = new Set();
 
-  /** Subscription (mirrors HighDepthTextureCache: late decode → redraw). */
+  /** Subscription (mirrors HighDepthCache: late decode → redraw). */
   subscribe(callback: () => void): () => void {
     this.listeners.add(callback);
     return () => {
@@ -78,17 +78,17 @@ class GainMapSourceCache {
   }
 
   /** Sync lookup — the decoded map, or undefined (missing OR negative). */
-  get(assetId: string): GainMapSource | undefined {
+  get(assetId: string): GainMapData | undefined {
     const entry = this.cache.get(assetId);
     return entry === null ? undefined : entry;
   }
 
   /**
    * Direct warm: land a decoded payload synchronously (test seeding today;
-   * import-time prewarming later). Notifies like any positive landing so
+   * import-time warming later). Notifies like any positive landing so
    * subscribers redraw.
    */
-  set(assetId: string, source: GainMapSource): void {
+  set(assetId: string, source: GainMapData): void {
     this.cache.set(assetId, source);
     this.notify();
   }
@@ -98,7 +98,7 @@ class GainMapSourceCache {
    * immediately; a miss kicks `fetcher` once (in-flight dedup) and notifies
    * subscribers only when a map lands.
    */
-  getOrFetch(assetId: string, fetcher: GainMapFetcher): GainMapSource | undefined {
+  getOrFetch(assetId: string, fetcher: GainMapFetcher): GainMapData | undefined {
     const hit = this.cache.get(assetId);
     if (hit !== undefined) return hit === null ? undefined : hit;
     if (this.pending.has(assetId)) return undefined;
@@ -117,7 +117,7 @@ class GainMapSourceCache {
           this.pending.delete(assetId);
           this.cache.set(assetId, null); // failed fetch = negative, one-shot
         }
-        console.warn('[GainMapSourceCache] decode failed for', assetId, err);
+        console.warn('[GainMapCache] decode failed for', assetId, err);
       },
     );
     return undefined;
@@ -134,4 +134,4 @@ class GainMapSourceCache {
   }
 }
 
-export const gainMapSourceCache = new GainMapSourceCache();
+export const gainMapCache = new GainMapCache();

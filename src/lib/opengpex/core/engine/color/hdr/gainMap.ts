@@ -57,7 +57,7 @@
  * @module core/engine/color/gainMap
  */
 
-import type { GainMapSource } from '../../sources/GainMapSource';
+import type { GainMapData } from '../../sources/GainMapCache';
 
 /** Straight linear values at or below this are black for ratio purposes: the
  * log2 ratio diverges at 0 and both renditions are (near-)identical there, so
@@ -81,9 +81,9 @@ export const QUANTIZE_MAX_DIM = 1024;
  * return as-is.
  */
 export function downscaleGainMap(
-  data: GainMapSource,
+  data: GainMapData,
   maxDim: number = QUANTIZE_MAX_DIM,
-): GainMapSource {
+): GainMapData {
   const longest = Math.max(data.width, data.height);
   if (longest <= maxDim) return data;
   const scale = maxDim / longest;
@@ -125,7 +125,7 @@ export function downscaleGainMap(
  * exactly like hardware texture filtering).
  */
 function sampleMapBilinear(
-  map: GainMapSource,
+  map: GainMapData,
   u: number,
   v: number,
 ): number {
@@ -155,7 +155,7 @@ export function applyGainToF32(
   sdrLinear: Float32Array,
   width: number,
   height: number,
-  map: GainMapSource,
+  map: GainMapData,
 ): Float32Array {
   const out = new Float32Array(sdrLinear.length);
   for (let y = 0; y < height; y++) {
@@ -194,7 +194,7 @@ export function quantizeGainMapPair(
   width: number,
   height: number,
   maxDim: number = QUANTIZE_MAX_DIM,
-): GainMapSource | null {
+): GainMapData | null {
   if (width <= 0 || height <= 0) return null;
   const scale = Math.min(1, maxDim / Math.max(width, height));
   const outW = Math.max(1, Math.round(width * scale));

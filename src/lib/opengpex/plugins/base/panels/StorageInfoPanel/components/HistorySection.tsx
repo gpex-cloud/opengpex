@@ -52,7 +52,7 @@ export function HistoryTreeNode({
       </div>
 
       {expandedNodes.history && (
-        <div className="pl-4 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-3.5 space-y-1 mt-0.5">
+        <div className="pl-2 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-2.5 space-y-1 mt-0.5">
           {history.map((moment) => (
             <div
               key={moment.id}

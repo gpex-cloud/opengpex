@@ -33,7 +33,7 @@ import CanvasBackdrop from "./CanvasBackdrop";
 import CanvasStage from "./CanvasStage";
 
 import { Frame, AssetService } from "@opengpex/editor/core/types";
-import { sourceBitmapCache, getGpuEngine, GpuDevice } from "@opengpex/editor/core/engine";
+import { imageBitmapCache, getGpuEngine, GpuDevice } from "@opengpex/editor/core/engine";
 
 interface ViewportProps {
   frameId: string;
@@ -49,7 +49,7 @@ function checkAllImagesLoaded(frame: Frame, assets?: AssetService): boolean {
   return visibleImageLayers.every((l) => {
     const src = assets ? assets.resolve(l.assetId, l.src) : l.src;
     if (!src) return true;
-    return !!sourceBitmapCache.getOrFetch(src);
+    return !!imageBitmapCache.getOrFetch(src);
   });
 }
 
@@ -114,7 +114,7 @@ function ViewportInner({ frame }: ViewportInnerProps) {
       setImagesLoaded(loaded);
     };
     check();
-    const unsubscribe = sourceBitmapCache.subscribe(check);
+    const unsubscribe = imageBitmapCache.subscribe(check);
     return unsubscribe;
   }, [frame, assets]);
 

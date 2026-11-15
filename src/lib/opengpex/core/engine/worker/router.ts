@@ -49,6 +49,7 @@
  */
 
 import type { Job } from '../protocol/jobs';
+import { cachePerfSnapshot } from '@opengpex/editor/core/engine/sources/cachePerf';
 import { workerCache } from './cache/WorkerCache';
 import { DecoderHandler } from './handlers/decoder';
 import { ResampleHandler } from './handlers/resample';
@@ -90,6 +91,9 @@ export async function router(job: Job): Promise<RouterResult> {
 
     case 'HISTOGRAM':
       return histogramHandler.handle(job);
+
+    case 'CACHE_PERF_SNAPSHOT':
+      return { result: cachePerfSnapshot() };
 
     default:
       throw new Error(`[router] Unknown job type: ${(job as { type: string }).type}`);

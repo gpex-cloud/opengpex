@@ -172,7 +172,7 @@ export function FrameTreeNodes({
 
             {/* Expanded Frame items */}
             {isFrameExpanded && (
-              <div className="pl-4 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-3 mt-0.5 space-y-1">
+              <div className="pl-2 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-2.5 mt-0.5 space-y-1">
                 {/* Frame Thumbnail Item */}
                 {frame.thumbnail && (
                   <div
@@ -209,7 +209,7 @@ export function FrameTreeNodes({
                   </div>
 
                   {expandedNodes[`${frameKey}:layers`] !== false && (
-                    <div className="pl-3 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-3.5 space-y-0.5">
+                    <div className="pl-2 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-2.5 space-y-0.5">
                       {frame.layers.map((layer) => (
                         <div
                           key={layer.id}

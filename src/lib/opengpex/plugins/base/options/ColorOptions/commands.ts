@@ -34,7 +34,7 @@ import * as P from './protocols';
  * native `EyeDropper` is driven by a command (the tool strip / Tab cycle), which
  * has no React scope to call into.
  *
- * `pendingColor` / `metadata.fillColor` are stored in exactly one canonical
+ * `pendingColor` / `layer.fillColor` are stored in exactly one canonical
  * form: `WORKING_GAMUT` — every writer converts before persisting (`applyColor`
  * in the hook is the other one). The native `EyeDropper` hands back an sRGB hex
  * (`fromHex` → `space:'srgb'`); converting before persist keeps solid-source
@@ -47,7 +47,7 @@ function landPickedColor(ctx: EditorContextValue, color: ColorValue): void {
   const { activeFrame, activeLayer, actions } = ctx;
   if (activeFrame && activeLayer?.type === 'color') {
     actions.updateLayer(activeFrame.id, activeLayer.id, {
-      metadata: { ...activeLayer.metadata, fillColor: stored },
+      fillColor: stored,
     });
   }
   // A pick is a definitive value: announce it as both the live step and the
@@ -193,21 +193,20 @@ export const COLOR_OPTIONS_COMMANDS = {
       const cx = box_cx - activeFrame.canvas.w / 2;
       const cy = box_cy - activeFrame.canvas.h / 2;
 
-      const newLayer = layers.getNewLayer({
+      const newLayer = layers.factory.createLayer('color', {
         name: 'Fill Layer',
-        type: 'color',
         cx,
         cy,
         locked: true,
         bounding: { w, h },
         visibleShape,
-        metadata: { fillColor }
+        fillColor,
       });
 
       // Flush fast-track: ensure any in-progress volatile overrides have landed before modifying State
       actions.commitVolatile();
 
-      layers.addLayer(activeFrame.id, newLayer);
+      layers.factory.addLayer(activeFrame.id, newLayer);
       actions.setActiveLayer(activeFrame.id, newLayer.id);
 
       // A fill consumes the selection: clear it in the same undo step as the

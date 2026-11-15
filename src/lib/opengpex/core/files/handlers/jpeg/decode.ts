@@ -40,7 +40,7 @@ export async function decodeJpeg(
 
   let displayBlob: Blob = file;
   let dimensions: { w: number; h: number };
-  let highDepthSource: DecodedPayload['highDepthSource'];
+  let highDepthData: DecodedPayload['highDepthData'];
 
   switch (decision.decodeChannel) {
     case 'image-bitmap': {
@@ -56,7 +56,7 @@ export async function decodeJpeg(
       // master is the SDR base lifted to linear f16 — the gain map is NOT
       // applied here (see liftBaseToF16's header for why the bake is wrong).
       // Decode options mirror the engine's own displayBlob consumption
-      // (SourceBitmapCache: EXIF-uprighted, browser-managed colour) so the
+      // (ImageBitmapCache: EXIF-uprighted, browser-managed colour) so the
       // master is co-oriented and pixel-identical in extent to the proxy.
       dimensions = await readImageDimensions(file);
       const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
@@ -70,7 +70,7 @@ export async function decodeJpeg(
         if (decision.colorIdentity.dataFormat !== 'rgba16float') {
           throw new Error("decodeJpeg: 'jpeg-hdr' decision must declare rgba16float");
         }
-        highDepthSource = liftBaseToF16(rgba, bitmap.width, bitmap.height);
+        highDepthData = liftBaseToF16(rgba, bitmap.width, bitmap.height);
       } finally {
         bitmap.close();
       }
@@ -86,13 +86,9 @@ export async function decodeJpeg(
       );
       dimensions = { w: decoded.width, h: decoded.height };
       displayBlob = decoded.displayBlob;
-      // Bare payload only — container/trc/gamut live on the sibling `colorIdentity`
-      // the entry injects (Path B).
-      highDepthSource = {
-        data: decoded.highDepthSource.data,
-        width: decoded.highDepthSource.width,
-        height: decoded.highDepthSource.height,
-      };
+      // Bare bytes only — container/trc/gamut live on the sibling `colorIdentity`
+      // the entry injects (Path B); geometry is the page dims (invariant).
+      highDepthData = decoded.highDepthData;
       break;
     }
 
@@ -119,5 +115,5 @@ export async function decodeJpeg(
       throw new Error(`decodeJpeg: unexpected decodeChannel '${decision.decodeChannel}'`);
   }
 
-  return [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0, highDepthSource }];
+  return [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0, highDepthData }];
 }

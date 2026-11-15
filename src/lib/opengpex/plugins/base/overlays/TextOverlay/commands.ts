@@ -50,7 +50,7 @@ const placeCommand: EditorCommand<{ frameId: string; layer: Layer }, void> = {
     // append-on-top (undefined index → reducer push) when there is no active layer.
     const below = LayerFactory.resolveActiveHostLayer(frame);
     const insertAt = LayerFactory.getInsertIndexAbove(frame, below?.id);
-    ctx.layers.addLayer(payload.frameId, payload.layer, insertAt);
+    ctx.layers.factory.addLayer(payload.frameId, payload.layer, insertAt);
     // Establish the history checkpoint at the PLACED state, recording the
     // creation as its own undo step. Everything the session does on top of it
     // (typing, panel styling) then baselines against a valid checkpoint — the
@@ -66,7 +66,7 @@ const placeCommand: EditorCommand<{ frameId: string; layer: Layer }, void> = {
  * the inline create-editing session.
  */
 function finishPlace(ctx: EditorContextValue, frameId: string, layerId: string): void {
-  ctx.layers.activate(frameId, layerId);
+  ctx.layers.factory.activate(frameId, layerId);
   ctx.scoped!.setSignal(P.SIGNAL_EDITING_TEXT_LAYER_ID, layerId);
   ctx.scoped!.setSignal(P.SIGNAL_SESSION_TYPE, 'create');
 }

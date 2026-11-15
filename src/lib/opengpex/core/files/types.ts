@@ -459,12 +459,12 @@ export interface ExportMetadataConfig {
  * identity + high-depth pixels lived once at the file level and could not be
  * expressed per-page (the multi-page 16-bit TIFF gap).
  *
- * Invariant on `highDepthSource`: its `width`/`height` are IDENTICAL to this
- * image's display `width`/`height`. The decode handlers upright the naked
- * buffer with the same EXIF Orientation as the display proxy (PNG/WebP
- * `rotateNakedRgba`), so the two never disagree — including for orientation 5-8
- * where both are the post-EXIF (swapped) dims. This makes the light record's
- * geometry a valid source for reconstructing the high-depth buffer.
+ * Invariant on `highDepthData`: the naked buffer is uprighted to THIS image's
+ * display `width`/`height` (the decode handlers rotate it with the same EXIF
+ * Orientation as the display proxy — PNG/WebP `rotateNakedRgba`), so it never
+ * carries dims of its own: the page dims ARE its dims, by construction.
+ * This makes the light record's geometry a valid source for reconstructing
+ * the high-depth buffer.
  */
 export interface DecodedImage extends ImageAssetPayload {
   /** Zero-based index within the source file */
@@ -493,9 +493,9 @@ export interface DecodeResult {
   /**
    * Decoded pages: always present, length ≥ 1. Each element is a complete,
    * self-contained `DecodedImage` (own `colorIdentity`, own optional
-   * `highDepthSource`), so per-page colour identity and high-depth pixels are
+   * `highDepthData`), so per-page colour identity and high-depth pixels are
    * now expressible — the multi-page 16-bit TIFF gap that a single file-level
-   * `colorIdentity`/`highDepthSource` could not represent.
+   * `colorIdentity`/`highDepthData` could not represent.
    *
    * - Single-page file → length = 1
    * - Multi-page TIFF → length = N pages
@@ -526,7 +526,7 @@ export interface DecodeResult {
  *
  * The FileService entry (Stage 4) injects each page's `colorIdentity` from the
  * authoritative `IngestDecision` (Path B — the decision is the single colour
- * authority), so no handler synthesises colour identity itself. `highDepthSource`
+ * authority), so no handler synthesises colour identity itself. `highDepthData`
  * (when present) is therefore the BARE `{ data, width, height }` payload; its
  * container / trc / gamut are read from the injected sibling `colorIdentity`.
  *
@@ -716,7 +716,7 @@ export interface FileService {
 
   /**
    * Recover the high-bit-depth naked pixels for an asset on a COLD RELOAD/revert,
-   * when the in-memory HighDepthTextureCache is empty. Three-tier, cheapest first:
+   * when the in-memory HighDepthCache is empty. Three-tier, cheapest first:
    *   1. persisted self-describing high-depth buffer (`assets.get` light record's
    *      `dataFormat` + `assets.getDec`) — bake products + RAW imports, a direct
    *      warm with no decode;
@@ -745,7 +745,7 @@ export interface FileService {
    * Decode the gain map carried in one file's metadata (`raw.gainMap` —
    * extracted at ingest) into the single-channel plane the presentation cache
    * and the export lane consume. One `createImageBitmap` per call; callers
-   * session-cache (`gainMapSourceCache`) so this runs once per asset per
+   * session-cache (`gainMapCache`) so this runs once per asset per
    * session. Returns null when the metadata carries no gain map or any decode
    * step fails — the caller negative-caches and presents the authoritative
    * SDR base.

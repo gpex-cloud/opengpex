@@ -136,7 +136,7 @@ async function rebuildOnePage(
   const canvasClipBox = getDefaultCanvasClipBox({ w: page.width, h: page.height });
 
   // 4. Assemble base layer
-  const baseLayer = LayerFactory.getNewLayer({
+  const baseLayer = LayerFactory.createLayer('image', {
     name: 'Background',
     src: bundle.url,
     assetId: bundle.assetId,
@@ -249,7 +249,7 @@ export async function revertMultiPageTiffGroup(ctx: EditorContextValue, frameId:
         (f.extra as Record<string, unknown> | undefined)?.tiffGroupId !== groupId,
       );
     for (const s of strays) {
-      layers.removeFrame(s.id);
+      layers.factory.removeFrame(s.id);
     }
 
     actions.resetHistory();

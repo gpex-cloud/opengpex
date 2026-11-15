@@ -127,6 +127,16 @@ export function useEditorStore() {
         const force = action.type === 'REMOVE_FRAME' || action.type === 'CLEAR_ALL_DATA';
         scheduleAssetSync(force);
       }
+      // Sanction the empty-index save this deletion will produce (see the
+      // EMPTY-INDEX GUARD in StateStorage.save): removing the LAST frame (or
+      // CLEAR_ALL_DATA) legitimately transitions the persisted index to zero.
+      // The confirmed-dialog gating lives in the command layer; this is the
+      // storage-side receipt that makes the transition writable.
+      if (action.type === 'REMOVE_FRAME' && currentState.frames.order.length <= 1) {
+        contextValueRef.current?.storage.authorizeEmptyIndexSave();
+      } else if (action.type === 'CLEAR_ALL_DATA') {
+        contextValueRef.current?.storage.authorizeEmptyIndexSave();
+      }
 
       // C. [Architecture Fix] Fast-track Garbage Collection
       // The logic here is like Redux Middleware, ensuring that when slow-track data is deleted, fast-track shadows are removed synchronously.

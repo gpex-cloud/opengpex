@@ -44,7 +44,7 @@ struct LayerUniforms {
   vmask_flags  : u32,           // Offset 76 (was _pad; bit0 HAS_VMASK_ANALYTIC, bit1 HAS_VMASK_TEX, bit2 INVERTED, bit3 HARD, bits4-5 SHAPE 0=rect/1=ellipse)
   vmask_rect   : vec4<f32>,     // Offset 80 (16B) — (cx, cy, halfW, halfH) in layer-local pixel space (analytic only)
   vmask_feather: vec4<f32>,     // Offset 96 (16B) — (featherPx, maskPxW, maskPxH, _reserved)
-  filmic_white : f32,           // Offset 112 — the layer's per-file filmic knee domain (ColorIdentity.rawWhiteDomain; consumed only when render_intent ≠ 0)
+  tail         : vec4<f32>,     // Offset 112 (16B) — dual-purpose tail: .x is the layer's per-file filmic knee domain (ColorIdentity.rawWhiteDomain; consumed only when render_intent ≠ 0); the WHOLE vec4 is the declarative solid colour (working-LINEAR straight-alpha RGBA) when flags bit 3 (SOURCE_SOLID) is set — a solid layer never carries a render intent, so the two readings cannot collide
 };
 
 @group(0) @binding(0) var<uniform> layer : LayerUniforms;
@@ -95,6 +95,17 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
     color = vec4<f32>(0.0);
   }
 
+  // ── Declarative solid fill ──
+  // flags bit 3 (SOURCE_SOLID): the colour is the uniform tail vec4 (working-LINEAR
+  // straight alpha), NOT a texture sample — the shared 1×1 white texture bound at
+  // layer_tex is a binding-formality stretched constant (the sampled uv is pinned
+  // to [0,1]) and its texel is discarded here. The composite packs SOURCE_LINEAR +
+  // GAMUT_ID 0 + RENDER_INTENT 0 alongside, so the normalize below passes the
+  // declaration through untouched.
+  if ((layer.flags & 8u) != 0u) {
+    color = layer.tail;
+  }
+
   // ── Normalise the sampled source
   // into WORKING-space (ProPhoto RGB) linear light with its rendering intent applied.
   // ONE call shared by layer.ts / blend.ts / adjustPre.ts (sourceNormalize.wgsl):
@@ -105,7 +116,7 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
   //   ③ render-intent tone-map in the STRAIGHT domain (flags bits 8..9; 0 = SDR
   //      passthrough). Applied here — BEFORE per-layer adjustments (method α).
   // Alpha is never transfer-encoded; only .rgb is converted.
-  color = normalize_layer_source(color, layer.flags, layer.filmic_white);
+  color = normalize_layer_source(color, layer.flags, layer.tail.x);
 
   // Per-layer grade CHAIN operates on STRAIGHT (un-premultiplied) rgb in
   // LINEAR light; each stage TRC-wraps its own chain internally. Gated on
@@ -192,7 +203,7 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
 }
 `;
 
-/** Size of LayerUniforms in bytes (128 bytes = 32 float/u32 slots, including vmask fields + filmic_white). */
+/** Size of LayerUniforms in bytes (128 bytes = 32 float/u32 slots, including vmask fields + the tail vec4). */
 export const LAYER_UNIFORM_BUFFER_SIZE = 128;
 
 /**
@@ -230,6 +241,7 @@ export {
   LAYER_FLAG_CLIP,
   LAYER_FLAG_PREMULTIPLIED_SOURCE,
   LAYER_FLAG_SOURCE_LINEAR,
+  LAYER_FLAG_SOURCE_SOLID,
   LAYER_GAMUT_SHIFT,
   LAYER_GAMUT_MASK,
   LAYER_RENDER_INTENT_SHIFT,

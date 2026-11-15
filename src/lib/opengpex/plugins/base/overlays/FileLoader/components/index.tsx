@@ -102,7 +102,7 @@ export function FileLoaderComponent() {
       try {
         const res = await fetch(NEW_DOCUMENT_THUMBNAIL_URL);
         if (!res.ok) throw new Error(`Placeholder thumbnail unavailable (${res.status})`);
-        const thumb = await assets.register(await res.blob(), { width: 512, height: 512 });
+        const thumb = await assets.register({ displayBlob: await res.blob(), width: 512, height: 512 });
         if (cancelled) return;
         actions.updateFrame(frameId, { thumbnail: { src: thumb.url, assetId: thumb.assetId } });
         if (transparent) {
@@ -351,7 +351,10 @@ export function FileLoaderLandingAction() {
           <DelayedConfirm
             onConfirm={() => {
               actions.setStateSignal("core.restoreTimedOut", false);
-              // Save empty state to IndexedDB to prevent stale data issues
+              // Start Fresh IS the sanctioned empty-workspace transition:
+              // authorize the empty-index save (see StateStorage guard),
+              // then save empty state to IndexedDB.
+              storage.authorizeEmptyIndexSave();
               storage.save(state);
             }}
             roundedClassName="rounded-2xl"

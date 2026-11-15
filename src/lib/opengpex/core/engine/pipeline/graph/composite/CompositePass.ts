@@ -36,6 +36,7 @@ import {
   LAYER_FLAG_HAS_MASK,
   LAYER_FLAG_CLIP,
   LAYER_FLAG_SOURCE_LINEAR,
+  LAYER_FLAG_SOURCE_SOLID,
   LAYER_GAMUT_SHIFT,
   LAYER_RENDER_INTENT_SHIFT,
 } from '@opengpex/editor/core/engine/gpu/shaders/layer';
@@ -128,6 +129,15 @@ export interface DrawLayerParams {
    * `layer.source.renderIntent`; see `sourceIntent.ts`.
    */
   readonly sourceIntentApplied?: boolean;
+  /**
+   * The `layer.source` is DECLARATIVE SOLID and `texture` is the shared 1×1
+   * white formality — read the colour from the uniform tail vec4 (flag bit 3)
+   * instead of sampling. Set ONLY when no prepared transient exists: once a
+   * filtered solid has been materialized through the AdjustPrePass bake, the
+   * texture holds real (already working-LINEAR) pixels and the uniform path
+   * must stay off.
+   */
+  readonly solidUniform?: boolean;
 }
 
 /**
@@ -169,6 +179,13 @@ export function packLayerUniforms(
   vmaskRect: readonly [number, number, number, number] = [0, 0, 0, 0],
   vmaskFeather: readonly [number, number, number, number] = [0, 0, 0, 0],
   rawWhiteDomain: number = FILMIC_WHITE_DOMAIN,
+  /**
+   * DECLARATIVE SOLID colour (working-LINEAR straight-alpha RGBA) — when
+   * present the tail vec4 (floats 28..31) carries it and the fragment shader
+   * replaces the texture sample with it (flag bit 3). A solid layer never has
+   * a render intent, so the filmic_white reading of float 28 cannot collide.
+   */
+  solidColor?: readonly [number, number, number, number],
 ): void {
   const srcX = exportViewport?.sourceRect ? exportViewport.sourceRect[0] : 0;
   const srcY = exportViewport?.sourceRect ? exportViewport.sourceRect[1] : 0;
@@ -238,9 +255,23 @@ export function packLayerUniforms(
   target[26] = vmaskFeather[2];
   target[27] = vmaskFeather[3];
 
-  // filmic_white: f32, offset 112 (float 28). The layer's per-file filmic knee
-  // domain; the shader reads it only when render_intent ≠ 0.
-  target[28] = rawWhiteDomain;
+  // Tail vec4: floats 28..31 (offset 112). Two mutually exclusive readings:
+  //  • default — filmic_white: f32 at float 28, the layer's per-file filmic knee
+  //    domain (read only when render_intent ≠ 0); floats 29..31 stay zero.
+  //  • solidColor present — the declarative solid colour (working-LINEAR straight
+  //    alpha), read whole when flags bit 3 (SOURCE_SOLID) is set. A solid layer
+  //    never carries a render intent, so the two readings cannot collide.
+  if (solidColor) {
+    target[28] = solidColor[0];
+    target[29] = solidColor[1];
+    target[30] = solidColor[2];
+    target[31] = solidColor[3];
+  } else {
+    target[28] = rawWhiteDomain;
+    target[29] = 0.0;
+    target[30] = 0.0;
+    target[31] = 0.0;
+  }
 }
 
 /**
@@ -272,6 +303,20 @@ export class CompositePass {
     // are already linear light — either a genuinely linear source asset, or a
     // filtered/baked transient that the filter chain already converted.
     if (isSourceLinear(layer, params.sourceIsLinear)) flags |= LAYER_FLAG_SOURCE_LINEAR;
+    // DECLARATIVE SOLID: the colour rides the uniform tail vec4, the bound
+    // texture is the shared 1×1 white formality. The declaration is already
+    // working-LINEAR in the working gamut, so SOURCE_LINEAR + gamut 0 +
+    // intent 0 (the resolvers below all return their defaults for a non-raster
+    // source) make the normalize step an exact pass-through. A solid whose
+    // filter chain already materialized a transient (`solidUniform` unset)
+    // samples that transient like any pipeline-produced raster instead.
+    const solidColor = params.solidUniform && layer.source.kind === 'solid'
+      ? layer.source.color
+      : undefined;
+    if (solidColor) {
+      flags |= LAYER_FLAG_SOURCE_SOLID;
+      flags |= LAYER_FLAG_SOURCE_LINEAR;
+    }
     // Pack the source gamut id (0..4) into bits 5..7. 0 = direct
     // (already working gamut, or a pipeline transient the bake already converted).
     const gamutId = resolveSourceGamutId(layer, params.sourceIsWorkingGamut);
@@ -327,6 +372,7 @@ export class CompositePass {
       vmaskU.rect,
       vmaskU.feather,
       rawWhiteDomain ?? FILMIC_WHITE_DOMAIN,
+      solidColor,
     );
 
     // 2. Write to BufferRing with dynamic offset

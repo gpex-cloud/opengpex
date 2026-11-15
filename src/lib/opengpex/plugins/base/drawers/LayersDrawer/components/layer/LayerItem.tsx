@@ -21,6 +21,7 @@
 
 "use client";
 
+import { getLayerKind } from '@opengpex/editor/core/layer/kinds';
 import React, { useRef, useEffect } from "react";
 import { Eye, EyeOff, Lock, Unlock, Star, Paintbrush, PenTool, Image as ImageIcon, Folder } from "lucide-react";
 import { MosaicIcon } from "@opengpex/editor/plugins/base/drawers/CraftDrawer/icon";
@@ -202,99 +203,91 @@ export const LayerItem = React.memo(
  ${!layer.visible ? "opacity-30 grayscale" : "opacity-100"}
 `}
             >
-              {layer.type === "color" ? (
-                <div
-                  className="w-full h-full rounded-[inherit]"
-                  style={{
-                    background:
-                      "linear-gradient(45deg, #ef4444, #f59e0b, #10b981, #3b82f6, #8b5cf6)",
-                  }}
-                />
-              ) : layer.type === "paint" ? (
-                <div
-                  className="w-full h-full flex items-center justify-center rounded-[inherit]"
-                  style={{
-                    background: "#e4e4e7",
-                    color: "#1a1a1a",
-                  }}
-                >
-                  {layer.metadata?.sourceTool === "mosaic" ? (
-                    <MosaicIcon size={13} />
-                  ) : layer.metadata?.sourceTool === "brush" ? (
-                    <Paintbrush size={13} strokeWidth={2} />
-                  ) : (
-                    <ImageIcon size={13} strokeWidth={2} />
-                  )}
-                </div>
-              ) : layer.type === "text" ? (
-                <div
-                  className="w-full h-full flex items-center justify-center font-black text-[14px] tracking-tighter rounded-[inherit]"
-                  style={{
-                    background: "#ffffff",
-                    color: "#1a1a1a",
-                  }}
-                >
-                  T
-                </div>
-              ) : layer.type === "vector" ? (
-                <div
-                  className="w-full h-full flex items-center justify-center rounded-[inherit]"
-                  style={{
-                    background: "#e4e4e7",
-                    color: "#1a1a1a",
-                  }}
-                >
-                  {layer.metadata?.sourceTool === "marker" ? (
-                    <Star size={13} strokeWidth={2} />
-                  ) : layer.metadata?.sourceTool === "brush" ? (
-                    <Paintbrush size={13} strokeWidth={2} />
-                  ) : layer.metadata?.sourceTool === "pen" ? (
-                    <PenTool size={13} strokeWidth={2} />
-                  ) : (
-                    <ImageIcon size={13} strokeWidth={2} />
-                  )}
-                </div>
-              ) : layer.type === "group" ? (
-                <div
-                  className="w-full h-full flex items-center justify-center rounded-[inherit]"
-                  style={{
-                    background: "#fce7f3",
-                    color: "#1a1a1a",
-                  }}
-                >
-                  <Folder size={13} strokeWidth={2} />
-                </div>
-              ) : (
-                <ImageAsset
-                  assetId={layer.assetId}
-                  src={layer.src}
-                  className="w-full h-full object-cover select-none pointer-events-none"
-                  draggable="false"
-                  style={(() => {
-                    // When layer has a logical crop (visibleShape is a sub-region of source image),
-                    // use object-view-box to display only the cropped portion in the thumbnail.
-                    // Crop fractions are relative to the SRC image's intrinsic dimensions
-                    // (asset light record); fall back to frame canvas only if the
-                    // asset is missing from the pool.
-                    const vs = layer.visibleShape;
-                    const refSize = srcSize ?? canvasSize;
-                    if (!vs || !refSize || refSize.w === 0 || refSize.h === 0) return undefined;
-                    const r = vs.rect;
-                    // Skip if visibleShape covers the entire source image (no crop needed)
-                    if (r.x === 0 && r.y === 0 && r.w >= refSize.w && r.h >= refSize.h) return undefined;
-                    const top = (r.y / refSize.h * 100).toFixed(1);
-                    const right = ((refSize.w - r.x - r.w) / refSize.w * 100).toFixed(1);
-                    const bottom = ((refSize.h - r.y - r.h) / refSize.h * 100).toFixed(1);
-                    const left = (r.x / refSize.w * 100).toFixed(1);
-                    return { objectViewBox: `inset(${top}% ${right}% ${bottom}% ${left}%)` } as React.CSSProperties;
-                  })()}
-                  fallback={
-                    <span className="text-[9px] font-bold text-[var(--text-muted)]">
-                      ?
-                    </span>
-                  }
-                />
-              )}
+              {(() => {
+                // Glyph routing lives in the LayerKind table's `icon` column;
+                // this block only maps tokens to visuals. 'thumbnail' renders
+                // the layer's real pixels (imported photos, baked bitmaps).
+                const token = getLayerKind(layer.type).icon(layer);
+                const glyph = (
+                  children: React.ReactNode,
+                  background = "#e4e4e7",
+                ) => (
+                  <div
+                    className="w-full h-full flex items-center justify-center rounded-[inherit]"
+                    style={{ background, color: "#1a1a1a" }}
+                  >
+                    {children}
+                  </div>
+                );
+                const cropStyle = (() => {
+                  // When layer has a logical crop (visibleShape is a sub-region of source image),
+                  // use object-view-box to display only the cropped portion in the thumbnail.
+                  // Crop fractions are relative to the SRC image's intrinsic dimensions
+                  // (asset light record); fall back to frame canvas only if the
+                  // asset is missing from the pool.
+                  const vs = layer.visibleShape;
+                  const refSize = srcSize ?? canvasSize;
+                  if (!vs || !refSize || refSize.w === 0 || refSize.h === 0) return undefined;
+                  const r = vs.rect;
+                  // Skip if visibleShape covers the entire source image (no crop needed)
+                  if (r.x === 0 && r.y === 0 && r.w >= refSize.w && r.h >= refSize.h) return undefined;
+                  const top = (r.y / refSize.h * 100).toFixed(1);
+                  const right = ((refSize.w - r.x - r.w) / refSize.w * 100).toFixed(1);
+                  const bottom = ((refSize.h - r.y - r.h) / refSize.h * 100).toFixed(1);
+                  const left = (r.x / refSize.w * 100).toFixed(1);
+                  return { objectViewBox: `inset(${top}% ${right}% ${bottom}% ${left}%)` } as React.CSSProperties;
+                })();
+                switch (token) {
+                  case "gradient":
+                    return (
+                      <div
+                        className="w-full h-full rounded-[inherit]"
+                        style={{
+                          background:
+                            "linear-gradient(45deg, #ef4444, #f59e0b, #10b981, #3b82f6, #8b5cf6)",
+                        }}
+                      />
+                    );
+                  case "mosaic":
+                    return glyph(<MosaicIcon size={13} />);
+                  case "brush":
+                    return glyph(<Paintbrush size={13} strokeWidth={2} />);
+                  case "marker":
+                    return glyph(<Star size={13} strokeWidth={2} />);
+                  case "pen":
+                    return glyph(<PenTool size={13} strokeWidth={2} />);
+                  case "vector":
+                  case "image":
+                    return glyph(<ImageIcon size={13} strokeWidth={2} />);
+                  case "text":
+                    return (
+                      <div
+                        className="w-full h-full flex items-center justify-center font-black text-[14px] tracking-tighter rounded-[inherit]"
+                        style={{ background: "#ffffff", color: "#1a1a1a" }}
+                      >
+                        T
+                      </div>
+                    );
+                  case "folder":
+                    return glyph(<Folder size={13} strokeWidth={2} />, "#fce7f3");
+                  case "thumbnail":
+                  default:
+                    return (
+                      <ImageAsset
+                        assetId={layer.assetId}
+                        src={layer.src}
+                        className="w-full h-full object-cover select-none pointer-events-none"
+                        draggable="false"
+                        style={cropStyle}
+                        fallback={
+                          <span className="text-[9px] font-bold text-[var(--text-muted)]">
+                            ?
+                          </span>
+                        }
+                      />
+                    );
+                }
+              })()}
             </div>
 
             <div className="flex-1 min-w-0 flex items-center gap-1.5">

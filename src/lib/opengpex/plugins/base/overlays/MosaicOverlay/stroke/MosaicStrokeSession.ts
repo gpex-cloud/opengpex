@@ -226,7 +226,7 @@ export class MosaicStrokeSession implements StrokeSession {
     const strokeBitmap = await createImageBitmap(this.canvas);
 
     const request: PaintBakeRequest = {
-      type: 'paint',
+      type: 'image',
       strokeBitmap,
       targetLayer: targetInfo.layer,
       isNewLayer: targetInfo.isNew,
@@ -260,16 +260,19 @@ export class MosaicStrokeSession implements StrokeSession {
     const activeLayer = activeLayerId ? frame.layers.byId[activeLayerId] : null;
 
     const hasMasks = activeLayer?.bitmapMasks && activeLayer.bitmapMasks.length > 0;
-    if (!this.forceNewLayer && !hasMasks && activeLayer && activeLayer.type === 'paint' && !activeLayer.locked && activeLayer.visible) {
+    // P5: the dedicated paint kind merged into image — a reusable mosaic
+    // canvas is an image stamped `sourceTool:'mosaic'`. Unstamped image
+    // layers (photos, baked text) are NOT mosaic targets: drawing mosaic
+    // onto a photo must stay impossible.
+    if (!this.forceNewLayer && !hasMasks && activeLayer && activeLayer.type === 'image' && activeLayer.metadata?.sourceTool === 'mosaic' && !activeLayer.locked && activeLayer.visible) {
       return { layer: activeLayer, isNew: false };
     }
 
     // Create new Paint Layer
     const layersArray = frame.layers.order.map(id => frame.layers.byId[id]);
     const smartName = LayerFactory.getNewLayerName(layersArray, 'Mosaic');
-    const newLayer = LayerFactory.getNewLayer({
+    const newLayer = LayerFactory.createLayer('blank', {
       name: smartName,
-      type: 'paint',
       cx: 0,
       cy: 0,
       bounding: { w: frame.canvas.w, h: frame.canvas.h },

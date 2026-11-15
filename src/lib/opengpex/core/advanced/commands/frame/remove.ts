@@ -34,7 +34,7 @@ export const FrameRemoveCommand = {
 
     if (confirmed) {
       requestAnimationFrame(() => {
-        ctx.layers.removeFrame(targetId);
+        ctx.layers.factory.removeFrame(targetId);
         actions.setInteraction({ hud: { message: 'Creation deleted permanently.', type: 'success' } });
       });
     }

@@ -26,7 +26,7 @@ import { Frame } from './models';
 import type { EditorActions } from './actions';
 import type { EditorContextValue } from './context';
 import type { PixelService, AssetService } from './services';
-import type { EngineContribution } from '../engine/pipeline/scene/vectorSources';
+import type { EngineContribution } from '../engine/pipeline/scene/translators';
 import type { DraftCodec } from '../state/drafts';
 
 export interface EditorShortcut {
@@ -95,7 +95,7 @@ export interface PluginContributions {
   readonly ui?: UIContribution[];
   /** Engine extension points, consumed through registry seams (each slot's
    *  anchor interface + registry live next to the engine module that consumes
-   *  them — e.g. `vectorSources.ts` owns the vectorSource slot). */
+   *  them — e.g. `translators/vector.ts` owns the vectorSource slot). */
   readonly engine?: EngineContribution;
   /** State extension points, consumed by the drafts registry. A plugin
    *  that keeps an in-progress session on `Frame.drafts` declares its payload

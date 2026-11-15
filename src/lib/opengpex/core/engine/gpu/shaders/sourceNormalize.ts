@@ -54,14 +54,30 @@ export const LAYER_FLAG_CLIP = 1 << 1;
  */
 export const LAYER_FLAG_PREMULTIPLIED_SOURCE = 1 << 2;
 /**
- * ⚠️ RETIRED BITS 3 / 10 / 11 / 12..17 — do NOT renumber, do NOT reuse blindly.
- * Bit 3 (`LAYER_FLAG_HARD_MASK`) and bit 10 (`LAYER_FLAG_HAS_BMASK_INVERTED`)
- * carried the bmask primary record's hard/inverted sampling semantics, and
- * bit 11 + bits 12..17 carried the bmask stack (3 slots × hard/invert pairs).
- * The bmask combine pass bakes every record's hard/family semantics into the
- * ONE combined mask texture, so the fragment shaders plain-multiply it and
- * these bits have no consumers. Remaining bit numbers (0..2, 4..9) are
- * UNCHANGED so no other flag moved.
+ * `flags` bit 3: DECLARATIVE SOLID source — the layer's colour is a uniform
+ * (the struct's tail vec4, offset 112), not a texture sample. The fragment
+ * shaders replace the sampled texel with the uniform colour BEFORE the
+ * normalize step; the composite also packs `SOURCE_LINEAR` + GAMUT_ID 0 +
+ * RENDER_INTENT 0 alongside it, so normalize is an exact pass-through of the
+ * already working-LINEAR declaration.
+ *
+ * Bit 3 was retired with the bmask primary-record flags (bit 10 carried the
+ * inverted semantics, bits 11..17 the stack slots) and is re-occupied here —
+ * its old consumers are gone (the bmask combine pass bakes every record's
+ * semantics into the combined mask texture), so the re-use cannot collide with
+ * live bits. Remaining bit numbers (0..2, 4..9) are UNCHANGED so no other
+ * flag moved.
+ */
+export const LAYER_FLAG_SOURCE_SOLID = 1 << 3;
+
+/**
+ * ⚠️ RETIRED BITS 10 / 11 / 12..17 — do NOT renumber, do NOT reuse blindly.
+ * Bit 10 (`LAYER_FLAG_HAS_BMASK_INVERTED`) carried the bmask primary record's
+ * inverted sampling semantics, and bit 11 + bits 12..17 carried the bmask
+ * stack (3 slots × hard/invert pairs). The bmask combine pass bakes every
+ * record's hard/family semantics into the ONE combined mask texture, so the
+ * fragment shaders plain-multiply it and these bits have no consumers.
+ * (Bit 3 has since been re-occupied by `LAYER_FLAG_SOURCE_SOLID` — see above.)
  */
 
 /**

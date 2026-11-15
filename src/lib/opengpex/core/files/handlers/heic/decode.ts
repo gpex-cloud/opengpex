@@ -88,21 +88,17 @@ export async function decodeHeic(
   // liftBaseToF16's header for why the bake is wrong). The lift can only fail
   // on a decoder/decision mismatch, which fails loudly like every other
   // channel.
-  let highDepthSource: DecodedPayload['highDepthSource'];
+  let highDepthData: DecodedPayload['highDepthData'];
   if (decision.colorIdentity.dataFormat === 'rgba16float' && metadata.raw?.hasGainmap && rgba) {
-    highDepthSource = liftBaseToF16(rgba, width, height);
+    highDepthData = liftBaseToF16(rgba, width, height);
   } else if (gamut === 'adobe-rgb' || gamut === 'prophoto-rgb') {
     // Wide gamut: lift the unclamped f16-linear line beside the (already
     // folded) proxy — the standing wide-gamut rule composition, fed by the
     // verbatim pixels both channels return.
     const lifted = wideGamut8ToF16(rgba!, width, height, gamut);
-    // Bare payload only — container/trc/gamut live on the sibling `colorIdentity`
-    // the entry injects (Path B).
-    highDepthSource = {
-      data: lifted.data,
-      width: lifted.width,
-      height: lifted.height,
-    };
+    // Bare bytes only — container/trc/gamut live on the sibling `colorIdentity`
+    // the entry injects (Path B); geometry is the page dims (invariant).
+    highDepthData = lifted.data;
   }
 
   // Gain-map carrier: extract the aux plane into `raw.gainMap` NOW — the
@@ -114,5 +110,5 @@ export async function decodeHeic(
     await extractHeicGainMapInto(file, metadata);
   }
 
-  return [{ displayBlob, width, height, index: 0, highDepthSource }];
+  return [{ displayBlob, width, height, index: 0, highDepthData }];
 }

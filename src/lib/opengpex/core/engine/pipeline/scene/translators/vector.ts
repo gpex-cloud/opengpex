@@ -18,8 +18,8 @@
  */
 
 /**
- * vectorSources.ts — the SINGLE business → engine translation seam for vector
- * layer sources.
+ * translators/vector.ts — the vector arm of the business → engine translation
+ * seam (SceneTranslator family): the SINGLE vector-source REGISTRY.
  *
  * ARCHITECTURAL IDENTITY — this file owns the vector-source REGISTRY: the
  * vocabulary of pixel-production strategies, the contributor contract, and the
@@ -50,7 +50,7 @@
  * linear light via `toWorkingLinearRgba`; the shared drawLayer tail applies
  * layer opacity / blend downstream for every strategy alike.
  *
- * @module core/engine/pipeline/scene/vectorSources
+ * @module core/engine/pipeline/scene/translators/vector
  */
 
 import type { Layer, StrokeData, WorkingColorSpace } from '@opengpex/editor/core/types';
@@ -59,7 +59,7 @@ import {
   computeTextLayout,
   type TextMeasureContext,
 } from '@opengpex/editor/core/engine/text/textLayout';
-import type { LayerSource, StrokeParams } from './Scene';
+import type { LayerSource, StrokeParams } from '../Scene';
 
 // Re-exported: the contributor contract's input/output types travel with it.
 export type { LayerSource };

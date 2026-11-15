@@ -32,7 +32,7 @@ import type { Layer, Frame } from '@opengpex/editor/core/types';
  * union accordingly via the `s is Layer` predicate.
  *
  * NOTE: this intentionally does NOT enumerate the individual Layer `type`
- * literals ('image' | 'text' | 'vector' | 'color' | 'paint' | 'group' | ...).
+ * literals ('image' | 'text' | 'vector' | 'color' | 'group' | ...).
  * The previous inlined checks did, which (a) was redundant for narrowing and
  * (b) silently dropped 'group' (and any future kind) into the Frame branch —
  * a latent coordinate-mapping bug. Keying off the structural `type` field keeps

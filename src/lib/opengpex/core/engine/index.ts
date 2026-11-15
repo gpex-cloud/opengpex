@@ -25,7 +25,7 @@
  *   - WorkerBridge (transport layer for main↔worker communication)
  *
  * Public surface (Tier 2 — Rendering-layer facade):
- *   - getGpuEngine, sourceBitmapCache, highDepthTextureCache, gainMapSourceCache
+ *   - getGpuEngine, imageBitmapCache, highDepthCache, gainMapCache
  *   - GpuDevice
  *   - SceneAssembler, SceneContentCache
  *   - Scene channel-mask constants + `SceneChannelMask` type
@@ -52,6 +52,7 @@
 
 // ── Facade ──
 export { createPixelFacade } from './PixelFacade';
+export { RenderController } from './RenderController';
 export type { PixelFacadeDeps } from './PixelFacade';
 
 // ── Bridge (needed by EditorContext to construct) ──
@@ -71,4 +72,4 @@ export {
 } from './pipeline/scene/Scene';
 export type { SceneChannelMask } from './pipeline/scene/Scene';
 export { GpuDevice } from './gpu/device/GpuDevice';
-export { sourceBitmapCache, highDepthTextureCache, gainMapSourceCache } from './sources';
+export { imageBitmapCache, highDepthCache, gainMapCache } from './sources';

@@ -24,7 +24,7 @@ import {
 } from '@opengpex/editor/core/types';
 import { LayerFactory } from '../factory';
 import { scalePolygon } from '@opengpex/editor/core/geometry/operators/polygon';
-import { highDepthTextureCache, type HighDepthSource } from '../../engine/sources/HighDepthSource';
+import { highDepthCache, type HighDepthSource } from '../../engine/sources/HighDepthCache';
 import { resampleBilinear } from '@opengpex/editor/core/engine/color';
 
 /**
@@ -137,7 +137,7 @@ export function createResampleOperations(
 
         // PR-4.1a: Check if this layer has a 16/32-bit high-depth source
         let hdSource: HighDepthSource | undefined = layer.assetId
-          ? highDepthTextureCache.get(layer.assetId)
+          ? highDepthCache.get(layer.assetId)
           : undefined;
         // Light record lookup (sync, near-zero cost): needed for BOTH the cold-reload
         // high-depth recovery below AND the 8-bit path's source gamut (so the Worker's
@@ -149,20 +149,15 @@ export function createResampleOperations(
           // and per AssetStore.getDec's contract, geometry + colour identity are
           // reassembled from that SAME light record, not from the bare dec buffer.
           const decData = await assets.getDec(layer.assetId);
-          if (decData) {
+          if (decData && lightRecord) {
             hdSource = {
               data: decData,
               width: lightRecord.width,
               height: lightRecord.height,
               dataFormat: lightRecord.dataFormat,
-              trc: lightRecord.trc,
-              // Forwarding: carry the persisted source gamut through the cold
-              // reload so the GPU converts it.
-              gamut: lightRecord.gamut,
-              // Carry the persisted raw white domain through too
-              // (its presence IS the render intent), so a cold-reloaded RAW still
-              // tone-maps identically.
-              rawWhiteDomain: lightRecord.rawWhiteDomain,
+              // ⚠️ NO identity fields (trc/gamut/rawWhiteDomain) — the entry is
+              // bytes-only (2026-11-15); the identity below re-reads the SAME
+              // `lightRecord`, the single authority.
             };
           } else {
             // dataFormat promised a truth that isn't there — persist failure /
@@ -188,18 +183,16 @@ export function createResampleOperations(
           );
           resampled = {
             ...resampled,
-            highDepthSource: {
-              data: scaledData,
-              width: targetW,
-              height: targetH,
-            },
+            highDepthData: scaledData,
             colorIdentity: {
-              gamut: hdSource.gamut ?? 'srgb',
-              trc: hdSource.trc ?? 'linear',
+              gamut: lightRecord?.gamut ?? 'srgb',
+              trc: lightRecord?.trc ?? 'linear',
               bitDepth: hdSource.dataFormat === 'rgba32float' ? 32 : 16,
               dataFormat: hdSource.dataFormat,
-              // Preserve the raw white domain across a resize re-store.
-              rawWhiteDomain: hdSource.rawWhiteDomain,
+              // Preserve the raw white domain across a resize re-store
+              // (its presence IS the render intent) — read from the SAME
+              // light record, the single authority.
+              rawWhiteDomain: lightRecord?.rawWhiteDomain,
             },
           };
         }

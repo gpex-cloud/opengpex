@@ -90,6 +90,14 @@ export class AdjustPrePass {
        * mapping (uncropped layer). Values are `crop × dprScale`-scaled.
        */
       readonly adjRect?: { cropX: number; cropY: number; contentW: number; contentH: number };
+      /**
+       * DECLARATIVE SOLID colour (working-LINEAR straight alpha): when present
+       * the bake ignores the bound texture (the shared 1×1 white formality) and
+       * writes the uniform colour instead, with identity normalize flags —
+       * the bake output is then the correct straight working-LINEAR constant a
+       * following FilterPass consumes.
+       */
+      readonly solidColor?: readonly [number, number, number, number];
     },
   ): void {
     const { layer, source } = params;
@@ -101,20 +109,25 @@ export class AdjustPrePass {
     // the source→working gamut alignment AND owns the render-intent tone-map itself
     // and RenderGraph then tells the downstream
     // composite it is already working-gamut with its intent applied.
-    const gamutId = resolveSourceGamutId(layer);
+    // A declarative solid bypasses all of this: its colour is ALREADY
+    // working-LINEAR in the working gamut and no intent applies, so the bake runs
+    // with identity normalize flags and the shader substitutes the uniform colour.
+    const isSolid = params.solidColor !== undefined;
+    const gamutId = isSolid ? 0 : resolveSourceGamutId(layer);
     // The bake OWNS the tone-map (always the raw asset's first sample, so no
     // pipeline override here) and must knee with the SAME per-file domain the
     // downstream composite would have used.
-    const rawWhiteDomain = resolveSourceRawWhiteDomain(layer);
+    const rawWhiteDomain = isSolid ? undefined : resolveSourceRawWhiteDomain(layer);
     const uniform = packAdjustPreUniform(
       source.maxU,
       source.maxV,
-      params.sourceIsLinear ?? false,
+      isSolid ? true : params.sourceIsLinear ?? false,
       gamutId,
-      resolveSourceRawIntentNibble(layer),
+      isSolid ? 0 : resolveSourceRawIntentNibble(layer),
       rawWhiteDomain ?? FILMIC_WHITE_DOMAIN,
       params.adjRect,
       { width: source.width, height: source.height },
+      params.solidColor,
     );
     const slot = bufferRing.writeSlot(uniform);
 

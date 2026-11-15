@@ -164,7 +164,7 @@ export const PEEL_COMMANDS = {
         if (session?.status === 'committing') return; // a commit is adjudicated — nothing to stamp or peel
 
         // ─── Resolve the triplet regardless of whether activeLayer is host or exchange ───
-        const triplet = layers.getTriplet(activeFrame.id, activeLayer.id);
+        const triplet = layers.factory.getTriplet(activeFrame.id, activeLayer.id);
         if (!triplet) return;
 
         const { host, exchange, frags } = triplet;
@@ -196,11 +196,11 @@ export const PEEL_COMMANDS = {
             const hostIndex = activeFrame.layers.order.indexOf(host.id);
             const exchangeIndex = activeFrame.layers.order.indexOf(exchange.id);
             const insertIndex = exchangeIndex !== -1 ? exchangeIndex : hostIndex + 1;
-            layers.addLayer(activeFrame.id, stampLayer, insertIndex);
+            layers.factory.addLayer(activeFrame.id, stampLayer, insertIndex);
           }
 
           // Restore focus to exchange layer to keep dragging it
-          layers.activate(activeFrame.id, exchange.id);
+          layers.factory.activate(activeFrame.id, exchange.id);
 
           return;
         }
@@ -231,7 +231,7 @@ export const PEEL_COMMANDS = {
         // Logical when the host's masks fold into hard geometry; a baked
         // bitmap otherwise (enabled bitmap mask, feathered holes). The bake
         // is a real GPU round trip, so this await can span pointer moves.
-        const result = await ctx.layers.clipToExchangeLayer(activeFrame, latestLayer, exchange, box);
+        const result = await ctx.layers.clip.clipToExchangeLayer(activeFrame, latestLayer, exchange, box);
         if (!result) {
           // The gesture already latched onto the peel: without feedback the
           // selection would slide away with no fragment and no explanation.
@@ -271,7 +271,7 @@ export const PEEL_COMMANDS = {
         const holeMaskId = `mask-peel-hole-${timestamp}`;
 
         // Start transaction: atomically update Exchange and Host
-        ctx.layers.updateLayer(activeFrame.id, (tx) => {
+        ctx.layers.factory.updateLayer(activeFrame.id, (tx) => {
           // A. Update Exchange (fragment). In copy mode there is no session
           // hole, so the pointer must stay unset — discardExchange removes a
           // hole BY THIS EXACT ID and nothing else. The fragment never
@@ -356,7 +356,7 @@ export const PEEL_COMMANDS = {
         }));
 
         // Switch focus to the fragment, taking over subsequent drag operations
-        ctx.layers.activate(activeFrame.id, exchange.id);
+        ctx.layers.factory.activate(activeFrame.id, exchange.id);
 
       } catch (err) {
         console.error('[ClipCommands] Peel to exchange failed:', err);
@@ -401,7 +401,7 @@ export const PEEL_COMMANDS = {
       // Rollback: remove the session hole from the host, reset the exchange.
       // This restores the host to its pre-peel state without any off-screen
       // compositing.
-      layers.updateLayer(activeFrame.id, (tx) => {
+      layers.factory.updateLayer(activeFrame.id, (tx) => {
         if (session.holeMaskId) {
           tx.edit(host.id).patch({
             vectorMasks: (host.vectorMasks || []).filter(m => m.id !== session.holeMaskId),
@@ -423,7 +423,7 @@ export const PEEL_COMMANDS = {
 
       // Clean up temporary stamp layers
       if (frags.length > 0) {
-        layers.removeLayers(activeFrame.id, frags.map(f => f.id));
+        layers.factory.removeLayers(activeFrame.id, frags.map(f => f.id));
       }
 
       // Settle = the record is gone. Absence IS the terminal state.
@@ -432,7 +432,7 @@ export const PEEL_COMMANDS = {
 
       // Focus returns to the host — the layer the user was working on before
       // the peel. (This is the one path that owns this write.)
-      layers.activate(activeFrame.id, host.id);
+      layers.factory.activate(activeFrame.id, host.id);
 
       // Close the bracket opened above: the rollback is now one isolated
       // undo step regardless of which boundary fires next.
@@ -459,9 +459,9 @@ export const PEEL_COMMANDS = {
         const session = readPeelSession(activeFrame);
         if (!session || session.status !== 'peeled') {
           if (activeLayer) {
-            const triplet = layers.getTriplet(activeFrame.id, activeLayer.id);
+            const triplet = layers.factory.getTriplet(activeFrame.id, activeLayer.id);
             if (triplet && activeLayer.id !== triplet.host.id) {
-              layers.activate(activeFrame.id, triplet.host.id);
+              layers.factory.activate(activeFrame.id, triplet.host.id);
             }
           }
           return false;
@@ -512,7 +512,7 @@ export const PEEL_COMMANDS = {
           // through new masks on the promoted layer like on any layer.
           const participants = [...frags, exchange];
 
-          const { composited, assetId, url: assetUrl } = await ctx.layers.bakeToAsset(activeFrame, participants);
+          const { composited, assetId, url: assetUrl } = await ctx.layers.bake.bakeToAsset(activeFrame, participants);
 
           // Outline rebuild — ALWAYS traced, unconditionally (supersedes the
           // earlier per-tool gate): a rotated host turns even a rect-tool cut
@@ -532,7 +532,7 @@ export const PEEL_COMMANDS = {
           // the content is transparent and clips nothing.
           const outlinePath = session.bakedFragment
             ? null
-            : await ctx.layers.traceAlphaOutline(composited);
+            : await ctx.layers.bake.traceAlphaOutline(composited);
 
           // The hole dug by THIS session, if any (null in copy mode). The
           // exact mask id is the only sanctioned hole handle — never a
@@ -602,7 +602,7 @@ export const PEEL_COMMANDS = {
             }
           }
 
-          const newLayer = LayerFactory.getNewLayer({
+          const newLayer = LayerFactory.createLayer('image', {
             name: LayerFactory.getNewLayerName(hostLayers),
             src: assetUrl,
             assetId,
@@ -612,7 +612,7 @@ export const PEEL_COMMANDS = {
             // chain stripped. Declaration inlined: the metadata object is
             // freshly composed here — nothing to merge. `clipTool` lets the
             // LayersDrawer Refocus re-arm the tool the fragment was cut with.
-            ...ctx.layers.bakedLayerPatch(composited.bounds, { outlinePath: outlinePath ?? undefined }),
+            ...ctx.layers.factory.bakedLayerPatch(composited.bounds, { outlinePath: outlinePath ?? undefined }),
             ...(productContour ? { contour: productContour } : {}),
             birthCenter: { cx: birth.x, cy: birth.y },
             nature: 'physical',
@@ -624,9 +624,9 @@ export const PEEL_COMMANDS = {
           });
 
           const exchangeIndex = activeFrame.layers.order.indexOf(exchange.id);
-          layers.addLayer(activeFrame.id, newLayer, exchangeIndex !== -1 ? exchangeIndex : undefined);
+          layers.factory.addLayer(activeFrame.id, newLayer, exchangeIndex !== -1 ? exchangeIndex : undefined);
 
-          layers.updateLayer(activeFrame.id, (tx) => {
+          layers.factory.updateLayer(activeFrame.id, (tx) => {
             // Reset the session helpers. metadata must be cleared explicitly:
             // reset() only writes the blank bitmap fields, which would leave
             // the stale session hole pointer behind. This is capacity
@@ -652,11 +652,11 @@ export const PEEL_COMMANDS = {
 
           // Clean up temporary stamp layers
           if (frags.length > 0) {
-            layers.removeLayers(activeFrame.id, frags.map(f => f.id));
+            layers.factory.removeLayers(activeFrame.id, frags.map(f => f.id));
           }
 
           // PS "Layer via Cut" intuition: focus lands on the new fragment.
-          layers.activate(activeFrame.id, newLayer.id);
+          layers.factory.activate(activeFrame.id, newLayer.id);
           return true;
 
         } catch (err) {
@@ -830,7 +830,7 @@ export const PEEL_COMMANDS = {
       // (retryable), no escape into the gesture teardown.
       const posed: Layer = { ...exchange, cx, cy, rotation };
       try {
-        const { composited, assetId: newAssetId, url: newUrl } = await ctx.layers.bakeToAsset(
+        const { composited, assetId: newAssetId, url: newUrl } = await ctx.layers.bake.bakeToAsset(
           activeFrame,
           [posed],
           { roi: roiLocal, poseOverrides: { [exchange.id]: { scale, scaleY, sourceAngle } } },
@@ -845,7 +845,7 @@ export const PEEL_COMMANDS = {
         // coverage off the hard edges a pure scale keeps hard.
         const outlinePath = session.bakedFragment
           ? null
-          : await ctx.layers.traceAlphaOutline(composited);
+          : await ctx.layers.bake.traceAlphaOutline(composited);
 
         // The baked pixels ARE the transform: reset the pose and re-anchor on
         // the composite bounds center (world coords, half-pixel aligned — even
@@ -855,7 +855,7 @@ export const PEEL_COMMANDS = {
         // historical padding. Product-record conventions come from the shared
         // bake primitive (services/baking.ts).
         const bounds = composited.bounds;
-        const record = ctx.layers.bakedLayerPatch(bounds, {
+        const record = ctx.layers.factory.bakedLayerPatch(bounds, {
           snapHalf: true,
           outlinePath: outlinePath ?? undefined,
           // flip UNCHANGED: the composite's pose scale is signed, so a
@@ -913,7 +913,7 @@ export const PEEL_COMMANDS = {
         // only once the committed state is observed to carry the new asset.
         ctx.actions.fast.overrideLayer(activeFrame.id, exchange.id, bakedPatch);
 
-        ctx.layers.updateLayer(activeFrame.id, (tx) => {
+        ctx.layers.factory.updateLayer(activeFrame.id, (tx) => {
           tx.edit(exchange.id).patch(bakedPatch);
         });
         // The bake zeroes the layer rotation (it lives in the pixels now); the
@@ -1023,7 +1023,7 @@ export const PEEL_COMMANDS = {
           )
         : null;
 
-      ctx.layers.updateLayer(activeFrame.id, (tx) => {
+      ctx.layers.factory.updateLayer(activeFrame.id, (tx) => {
         tx.edit(exchange.id).patch(restored);
       });
       const sessionFrame = ctx.actions.fast.latestFrame(activeFrame.id) ?? activeFrame;

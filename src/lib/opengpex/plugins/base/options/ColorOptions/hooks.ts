@@ -481,12 +481,12 @@ export const useColorOptions = () => {
   const { currentColor, isColorLayer } = useMemo(() => {
     const isColorLayer = activeLayer?.type === "color";
     const currentColor = isColorLayer
-      ? activeLayer?.metadata?.fillColor || fromHex("#EAB308")
+      ? activeLayer?.fillColor || fromHex("#EAB308")
       : pendingColor;
     return { currentColor, isColorLayer };
   }, [activeLayer, pendingColor]);
 
-  // The single write boundary: `pendingColor` / `metadata.fillColor`'s
+  // The single write boundary: `pendingColor` / `layer.fillColor`'s
   // storage representation is ALWAYS `WORKING_GAMUT`. Callers (widget edits via
   // `ColorPickerPro.onValueChange`, sampler picks via `handleSampled`) hand in a
   // frame/view-gamut value; this is the one place that converts it before it is
@@ -503,7 +503,7 @@ export const useColorOptions = () => {
     // If a color layer is currently active, mutate it live
     if (isColorLayer && activeFrame && activeLayer) {
       actions.updateLayer(activeFrame.id, activeLayer.id, {
-        metadata: { ...activeLayer.metadata, fillColor: stored },
+        fillColor: stored,
       });
     }
     P.dispatchColorApply(stored, 'live');

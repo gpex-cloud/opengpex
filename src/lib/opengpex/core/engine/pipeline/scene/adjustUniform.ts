@@ -232,7 +232,7 @@ export interface PackAdjustChainOptions {
    * Coverage window of the layer's baked coverage array, in content-unit
    * fractions (x0, y0, w, h); `undefined` when no stage is confined. Confined
    * stages are assigned array layers in chain order (0, 1, 2, …), matching the
-   * bake order in `prepareAdjustCoverageSources`.
+   * bake order in `prepareAdjustCoverage`.
    */
   readonly coverageWindow?: readonly [number, number, number, number];
 }

@@ -51,6 +51,7 @@
  * @module core/layer/services/clip-routing
  */
 
+import { getLayerKind } from '@opengpex/editor/core/layer/kinds';
 import {
   Frame, Layer, VectorMask, GeometryService, asLocalShape, type LocalPolygon,
 } from '@opengpex/editor/core/types';
@@ -134,8 +135,7 @@ export interface ClipFragmentResult {
 
 const CLIPBOARD_MODES: readonly ClipMode[] = ['copy', 'cut'];
 
-/** Layers whose `src` is real pixel content rather than the shared placeholder. */
-const RASTER_SOURCE_TYPES: readonly Layer['type'][] = ['image', 'paint'];
+
 
 /**
  * Every executor carries a lock-free product: a new layer must never inherit
@@ -175,7 +175,7 @@ export function createClipRoutingOperations(
       metadata = rest;
     }
     const intoFrame = !CLIPBOARD_MODES.includes(mode);
-    let newLayer = unlocked(LayerFactory.getNewLayer({
+    let newLayer = unlocked(LayerFactory.createLayer(layerData.type, {
       ...layerData,
       metadata,
       // Clipboard products keep the source name; paste adds its own suffix.
@@ -199,7 +199,11 @@ export function createClipRoutingOperations(
     if (!intoFrame) {
       // Non-raster layers hold only a 1x1 placeholder in `src`; external
       // applications need the rendered layer instead.
-      clipboardUrl = RASTER_SOURCE_TYPES.includes(layer.type)
+      // Layers whose `src` is real pixel content (pipeline:'bitmap') hand it
+      // straight to external applications; every other kind (analytic
+      // geometry, synthesized fills) holds only a placeholder and must be
+      // BAKED into a real bitmap for the external clipboard.
+      clipboardUrl = getLayerKind(layer.type).pipeline === 'bitmap'
         ? layer.src
         : (await bakeOps.bakeToAsset(frame, [layer])).url;
     }

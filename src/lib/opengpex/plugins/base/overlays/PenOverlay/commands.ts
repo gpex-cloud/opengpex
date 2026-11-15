@@ -181,7 +181,7 @@ const applyMaskCommand: EditorCommand<{ feather?: number }, void> = {
     const shape = ctx.geometry.polygon.polygonToShape(layerPoly);
     const feather = payload?.feather ?? 0;
 
-    ctx.layers.updateLayer(frame.id, (tx) => {
+    ctx.layers.factory.updateLayer(frame.id, (tx) => {
       tx.edit(layer.id).applyMask(shape, { feather });
     });
     // Commit semantics: the draft is cleared INSIDE this same undoable step
@@ -407,9 +407,8 @@ const createShapeCommand: EditorCommand<PenShapeStylePayload | undefined, void> 
 
     const worldCenter = ctx.geometry.space.localToWorld(minX + w / 2, minY + h / 2, frame);
     const layersArray = frame.layers.order.map((id) => frame.layers.byId[id]);
-    const layer = LayerFactory.getNewLayer({
+    const layer = LayerFactory.createLayer('vector', {
       name: LayerFactory.getNewLayerName(layersArray, 'Pen Shape'),
-      type: 'vector',
       cx: worldCenter.x,
       cy: worldCenter.y,
       bounding: { w: w + pad * 2, h: h + pad * 2 },
@@ -421,8 +420,8 @@ const createShapeCommand: EditorCommand<PenShapeStylePayload | undefined, void> 
 
     const below = LayerFactory.resolveActiveHostLayer(frame);
     const insertAt = LayerFactory.getInsertIndexAbove(frame, below?.id);
-    ctx.layers.addLayer(frame.id, layer, insertAt);
-    ctx.layers.activate(frame.id, layer.id);
+    ctx.layers.factory.addLayer(frame.id, layer, insertAt);
+    ctx.layers.factory.activate(frame.id, layer.id);
 
     // Same-step draft clear: undo restores the shape layer AND the path.
     clearPenDraftInStep(ctx, frame.id);
@@ -473,7 +472,7 @@ const releaseToDraftCommand: EditorCommand<{ frameId: string; layerId: string },
     publishPenPhase(ctx.actions.setStateSignal, 'drawing');
     if (getPenCommittedSelection()?.layerId === layer.id) setPenCommittedSelection(null);
 
-    ctx.layers.removeLayers(frame.id, layer.id);
+    ctx.layers.factory.removeLayers(frame.id, layer.id);
     ctx.actions.notifyHUD(`Path released to the pen tool (${subs.length} subpath${subs.length > 1 ? 's' : ''})`, 'info');
   },
 } as EditorCommand<{ frameId: string; layerId: string }, void>;

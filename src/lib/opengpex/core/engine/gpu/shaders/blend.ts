@@ -86,11 +86,11 @@ struct BlendUniforms {
   uv_rect      : vec4<f32>,   // (u0, v0, du, dv) (16 bytes, offset 48..63)
   opacity      : f32,         // Offset 64
   blend_mode   : u32,         // Offset 68 (0..15)
-  flags        : u32,         // Offset 72 (bits 0..2: has_mask/clip/premult, bit 4: source_is_linear, bits 5..7: gamut_id, bits 8..9: render_intent; bits 3/10..17 RETIRED — bmask hard/invert/stack now bake into the combined mask texture)
+  flags        : u32,         // Offset 72 (bits 0..2: has_mask/clip/premult, bit 3: source_solid, bit 4: source_is_linear, bits 5..7: gamut_id, bits 8..9: render_intent; bits 10..17 RETIRED — bmask hard/invert/stack now bake into the combined mask texture)
   vmask_flags  : u32,         // Offset 76 (was _pad; mirrors LayerUniforms.vmask_flags)
   vmask_rect   : vec4<f32>,   // Offset 80 (16B) — (cx, cy, halfW, halfH) in layer-local pixel space (analytic only)
   vmask_feather: vec4<f32>,   // Offset 96 (16B) — (featherPx, maskPxW, maskPxH, _reserved)
-  filmic_white : f32,         // Offset 112 — mirrors LayerUniforms.filmic_white (per-file filmic knee domain)
+  tail         : vec4<f32>,   // Offset 112 (16B) — mirrors LayerUniforms.tail: .x is the per-file filmic knee domain (consumed only when render_intent ≠ 0); the WHOLE vec4 is the declarative solid colour (working-LINEAR straight alpha) when flags bit 3 (SOURCE_SOLID) is set
 };
 
 @group(0) @binding(0) var<uniform> blend_u : BlendUniforms;
@@ -390,6 +390,17 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
   if (fg_uv.x < 0.0 || fg_uv.y < 0.0 || fg_uv.x > 1.0 || fg_uv.y > 1.0) {
     fg_sample = vec4<f32>(0.0);
   }
+
+  // ── Declarative solid fill ──
+  // flags bit 3 (SOURCE_SOLID): the foreground colour is the uniform tail vec4
+  // (working-LINEAR straight alpha), NOT a texture sample — the shared 1×1 white
+  // texture bound at fg_tex is a binding-formality stretched constant and its
+  // texel is discarded here (same discipline as layer.ts's fs_main). The blend
+  // pass packs SOURCE_LINEAR + GAMUT_ID 0 + RENDER_INTENT 0 alongside, so the
+  // normalize below passes the declaration through untouched.
+  if ((blend_u.flags & 8u) != 0u) {
+    fg_sample = blend_u.tail;
+  }
   fg_sample.a *= coverage;
 
   // ── NORMALISE THE FOREGROUND ──
@@ -403,7 +414,7 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
   // rgba16float accumulator — it is ALREADY working-space linear light and must
   // NOT be re-normalised. Converting both sides would double-decode / double-fold /
   // double-tone-map the backdrop and darken every ping-pong blend.
-  fg_sample = normalize_layer_source(fg_sample, blend_u.flags, blend_u.filmic_white);
+  fg_sample = normalize_layer_source(fg_sample, blend_u.flags, blend_u.tail.x);
 
   // Optional mask on foreground (bmask, sampled in the same foreground-local space).
   // The bound texture is the COMBINED coverage the bmask combine pass baked:

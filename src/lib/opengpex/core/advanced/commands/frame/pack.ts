@@ -74,26 +74,27 @@ export const FramePackCommands = {
           // WITHOUT writing `dec:` — the source file is authoritative and
           // `FileService.recover()` re-derives the pixels on first render.
           await assets.storeRaw(rawBlobs[meta.rawFileHash]);
-          await assets.register(blob, {
+          await assets.register({
+            displayBlob: blob,
             precomputedHash: id,
             width: meta.width,
             height: meta.height,
             dprScale: meta.dprScale,
             sourceFileName: meta.sourceFileName,
-            ...identity,
+            colorIdentity: identity,
           });
         } else if (meta?.bakedDecOnly && decBuffers[id] && identity) {
           // ③ Bake product (merge / rasterize / peel / create). No source file
           // can regenerate it, so the shipped naked pixels go straight back to
           // `dec:` — `storeBundle` keeps the write ordering (dec first,
-          // light record after) and warms HighDepthTextureCache.
+          // light record after) and warms HighDepthCache.
           await assets.storeBundle({
             displayBlob: blob,
             width: meta.width,
             height: meta.height,
             dprScale: meta.dprScale,
             colorIdentity: identity,
-            highDepthSource: { data: decBuffers[id], width: meta.width, height: meta.height },
+            highDepthData: decBuffers[id],
             precomputedHash: id,
             sourceFileName: meta.sourceFileName,
           });
@@ -115,13 +116,14 @@ export const FramePackCommands = {
             }
           }
 
-          await assets.register(blob, {
+          await assets.register({
+            displayBlob: blob,
             precomputedHash: id, // ★ pin the original assetId — never re-hash
             width,
             height,
             dprScale: meta?.dprScale,
             sourceFileName: meta?.sourceFileName,
-            ...identity,
+            colorIdentity: identity,
           });
         }
       }

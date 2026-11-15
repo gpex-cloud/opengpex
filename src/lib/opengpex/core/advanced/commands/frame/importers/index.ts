@@ -351,7 +351,8 @@ export async function createFrameFromAsset(
     format: 'image/webp',
     quality: 0.9,
   });
-  const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbResult.displayBlob, {
+  const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register({
+    displayBlob: thumbResult.displayBlob,
     width: thumbResult.width,
     height: thumbResult.height,
     precomputedHash: thumbResult.precomputedHash,
@@ -395,7 +396,7 @@ export async function createFrameFromAsset(
     0,
     { h: false, v: false },
   );
-  const baseLayer = LayerFactory.getNewLayer({
+  const baseLayer = LayerFactory.createLayer('image', {
     name: 'Background',
     src: asset.url,
     assetId,

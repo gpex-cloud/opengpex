@@ -25,7 +25,7 @@ import Switch from "@opengpex/editor/widgets/Switch";
 import { presets } from "@opengpex/editor/core/helpers/preferences";
 import { usePreset } from "@opengpex/editor/core/helpers/preferences/usePreset";
 
-type ExcludableLayerType = 'text' | 'paint' | 'vector' | 'color';
+type ExcludableLayerType = 'text' | 'vector' | 'color';
 
 /**
  * SmartGuidesSettings: Settings panel contributed to SETTINGS_CONFIG_PANEL.
@@ -143,12 +143,6 @@ export function SmartGuidesSettings() {
           description="Don't snap to text layers"
           checked={excludeLayerTypes?.includes('text') ?? false}
           onChange={() => toggleExclude('text')}
-        />
-        <SwitchRow
-          label="Paint/Brush layers"
-          description="Don't snap to paint layers"
-          checked={excludeLayerTypes?.includes('paint') ?? false}
-          onChange={() => toggleExclude('paint')}
         />
         <SwitchRow
           label="Vector layers"

@@ -88,7 +88,7 @@ export const FrameResizeCommands = {
 
       for (const layer of hostLayers) {
         try {
-          const result = await ctx.layers.resampleLayer(activeFrame, layer, scaleX, scaleY);
+          const result = await ctx.layers.bake.resampleLayer(activeFrame, layer, scaleX, scaleY);
           if (result) {
             patches[layer.id] = result.patch;
           }
@@ -112,7 +112,7 @@ export const FrameResizeCommands = {
         ...(dpi ? { dpi } : {})
       });
 
-      layers.updateLayer(activeFrame.id, tx => {
+      layers.factory.updateLayer(activeFrame.id, tx => {
         for (const [id, patch] of Object.entries(patches)) {
           tx.edit(id).patch(patch);
         }
@@ -156,7 +156,7 @@ export const FrameResizeCommands = {
       const scaleY = newH / oldH;
 
       // 2. Register the source as an asset (creates blob URL + cache entry)
-      const { assetId, url: assetUrl } = await assets.register(source, { width: newW, height: newH });
+      const { assetId, url: assetUrl } = await assets.register({ displayBlob: source, width: newW, height: newH });
 
       // 3. Find primary image layer (first host image layer)
       const primaryLayer = activeFrame.layers.order
@@ -176,7 +176,7 @@ export const FrameResizeCommands = {
 
       for (const layer of otherHostLayers) {
         try {
-          const result = await ctx.layers.resampleLayer(activeFrame, layer, scaleX, scaleY);
+          const result = await ctx.layers.bake.resampleLayer(activeFrame, layer, scaleX, scaleY);
           if (result) {
             patches[layer.id] = result.patch;
           }
@@ -215,7 +215,7 @@ export const FrameResizeCommands = {
       });
 
       // 7. Apply layer patches
-      layers.updateLayer(activeFrame.id, tx => {
+      layers.factory.updateLayer(activeFrame.id, tx => {
         for (const [id, patch] of Object.entries(patches)) {
           tx.edit(id).patch(patch);
         }

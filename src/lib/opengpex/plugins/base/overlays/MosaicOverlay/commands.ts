@@ -38,8 +38,8 @@ const bakeCommand: EditorCommand<{ frameId: string; layer: Layer; isNew: boolean
     if (payload.isNew) {
       // Pass through complete pipeline via LayerService.addLayer (expandLayers + cascade calculation),
       // ensuring the paint layer supports subsequent operations like peel that generate child layers.
-      ctx.layers.addLayer(payload.frameId, payload.layer);
-      ctx.layers.activate(payload.frameId, payload.layer.id);
+      ctx.layers.factory.addLayer(payload.frameId, payload.layer);
+      ctx.layers.factory.activate(payload.frameId, payload.layer.id);
     } else {
       ctx.actions.updateLayer(payload.frameId, payload.layer.id, {
         assetId: payload.layer.assetId,

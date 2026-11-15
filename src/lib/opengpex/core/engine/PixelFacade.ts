@@ -34,13 +34,16 @@
  */
 
 import { WorkerBridge } from './dispatch/bridge/WorkerBridge';
+import { PERF_MON } from '@opengpex/editor/core/helpers/config';
+import { cachePerfSnapshot } from './sources/cachePerf';
 import { getGpuEngine } from './pipeline/WebGpuEngine';
 import { ImageDispatcher } from './dispatch/ImageDispatcher';
 import { CompositeDispatcher } from './dispatch/CompositeDispatcher';
 import type { CompositeRequest } from './dispatch/CompositeDispatcher';
 import { ExportDispatcher } from './dispatch/ExportDispatcher';
 import type { ExportRequest } from './dispatch/ExportDispatcher';
-import { sourceBitmapCache } from './sources/SourceBitmapCache';
+import { imageBitmapCache } from './sources/ImageBitmapCache';
+import { highDepthCache } from './sources/HighDepthCache';
 import { download } from './utils/pixel-utils';
 import { unpackLayerHistogramBuffer } from '@opengpex/editor/core/engine/color/histograms';
 import type { LayerHistogramData } from '@opengpex/editor/core/engine/color/histograms';
@@ -78,7 +81,7 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
   const { geometry, assets, bridge, files } = deps;
 
   // ── Dispatcher instances ──
-  const imageDispatcher = new ImageDispatcher(sourceBitmapCache, bridge, assets);
+  const imageDispatcher = new ImageDispatcher(imageBitmapCache, bridge, assets);
   // Internal composite runs on the main-thread GPU engine (no WorkerBridge).
   // `files` is injected directly so the dispatcher can call `files.recover` for
   // cold high-depth recovery — plain constructor DI, no post-construction setter.
@@ -103,27 +106,62 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
   // AssetService handles registration + IDB persistence + pool lifecycle.
   // It knows nothing about rendering caches. These callbacks bridge the gap:
   //
-  // onRegistered: Pre-warm BOTH rendering caches so the asset renders immediately
+  // onLoaded: Pre-warm ALL rendering caches so the asset renders immediately
   //   without a flash/decode delay on first frame:
   //   1. Worker-side: ensureAsset → ENSURE_ASSET job → workerCache.ingest (bitmapCache + blobCache)
-  //   2. Main-thread: sourceBitmapCache.warmFromBlob → decode blob → ImageBitmap cache
+  //   2. Main-thread: imageBitmapCache.warmFromBlob → decode blob → ImageBitmap cache
+  //   3. High-depth channel: the confirmed-persisted naked pixels ride the
+  //      callback as BARE `highDepthData` (AssetService only rules "disk-backed
+  //      or not" — the write-ordering authority; the ENGINE-side shape assembly
+  //      lives here). Geometry + colour identity are read synchronously from the
+  //      just-registered pool entry (register fires only after pool.set), so no
+  //      IDB re-read is ever needed.
   //
-  // onReleased: Evict from Worker cache when AssetService revokes the asset (GC).
+  // onReleased: Evict from the Worker cache AND the high-depth channel when
+  //   AssetService revokes the asset (GC).
   //
-  // Note: source assets (noCache) never trigger onRegistered — they are stored
+  // Note: source assets (noCache) never trigger onLoaded — they are stored
   // in IDB for lossless re-export only, never displayed or rendered.
   assets.setCallbacks({
-    onRegistered: (assetId, blob) => {
+    onLoaded: (assetId, blob, highDepthData) => {
       imageDispatcher.ensureAsset(assetId, blob).catch(() => { /* non-fatal */ });
       const url = assets.getURL(assetId);
       if (url) {
-        sourceBitmapCache.warmFromBlob(url, blob).catch(() => { /* non-fatal */ });
+        imageBitmapCache.warmFromBlob(url, blob).catch(() => { /* non-fatal */ });
+      }
+      if (highDepthData) {
+        const meta = assets.get(assetId);
+        // dataFormat is guaranteed present whenever highDepthData is (a
+        // storeDec failure degrades BOTH on the asset side) — guard anyway so
+        // a malformed registration can never mint a half-identity cache entry.
+        if (meta?.dataFormat) {
+          highDepthCache.set(
+            assetId,
+            {
+              data: highDepthData,
+              width: meta.width,
+              height: meta.height,
+              dataFormat: meta.dataFormat,
+            },
+            { persisted: true },
+          );
+        }
       }
     },
     onReleased: (assetId) => {
       imageDispatcher.evict(assetId).catch(() => { /* non-fatal */ });
+      highDepthCache.delete(assetId);
     },
   });
+
+  // ── DEV AUDIT (debt ⑧a): console hook for real-machine cache-perf sessions.
+  // PERF_MON-gated; read via `await __gpexCachePerf()` in the page console.
+  if (PERF_MON) {
+    (globalThis as unknown as Record<string, unknown>).__gpexCachePerf = async () => ({
+      main: cachePerfSnapshot(),
+      worker: await imageDispatcher.workerCachePerf().catch(() => ({ error: 'worker unreachable' })),
+    });
+  }
 
   // ── External encoders registry ──
   const externalEncoders = new Map<
@@ -142,7 +180,7 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
       },
       /** Pre-warm cache from a Blob (no Worker round-trip). Use after bake/composite. */
       async cacheBitmap(src: string, blob: Blob): Promise<void> {
-        await sourceBitmapCache.warmFromBlob(src, blob);
+        await imageBitmapCache.warmFromBlob(src, blob);
       },
       /** Sync probe: returns cached bitmap or undefined (fires background decode on miss). */
       ensureBitmap(src: string): ImageBitmap | undefined {
@@ -162,15 +200,15 @@ export function createPixelFacade(deps: PixelFacadeDeps): PixelService {
       },
       /** Clear all bitmap caches. */
       clearCache() {
-        sourceBitmapCache.clear();
+        imageBitmapCache.clear();
       },
       /** Return a caller-owned clone suitable for postMessage transfer (GPU refcount, near-zero cost). */
       async acquireOwned(src: string): Promise<ImageBitmap | null> {
-        return sourceBitmapCache.acquireOwned(src);
+        return imageBitmapCache.acquireOwned(src);
       },
       /** Write a pre-decoded ImageBitmap directly into the cache (skip blob→decode). */
       writeBitmap(src: string, bitmap: ImageBitmap): void {
-        sourceBitmapCache.set(src, bitmap);
+        imageBitmapCache.set(src, bitmap);
       },
     },
 

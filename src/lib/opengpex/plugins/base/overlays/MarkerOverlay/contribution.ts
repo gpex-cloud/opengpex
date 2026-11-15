@@ -37,7 +37,7 @@ import type {
   LayerSource,
   VectorSourceContributor,
   VectorSourceContext,
-} from '@opengpex/editor/core/engine/pipeline/scene/vectorSources';
+} from '@opengpex/editor/core/engine/pipeline/scene/translators';
 import { rectToSdf } from './marker/shapes/rect/render';
 import { ellipseToSdf } from './marker/shapes/ellipse/render';
 import { arrowToSdf } from './marker/shapes/arrow/render';

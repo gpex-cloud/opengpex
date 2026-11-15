@@ -30,6 +30,7 @@
  */
 
 import type { LayerBlendMode } from '@opengpex/editor/core/types';
+import { LayerTexture } from './LayerTexture';
 import { LAYER_WGSL, LAYER_UNIFORM_BUFFER_SIZE } from '../shaders/layer';
 import { BLEND_WGSL, isHardwareBlendable } from '../shaders/blend';
 import { VIEW_WGSL, VIEW_WGSL_HDR, VIEW_UNIFORM_BUFFER_SIZE } from '../shaders/view';
@@ -176,6 +177,8 @@ export class PipelineCache {
   private nearestSampler: GPUSampler | null = null;
   private defaultMaskTexture: GPUTexture | null = null;
   private defaultMaskView: GPUTextureView | null = null;
+  /** Shared 1×1 white LayerTexture — the declarative solid source's binding formality. */
+  private defaultSourceTexture: LayerTexture | null = null;
 
   /** Adjust-bake (pre-filter) render pipeline + its group-0 layout. */
   private adjustPreShaderModule: GPUShaderModule | null = null;
@@ -346,6 +349,41 @@ export class PipelineCache {
     this.defaultMaskTexture = texture;
     this.defaultMaskView = texture.createView({ label: 'Default 1x1 Dummy Mask View' });
     return this.defaultMaskView;
+  }
+
+  /**
+   * Shared 1×1 opaque-white source texture — the DECLARATIVE SOLID source's
+   * binding formality. Every layer slot (binding 2 in the layer/blend layouts,
+   * the AdjustPre bake source) demands a bound, filterable `texture_2d<f32>`;
+   * a solid layer never samples content (its colour rides the uniform tail
+   * vec4 behind flag bit 3), so this stretched constant satisfies the layout
+   * and its texel is discarded in-shader. Wrapped as a {@link LayerTexture}
+   * (exact 1×1 ⇒ maxU = maxV = 1) because the composite guards and
+   * `prepareFilteredSources` traffic in LayerTextures, not raw views.
+   */
+  getSolidPixelTexture(): LayerTexture {
+    if (this.defaultSourceTexture) return this.defaultSourceTexture;
+    const texture = this.device.createTexture({
+      size: [1, 1, 1],
+      format: 'rgba8unorm',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+      label: 'Default 1x1 White Source (solid binding formality)',
+    });
+    this.device.queue.writeTexture(
+      { texture },
+      new Uint8Array([255, 255, 255, 255]),
+      { bytesPerRow: 4, rowsPerImage: 1 },
+      [1, 1, 1],
+    );
+    this.defaultSourceTexture = new LayerTexture({
+      texture,
+      width: 1,
+      height: 1,
+      allocatedWidth: 1,
+      allocatedHeight: 1,
+      format: 'rgba8unorm',
+    });
+    return this.defaultSourceTexture;
   }
 
   getLayerShaderModule(): GPUShaderModule {

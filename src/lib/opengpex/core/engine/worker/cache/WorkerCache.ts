@@ -1,3 +1,5 @@
+import { recordCacheRead } from '@opengpex/editor/core/engine/sources/cachePerf';
+
 /**
  * OpenGPEX - An Open-source, Web-based Graphics and Photo editor.
  * Copyright (C) 2026 The OpenGPEX Authors
@@ -92,7 +94,10 @@ class WorkerCache {
    */
   public getBitmap(hash: string): ImageBitmap | undefined {
     const bitmap = this.bitmapCache.get(hash);
-    if (bitmap) this.touchUsage(hash);
+    if (bitmap) {
+      this.touchUsage(hash);
+      recordCacheRead('workerBitmapHits');
+    }
     return bitmap;
   }
 
@@ -101,7 +106,9 @@ class WorkerCache {
    * Used by VipsBackend to obtain blob data for vips decoding.
    */
   public getBlob(hash: string): Blob | undefined {
-    return this.blobCache.get(hash);
+    const blob = this.blobCache.get(hash);
+    if (blob) recordCacheRead('workerBlobHits');
+    return blob;
   }
 
   /**

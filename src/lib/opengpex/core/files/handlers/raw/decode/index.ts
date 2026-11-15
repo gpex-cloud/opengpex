@@ -147,19 +147,13 @@ async function decodeRawLegacy(
     // vips `decodeHighDepth` on the source blob — the retained sourceBlob is the
     // ORIGINAL camera file (CR2/NEF/…), which vips cannot decode. So we hand the
     // pre-decoded naked pixels straight to the importer to warm the cache.
-    // ⚠️ COLD RELOAD: on reload/revert `highDepthTextureCache` is
+    // ⚠️ COLD RELOAD: on reload/revert `highDepthCache` is
     // empty and CanvasStage's `getOrFetch → getRaw → decodeHighDepth` fetches the
     // RAW source blob → vips cannot decode it → falls back to the 8-bit display
     // blob if rawbuf is unavailable (no crash, just loses >8-bit precision until re-import).
     // BARE payload — container/trc/gamut/rawWhiteDomain live on the sibling
     // `colorIdentity` (above); the source-gamut tag is carried there, not per-page.
-    highDepthSource: decoded.highDepth
-      ? {
-          data: decoded.highDepth.data,
-          width: decoded.highDepth.width,
-          height: decoded.highDepth.height,
-        }
-      : undefined,
+    highDepthData: decoded.highDepth?.data,
     colorIdentity: pageColorIdentity,
   }];
 }

@@ -64,7 +64,7 @@ export interface AssetMetric {
 export interface LayerMetric {
   id: string;
   name: string;
-  type: 'image' | 'text' | 'vector' | 'color' | 'paint' | 'group';
+  type: 'image' | 'text' | 'vector' | 'color' | 'group';
   visible: boolean;
   locked: boolean;
   opacity: number;
@@ -126,4 +126,34 @@ export interface StorageSummary {
   frames: FrameMetric[];
   history: HistoryMoment[];
   detached: AssetMetric[]; // Assets existing only in unarchived cache
+  storeAudit: StoreAuditSummary | null; // STORE-level truth (IndexedDB incl. raw:/dec:), null until the first audit pass lands
+}
+
+/**
+ * Store-level audit (IndexedDB truth, independent of the session pool).
+ * `alive` = referenced by the document state (frames + undo history) or a
+ * system placeholder; NOT alive = stored but referenced by nothing (orphan).
+ */
+export interface StoreAuditEntryView {
+  key: string;
+  kind: 'display' | 'raw' | 'dec';
+  size: number;
+  width?: number;
+  height?: number;
+  timestamp?: number;
+  sourceFileName?: string;
+  dataFormat?: 'rgba16float' | 'rgba32float' | undefined;
+  alive: boolean;
+}
+
+export interface StoreAuditSummary {
+  entries: StoreAuditEntryView[];
+  totalBytes: number;
+  aliveBytes: number;
+  orphanBytes: number;
+  orphanCount: number;
+  displayCount: number;
+  rawCount: number;
+  decCount: number;
+  orphans: StoreAuditEntryView[];
 }

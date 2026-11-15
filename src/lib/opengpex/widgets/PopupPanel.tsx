@@ -391,10 +391,7 @@ export function PopupPanel({
               {hasActiveStatus && (
                 <span className="relative flex h-2 w-2 shrink-0">
                   <span
-                    className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${status === "STABLE" ? "bg-emerald-400" : "bg-amber-400"}`}
-                  />
-                  <span
-                    className={`relative inline-flex rounded-full h-2 w-2 ${status === "STABLE" ? "bg-emerald-500" : "bg-amber-500"}`}
+                    className={`inline-flex rounded-full h-2 w-2 ${status === "STABLE" ? "bg-emerald-500" : "bg-amber-500"}`}
                   />
                 </span>
               )}

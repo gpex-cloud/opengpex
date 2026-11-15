@@ -43,7 +43,7 @@ import { isOversizedTransient } from '@opengpex/editor/core/engine/gpu/resources
 import { LayerTexture } from '@opengpex/editor/core/engine/gpu/resources/LayerTexture';
 import { GPUTextureUsage } from '@opengpex/editor/core/engine/gpu/constants';
 import type { ResidentTransientDesc } from '@opengpex/editor/core/engine/gpu/resources/ResidentTransientCache';
-import type { Scene, LayerNode } from '../scene/Scene';
+import type { Scene } from '../scene/Scene';
 import type { CompiledScene } from './SceneCompiler';
 import { CompositePass, type CompositePassContext } from './composite/CompositePass';
 import { BlendPass, type BlendPassContext } from './composite/BlendPass';
@@ -55,7 +55,7 @@ import { effectiveScale } from './support/layerGeometry';
 import { prepareFilteredSources } from './build/prepareFilteredSources';
 import { prepareVectorSources } from './build/prepareVectorSources';
 import { prepareVmaskSources, type VmaskBake } from './build/prepareVmaskSources';
-import { prepareAdjustCoverageSources } from './build/prepareAMaskSources';
+import { prepareAdjustCoverage } from './build/prepareAdjustCoverage';
 import type { AdjustCoverageBinding } from './support/adjustBindGroup';
 import { prepareBmaskCombineSources } from './build/prepareBmaskCombine';
 import type { BuildContext, PreparedSource } from './build/types';
@@ -254,24 +254,6 @@ export interface CompositeResult {
   readonly scratch: GPUTexture[];
 }
 
-/**
- * The base texture a composite/blend guard should draw for `layer`, or `undefined`
- * to skip it. Unifies the source kinds behind the guards:
- *   • a PREPARED transient (filtered raster, or a vector source) always wins;
- *   • else a raster layer draws its resident asset;
- *   • else (a vector source whose prepass was skipped) → skip.
- */
-function resolveGuardTexture(
-  layer: LayerNode,
-  assets: Map<string, LayerTexture>,
-  prepared: Map<string, PreparedSource>,
-): LayerTexture | undefined {
-  const prep = prepared.get(layer.id);
-  if (prep) return prep.texture;
-  if (layer.source.kind === 'raster') return assets.get(layer.source.assetId);
-  return undefined;
-}
-
 export class RenderGraph {
   /**
    * Composite all layers into a fresh document-space texture (camera-
@@ -280,7 +262,10 @@ export class RenderGraph {
    * this ONLY when the content signature changes.
    */
   static composite(compiled: CompiledScene, ctx: CompositeContext): CompositeResult {
-    const { device, pipelineCache, bufferRing, texturePool, assets } = ctx;
+    // (ctx.assets is no longer destructured: since the chain map became the
+    // draw-source authority, resident-asset lookup happens in
+    // prepareFilteredSources, not in the composite loops.)
+    const { device, pipelineCache, bufferRing, texturePool } = ctx;
     const workingFormat: GPUTextureFormat = ctx.workingFormat ?? 'rgba16float';
     const scene = compiled.scene;
 
@@ -329,9 +314,9 @@ export class RenderGraph {
     // composite render pass opens. Keyed by layer id; absent ⇒ the layer
     // binds the default white array (every stage grades the whole layer).
     const adjustCoverageSources = new Map<string, AdjustCoverageBinding>();
-    prepareAdjustCoverageSources(commandEncoder, compiled, buildCtx, adjustCoverageSources, vectorScale);
+    prepareAdjustCoverage(commandEncoder, compiled, buildCtx, adjustCoverageSources, vectorScale);
 
-    const filtered = prepareFilteredSources(commandEncoder, compiled, buildCtx, adjustCoverageSources);
+    const sources = prepareFilteredSources(commandEncoder, compiled, buildCtx, adjustCoverageSources);
 
 
     // The density-scaled interactive target expressed as a VIEWPORT: same world space (the
@@ -348,7 +333,7 @@ export class RenderGraph {
         }
       : undefined;
     const passViewport = ev ?? densityViewport;
-    prepareVectorSources(commandEncoder, compiled, buildCtx, filtered, vectorScale);
+    prepareVectorSources(commandEncoder, compiled, buildCtx, sources, vectorScale);
 
     // Bake every POLYGON vmask into an owned coverage texture, keyed by
     // layer id. Recorded here (before any composite render pass opens) because the
@@ -418,10 +403,12 @@ export class RenderGraph {
         if (step.kind !== 'separable') continue;
         for (let l = 0; l < step.layers.length; l++) {
           const layer = step.layers[l];
-          // Prefer a prepared transient (filtered raster OR a vector source);
           // else a raster layer draws its resident asset; else skip (stroke).
-          const src = filtered.get(layer.id);
-          const texture = resolveGuardTexture(layer, assets, filtered);
+          // The chain map IS the draw-source authority (filtered transients,
+          // vector transients, resident assets, the solid white formality);
+          // absent = nothing to draw this frame.
+          const src = sources.get(layer.id);
+          const texture = src?.texture;
           if (!texture) continue;
           // The COMBINED bmask coverage (bmask combine pass). Absent → unmasked.
           const maskTex = bmaskSources.get(layer.id);
@@ -430,9 +417,10 @@ export class RenderGraph {
             texture,
             maskTexture: maskTex,
             vmaskTexture: vmaskSources.get(layer.id)?.texture,
-          vmaskWindow: vmaskSources.get(layer.id)?.window,
-          adjustCoverage: adjustCoverageSources.get(layer.id),
+            vmaskWindow: vmaskSources.get(layer.id)?.window,
+            adjustCoverage: adjustCoverageSources.get(layer.id),
             isBottomOpaque: false,
+            solidUniform: src?.solidUniform === true,
             suppressAdjust: src?.suppressAdjust,
             vectorTransient: src?.vectorTransient,
             sourceIsLinear: src?.sourceIsLinear,
@@ -458,7 +446,7 @@ export class RenderGraph {
       frameHeight,
       allocatedWidth,
       allocatedHeight,
-      filtered,
+      sources,
       adjustCoverageSources,
       vmaskSources,
       bmaskSources,
@@ -483,14 +471,17 @@ export class RenderGraph {
     frameHeight: number,
     allocatedWidth: number,
     allocatedHeight: number,
-    filtered: Map<string, PreparedSource>,
+    sources: Map<string, PreparedSource>,
     adjustCoverageSources: Map<string, AdjustCoverageBinding>,
     vmaskSources: Map<string, VmaskBake>,
     bmaskSources: Map<string, LayerTexture>,
     filterScratch: GPUTexture[],
     exportViewport?: ExportViewport,
   ): CompositeResult {
-    const { device, pipelineCache, bufferRing, texturePool, assets } = ctx;
+    // (ctx.assets is no longer destructured: since the chain map became the
+    // draw-source authority, resident-asset lookup happens in
+    // prepareFilteredSources, not in the composite loops.)
+    const { device, pipelineCache, bufferRing, texturePool } = ctx;
 
     const mkTex = (texture: GPUTexture) =>
       new LayerTexture({ texture, width: frameWidth, height: frameHeight, allocatedWidth, allocatedHeight, format: workingFormat });
@@ -577,10 +568,11 @@ export class RenderGraph {
 
         for (let l = 0; l < step.layers.length; l++) {
           const layer = step.layers[l];
-          // Prepared transient (filtered raster OR vector source) wins; else
-          // a raster layer draws its resident asset; else skip.
-          const src = filtered.get(layer.id);
-          const texture = resolveGuardTexture(layer, assets, filtered);
+          // The chain map IS the draw-source authority (filtered transients,
+          // vector transients, resident assets, the solid white formality);
+          // absent = nothing to draw this frame.
+          const src = sources.get(layer.id);
+          const texture = src?.texture;
           if (!texture) continue;
           // The COMBINED bmask coverage (bmask combine pass). Absent → unmasked.
           const maskTex = bmaskSources.get(layer.id);
@@ -592,6 +584,7 @@ export class RenderGraph {
             vmaskWindow: vmaskSources.get(layer.id)?.window,
             adjustCoverage: adjustCoverageSources.get(layer.id),
             isBottomOpaque: false,
+            solidUniform: src?.solidUniform === true,
             suppressAdjust: src?.suppressAdjust,
             vectorTransient: src?.vectorTransient,
             sourceIsLinear: src?.sourceIsLinear,
@@ -605,10 +598,11 @@ export class RenderGraph {
         isFirstStep = false;
       } else if (step.kind === 'non-separable') {
         const layer = step.layer;
-        // Prepared transient (filtered raster OR vector source) wins; else a raster
-        // layer blends its resident asset; else skip (stroke).
-        const src = filtered.get(layer.id);
-        const fgTexture = resolveGuardTexture(layer, assets, filtered);
+        // Same chain-map authority as the separable branch (chain map holds
+        // filtered transients, vector transients, resident assets and the
+        // solid white formality); absent = nothing to draw this frame.
+        const src = sources.get(layer.id);
+        const fgTexture = src?.texture;
         if (!fgTexture) continue;
         // The COMBINED bmask coverage (bmask combine pass). Absent → unmasked.
         const maskTex = bmaskSources.get(layer.id);
@@ -653,8 +647,7 @@ export class RenderGraph {
           exportViewport,
         };
 
-        // Foreground = the prepared transient (filtered raster / vector source) or
-        // the resident asset, resolved once above.
+        // Foreground = the chain-resolved source, resolved once above.
         BlendPass.drawLayer(blendPass, blendCtx, {
           layer,
           fgTexture,
@@ -663,6 +656,7 @@ export class RenderGraph {
           vmaskTexture: vmaskSources.get(layer.id)?.texture,
             vmaskWindow: vmaskSources.get(layer.id)?.window,
             adjustCoverage: adjustCoverageSources.get(layer.id),
+          solidUniform: src?.solidUniform === true,
           suppressAdjust: src?.suppressAdjust,
           vectorTransient: src?.vectorTransient,
           sourceIsLinear: src?.sourceIsLinear,

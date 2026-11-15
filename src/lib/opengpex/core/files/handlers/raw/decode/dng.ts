@@ -216,11 +216,7 @@ export async function decodeDngHybrid(
         width,
         height,
         index: 0,
-        highDepthSource: {
-          data: half,
-          width,
-          height,
-        },
+        highDepthData: half,
         // Working-space identity (the sanctioned per-page exception): the
         // pixels ARE working ProPhoto-linear, so the GPU fold is identity; the
         // white domain turns on the SAME filmic knee the legacy chain uses.
@@ -422,7 +418,7 @@ export async function decodeDngFirstPrinciples(
       width: outW,
       height: outH,
       index: 0,
-      highDepthSource: { data: half, width: outW, height: outH },
+      highDepthData: half,
       // Display-referred working pixels: GPU fold is identity, and the absent
       // white domain keeps the GPU from tone mapping a second time.
       colorIdentity: {

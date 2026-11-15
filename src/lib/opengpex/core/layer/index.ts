@@ -43,16 +43,30 @@ export function createLayerService(
   // removeLayers, activate), so it cannot be built inside the literal — the
   // method here just delegates to an implementation that is wired right
   // after the literal, over the assembled service.
-  const mergeOps: { impl: LayerService['mergeLayers'] } = {
+  const mergeOps: { impl: LayerService['bake']['mergeLayers'] } = {
     // Replaced synchronously right after the service literal below — never
     // called before that.
     impl: (_frame, _participants, _options) => {
-      throw new Error('[LayerService] mergeLayers is wired after service construction');
+      throw new Error('[LayerService] bake.mergeLayers is wired after service construction');
     },
   };
-  const service: LayerService = {
+
+  // ── factory namespace ────────────────────────────────────────────────────
+  // Synchronous layer/frame record operations: creation, state changes and
+  // reads, all driven through the LayerKind table. The pure record members
+  // come from LayerFactory; the stateful members below are the same logic
+  // that used to sit flat on the service, moved verbatim into the group.
+  const factory: LayerService['factory'] = {
     ...LayerFactory,
-    mergeLayers: (frame, participants, options) => mergeOps.impl(frame, participants, options),
+    bakedLayerPatch: bakeOps.bakedLayerPatch,
+    getTriplet: (frameId, layerId) => {
+      const state = getState();
+      const frame = state.frames.byId[frameId];
+      const layer = frame?.layers.byId[layerId];
+      if (!layer || !frame) return null;
+
+      return LayerFactory.getTriplet(layer, frame.layers.order.map(id => frame.layers.byId[id]));
+    },
 
     updateLayer: (frameId, runner) => {
       const state = getState();
@@ -105,15 +119,6 @@ export function createLayerService(
               patches[layerId] = { ...LayerFactory.getBlank() };
               return editor;
             },
-            emptyLayer: () => {
-              patches[layerId] = {
-                ...patches[layerId],
-                src: LayerFactory.TRANSPARENT_PIXEL,
-                assetId: 'asset-transparent-pixel',
-                vectorMasks: []
-              };
-              return editor;
-            },
             maskLayer: () => {
               const currentLayer = layer;
               if (!currentLayer) return editor;
@@ -127,7 +132,8 @@ export function createLayerService(
               return editor;
             },
             resetWithBounds: (w, h, cx, cy) => {
-              const { flip, opacity, vectorMasks } = LayerFactory.getNewLayer();
+              // Default-shape probe (flip/opacity/mask containers) — reads the template.
+              const { flip, opacity, vectorMasks } = LayerFactory.createLayer('blank');
               patches[layerId] = {
                 ...patches[layerId],
                 // Shared physical-record core (services/baking.ts): pose reset,
@@ -294,29 +300,9 @@ export function createLayerService(
       actions.removeFrame(Array.from(idsToRemove), nextActiveFrameId);
     },
 
-    getTriplet: (frameId, layerId) => {
-      const state = getState();
-      const frame = state.frames.byId[frameId];
-      const layer = frame?.layers.byId[layerId];
-      if (!layer || !frame) return null;
-
-      return LayerFactory.getTriplet(layer, frame.layers.order.map(id => frame.layers.byId[id]));
-    },
-
-    // ── Clip operations (delegated to clipping.ts) ──────────────────────────
-    clipToLogicalLayer: fragmentOps.clipToLogicalLayer,
-    clipToPhysicalLayer: fragmentOps.clipToPhysicalLayer,
-    clipToExchangeLayer: fragmentOps.clipToExchangeLayer,
-    clipFragment: clipRoutingOps.clipFragment,
-
-    // ── Resample operations (delegated to resizing.ts) ──────────────────────────
-    resampleLayer: resampleOps.resampleLayer,
-
-    // ── Bake operations (delegated to baking.ts) ──────────────────────────────────
-    bakeToAsset: bakeOps.bakeToAsset,
-    bakedLayerPatch: bakeOps.bakedLayerPatch,
-    traceAlphaOutline: bakeOps.traceAlphaOutline,
-
+    // Ingest composition (the factory group's single async member): the first
+    // half is asset-domain ingest (decode / gamut sniff / registration —
+    // delegated to AssetService), the second half is layer production.
     createLayerFromBlob: async (blob, frame, screenPoint) => {
       const bmp = await createImageBitmap(blob);
       const dim = { w: bmp.width, h: bmp.height };
@@ -333,10 +319,11 @@ export function createLayerService(
       } catch {
         snGamut = undefined; // enrichment only — default identity wins
       }
-      const { assetId, url } = await assets.register(blob, {
+      const { assetId, url } = await assets.register({
+        displayBlob: blob,
         width: dim.w,
         height: dim.h,
-        ...(snGamut ? { gamut: snGamut } : {}),
+        colorIdentity: snGamut ? { gamut: snGamut } : undefined,
       });
 
       // layer.cx/cy uses the world coordinate system (origin at canvas center), directly using the screenToWorld result
@@ -356,7 +343,7 @@ export function createLayerService(
       const layersArray = frame.layers.order.map(id => frame.layers.byId[id]);
       const smartName = LayerFactory.getNewLayerName(layersArray, 'Pasted');
 
-      return LayerFactory.getNewLayer({
+      return LayerFactory.createLayer('image', {
         name: smartName,
         src: url,
         assetId: assetId,
@@ -368,6 +355,30 @@ export function createLayerService(
       });
     },
   };
+
+  // ── clip namespace ───────────────────────────────────────────────────────
+  // Heavy async pixel operations routed through the clip decision table.
+  const clip: LayerService['clip'] = {
+    clipToLogicalLayer: fragmentOps.clipToLogicalLayer,
+    clipToPhysicalLayer: fragmentOps.clipToPhysicalLayer,
+    clipToExchangeLayer: fragmentOps.clipToExchangeLayer,
+    clipFragment: clipRoutingOps.clipFragment,
+  };
+
+  // ── bake namespace ───────────────────────────────────────────────────────
+  // Heavy async pixel operations running the asset pipeline. mergeLayers is
+  // wired after service construction (see mergeOps above).
+  const bake: LayerService['bake'] = {
+    mergeLayers: (frame, participants, options) => mergeOps.impl(frame, participants, options),
+    bakeToAsset: bakeOps.bakeToAsset,
+    traceAlphaOutline: bakeOps.traceAlphaOutline,
+    resampleLayer: resampleOps.resampleLayer,
+  };
+
+  // ── Public facade ────────────────────────────────────────────────────────
+  // The service is exactly the three namespaces. Pure record helpers live on
+  // LayerFactory (this module's export) — call them there, not on the facade.
+  const service: LayerService = { factory, clip, bake };
 
   mergeOps.impl = createMergeOperations(geometry, service, actions).mergeLayers;
 

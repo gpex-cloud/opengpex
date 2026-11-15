@@ -22,35 +22,37 @@
  *
  * Consolidates image carriers of varying precision consumed by the pipeline:
  *   - `HighDepthSource`   — 16/32-bit raw float buffer source + its cache/singleton.
- *   - `SourceBitmapCache` — 8-bit bitmap decoded pixel cache (upload source for `IEngine.uploadSource()`).
- *   - `SolidColorSource`  — 1×1 solid color fill source (stateless pure function output).
+ *   - `ImageBitmapCache` — 8-bit bitmap decoded pixel cache (upload source for `IEngine.uploadSource()`).
+ *   (Solid color fills are DECLARATIVE scene sources — `pipeline/scene/translators/solid.ts` —
+ *   not byte carriers; they own no source container here.)
  *
  * Dependency direction: sources sits above color/gpu leaves, only depending downwards on color operators;
  * no upward dependency on pipeline / facade / gpu hardware layer.
  */
 
 // ── 8-bit bitmap cache ──
-export { sourceBitmapCache } from './SourceBitmapCache';
+export { imageBitmapCache } from './ImageBitmapCache';
 
 // ── 16/32-bit high-precision source + cache ──
 export {
-  highDepthTextureCache,
+  highDepthCache,
   selectEvictions,
   DEFAULT_HIGH_DEPTH_BUDGET_BYTES,
-} from './HighDepthSource';
+} from './HighDepthCache';
 export type {
   HighDepthSource,
   HighDepthFetcher,
   EvictionCandidate,
-} from './HighDepthSource';
-
-// ── 1×1 solid color source ──
-export {
-  buildSolidColorSource,
-  SOLID_COLOR_SOURCE_FORMAT,
-} from './SolidColorSource';
-export type { SolidColorSource } from './SolidColorSource';
+} from './HighDepthCache';
 
 // ── gain map (presentation adjunct) + cache ──
-export { gainMapSourceCache } from './GainMapSource';
-export type { GainMapSource, GainMapFetcher } from './GainMapSource';
+export { gainMapCache } from './GainMapCache';
+export type { GainMapData, GainMapFetcher } from './GainMapCache';
+
+// ── PERF_MON-gated cache audit counters (memory-residency audit, ⑧a) ──
+export {
+  recordCacheRead,
+  cachePerfSnapshot,
+  resetCachePerf,
+} from './cachePerf';
+export type { CachePerfCounters } from './cachePerf';

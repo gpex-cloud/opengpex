@@ -144,8 +144,8 @@ export function createBakeOperations(
     );
     const { assetId, url } = await assets.storeBundle(composited);
 
-    // Ensure the bitmap is decoded into SourceBitmapCache BEFORE the caller's
-    // state update. storeBundle() registers the asset (its onRegistered hook
+    // Ensure the bitmap is decoded into ImageBitmapCache BEFORE the caller's
+    // state update. storeBundle() registers the asset (its onLoaded hook
     // warms both caches); loadBitmap is cache-first so this is instant.
     await pixels.image.loadBitmap(url);
 

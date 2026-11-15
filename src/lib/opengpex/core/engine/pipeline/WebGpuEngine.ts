@@ -77,8 +77,8 @@ import {
 import { resolveRoiFrame } from '@opengpex/editor/core/engine/pipeline/graph/support/roiFrame';
 import { computeCompositeSignature } from '@opengpex/editor/core/engine/pipeline/scene/compositeSignature';
 import { clearVmaskCache } from '@opengpex/editor/core/engine/pipeline/graph/build/prepareVmaskSources';
-import { clearConfinementCoverageCache } from '@opengpex/editor/core/engine/pipeline/graph/build/prepareConfinementSources';
-import { clearAMaskCoverageArrays } from '@opengpex/editor/core/engine/pipeline/graph/build/prepareAMaskSources';
+import { clearConfinementCoverageCache } from '@opengpex/editor/core/engine/pipeline/graph/build/prepareConfinedSources';
+import { clearAMaskCoverageArrays } from '@opengpex/editor/core/engine/pipeline/graph/build/prepareAdjustCoverage';
 import { releaseExportGlyphAtlas } from '@opengpex/editor/core/engine/pipeline/graph/build/vectorRenderers/TextRenderer';
 import { clearBmaskCombineCache } from '@opengpex/editor/core/engine/pipeline/graph/build/prepareBmaskCombine';
 import { GPUTextureUsage } from '@opengpex/editor/core/engine/gpu/constants';
@@ -1195,7 +1195,7 @@ export class WebGpuEngine implements IEngine {
     }
     this.luts3d.clear();
     // Gain-map textures belonged to the destroyed device — the CPU payload in
-    // gainMapSourceCache survives, so the next eligible present re-uploads
+    // gainMapCache survives, so the next eligible present re-uploads
     // (and re-runs the reveal ease, a graceful re-brighten after recovery).
     this.gainPresenter.release();
     // Engine-owned targets are OUTSIDE the pool (nothing else frees them):
@@ -2012,7 +2012,7 @@ export class WebGpuEngine implements IEngine {
 // Provides:
 //   - getGpuEngine(): lazy-created IEngine singleton
 //   - getEngine(): alias to getGpuEngine() for backwards compatibility
-//   - Cache singletons (sourceBitmapCache re-export)
+//   - Cache singletons (imageBitmapCache re-export)
 // ────────────────────────────────────────────────────────────
 
 // ── Lazy WebGPU Engine Singleton ──
@@ -2038,6 +2038,6 @@ export function getGpuEngine(): IEngine {
 export const getEngine = getGpuEngine;
 
 // ── Cache Singletons (render loop subscribe + lifecycle) ──
-export { sourceBitmapCache } from '@opengpex/editor/core/engine/sources/SourceBitmapCache';
+export { imageBitmapCache } from '@opengpex/editor/core/engine/sources/ImageBitmapCache';
 
 

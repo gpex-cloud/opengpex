@@ -39,6 +39,7 @@ import {
   LAYER_FLAG_HAS_MASK,
   LAYER_FLAG_CLIP,
   LAYER_FLAG_SOURCE_LINEAR,
+  LAYER_FLAG_SOURCE_SOLID,
   LAYER_GAMUT_SHIFT,
   LAYER_RENDER_INTENT_SHIFT,
 } from '@opengpex/editor/core/engine/gpu/shaders/layer';
@@ -130,6 +131,13 @@ export interface DrawBlendParams {
    * carries no intent — `blend.wgsl` never tone-maps it.
    */
   readonly sourceIntentApplied?: boolean;
+  /**
+   * The `layer.source` is DECLARATIVE SOLID and `fgTexture` is the shared 1×1
+   * white formality — read the colour from the uniform tail vec4 (flag bit 3)
+   * instead of sampling. Same contract as `CompositePass.DrawLayerParams`
+   * (unset when a filtered transient already materialized the pixels).
+   */
+  readonly solidUniform?: boolean;
 }
 
 /**
@@ -159,6 +167,18 @@ export class BlendPass {
     // Same shared decision as CompositePass, so a layer cannot change
     // appearance merely by switching between a class-A and class-B blend mode.
     if (isSourceLinear(layer, params.sourceIsLinear)) flags |= LAYER_FLAG_SOURCE_LINEAR;
+    // DECLARATIVE SOLID: same shared decision as CompositePass — the colour
+    // rides the uniform tail vec4, the bound texture is the shared 1×1 white
+    // formality, and SOURCE_LINEAR + gamut 0 + intent 0 (the resolvers return
+    // their defaults for a non-raster source) make the normalize step an exact
+    // pass-through of the already working-LINEAR declaration.
+    const solidColor = params.solidUniform && layer.source.kind === 'solid'
+      ? layer.source.color
+      : undefined;
+    if (solidColor) {
+      flags |= LAYER_FLAG_SOURCE_SOLID;
+      flags |= LAYER_FLAG_SOURCE_LINEAR;
+    }
     // Same shared gamut decision as CompositePass — only the
     // foreground is converted; the bg accumulator is already the working gamut.
     const gamutId = resolveSourceGamutId(layer, params.sourceIsWorkingGamut);
@@ -215,6 +235,7 @@ export class BlendPass {
       vmaskU.rect,
       vmaskU.feather,
       rawWhiteDomain ?? FILMIC_WHITE_DOMAIN,
+      solidColor,
     );
 
     // ── Overwrite slots 0..11 with fg_frame_to_local = inverse of the forward

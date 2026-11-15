@@ -45,8 +45,8 @@ const placeCommand: EditorCommand<{ frameId: string; layer: Layer }, void> = {
     // append-on-top (undefined index → reducer push) when there is no active layer.
     const below = LayerFactory.resolveActiveHostLayer(frame);
     const insertAt = LayerFactory.getInsertIndexAbove(frame, below?.id);
-    ctx.layers.addLayer(payload.frameId, payload.layer, insertAt);
-    ctx.layers.activate(payload.frameId, payload.layer.id);
+    ctx.layers.factory.addLayer(payload.frameId, payload.layer, insertAt);
+    ctx.layers.factory.activate(payload.frameId, payload.layer.id);
   },
 };
 

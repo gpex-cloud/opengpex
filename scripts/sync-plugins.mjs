@@ -94,7 +94,7 @@ const registryTemplate = `/**
  * Run "pnpm sync-plugins" to refresh this core registry.
  */
 
-import { registerVectorSourceContributor } from '../../core/engine/pipeline/scene/vectorSources';
+import { registerVectorSourceContributor } from '../../core/engine/pipeline/scene/translators';
 import { registerFrameDraftCodec } from '../../core/state/drafts';
 
 ${importStatements.join('\n')}

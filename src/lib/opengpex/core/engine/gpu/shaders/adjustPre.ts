@@ -65,9 +65,9 @@ import { FILMIC_WHITE_DOMAIN } from '@opengpex/editor/core/engine/color/filmic';
 
 /**
  * `AdjustPreUniforms` size in bytes: `uv_rect` vec4 (16) + `flags` vec4 (16)
- * + `adj_rect` vec4 (16) + `src_size` vec4 (16) = 64.
+ * + `adj_rect` vec4 (16) + `src_size` vec4 (16) + 'solid_color' vec4 (16) = 80.
  */
-export const ADJUST_PRE_UNIFORM_BUFFER_SIZE = 64;
+export const ADJUST_PRE_UNIFORM_BUFFER_SIZE = 80;
 
 /** Number of 4-byte slots in `AdjustPreUniforms`. */
 export const ADJUST_PRE_UNIFORM_FLOATS = ADJUST_PRE_UNIFORM_BUFFER_SIZE / 4;
@@ -108,9 +108,17 @@ struct AdjustPreUniforms {
   // am_uv = (uv * src_size.xy - adj_rect.xy) / adj_rect.zw. An uncropped
   // layer passes (0, 0, assetW, assetH), which collapses to uv (identity).
   adj_rect : vec4<f32>,
-  // (assetWidth, assetHeight, 0, 0) — the source content size in asset pixels,
-  // so the fragment can convert its normalized uv to asset pixels.
+  // (assetWidth, assetHeight, 0, solid_flag) — the source content size in asset
+  // pixels, so the fragment can convert its normalized uv to asset pixels. slot z
+  // is unused (0); slot w is the DECLARATIVE SOLID flag: when 1, the sampled texel
+  // is DISCARDED and 'solid_color' (working-LINEAR straight alpha) is used instead
+  // — the bound texture is the shared 1×1 white binding formality.
   src_size : vec4<f32>,
+  // The declarative solid colour (working-gamut LINEAR straight-alpha RGBA).
+  // Read only when src_size.w == 1; combined with flags.x=1 (linear) / flags.y=0
+  // (working gamut) / flags.z=0 (SDR passthrough) the normalize below is an exact
+  // pass-through of the declaration.
+  solid_color : vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> pre : AdjustPreUniforms;
@@ -153,6 +161,17 @@ fn fs_adjust_pre(in : PreVSOut) -> @location(0) vec4<f32> {
   let src_in_bitmap = !(in.uv.x < 0.0 || in.uv.y < 0.0 || in.uv.x > 1.0 || in.uv.y > 1.0);
   if (!src_in_bitmap) {
     src = vec4<f32>(0.0);
+  }
+
+  // ── Declarative solid fill ──
+  // src_size.w == 1: the colour is the 'solid_color' uniform (working-LINEAR
+  // straight alpha), NOT the texture sample — the shared 1×1 white texture bound
+  // at pre_tex is a binding formality whose texel is discarded here (the bake's
+  // uv_rect is the full [0,1] domain over a 1×1 target, so the gate above never
+  // fires for it). The caller packs flags.x=1 / flags.y=0 / flags.z=0 alongside,
+  // so the normalize below is an exact pass-through of the declaration.
+  if (pre.src_size.w > 0.5) {
+    src = pre.solid_color;
   }
 
   // Normalise the raw sample into WORKING-space
@@ -230,6 +249,14 @@ export function packAdjustPreUniform(
   whiteDomain: number = FILMIC_WHITE_DOMAIN,
   adjRect?: { cropX: number; cropY: number; contentW: number; contentH: number },
   srcSize?: { width: number; height: number },
+  /**
+   * DECLARATIVE SOLID colour (working-LINEAR straight-alpha RGBA). When
+   * present, `src_size.w` packs the solid flag and 'solid_color' carries the
+   * value; the fragment shader then replaces the texture sample with it. The
+   * caller must pair this with `sourceIsLinear = true`, `gamutId = 0` and
+   * `intent = 0` so the normalize step passes the declaration through.
+   */
+  solidColor?: readonly [number, number, number, number],
 ): Float32Array {
   const out = new Float32Array(ADJUST_PRE_UNIFORM_FLOATS);
   out[0] = 0;
@@ -250,6 +277,18 @@ export function packAdjustPreUniform(
   out[12] = w;
   out[13] = h;
   out[14] = 0;
-  out[15] = 0;
+  // src_size.w: the DECLARATIVE SOLID flag (0 = sample the texture as usual).
+  out[15] = solidColor ? 1 : 0;
+  if (solidColor) {
+    out[16] = solidColor[0];
+    out[17] = solidColor[1];
+    out[18] = solidColor[2];
+    out[19] = solidColor[3];
+  } else {
+    out[16] = 0;
+    out[17] = 0;
+    out[18] = 0;
+    out[19] = 0;
+  }
   return out;
 }

@@ -181,7 +181,7 @@ export class VmaskCache {
       size: [maskW, maskH, 1],
       format: 'rgba8unorm',
       // COPY_SRC: the adjust-coverage consumer gathers per-stage bakes into
-      // one array texture by texture copy (prepareConfinementSources).
+      // one array texture by texture copy (prepareConfinedSources).
       usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC,
       label: `Vmask (${layerId})`,
     });

@@ -45,7 +45,7 @@ export async function decodeWebp(
 
   let displayBlob: Blob = file;
   let dimensions: { w: number; h: number };
-  let highDepthSource: DecodedPayload['highDepthSource'];
+  let highDepthData: DecodedPayload['highDepthData'];
 
   switch (decision.decodeChannel) {
     case 'image-bitmap': {
@@ -64,13 +64,9 @@ export async function decodeWebp(
       );
       dimensions = { w: decoded.width, h: decoded.height };
       displayBlob = decoded.displayBlob;
-      // Bare payload only — container/trc/gamut live on the sibling `colorIdentity`
-      // the entry injects (Path B).
-      highDepthSource = {
-        data: decoded.highDepthSource.data,
-        width: decoded.highDepthSource.width,
-        height: decoded.highDepthSource.height,
-      };
+      // Bare bytes only — container/trc/gamut live on the sibling `colorIdentity`
+      // the entry injects (Path B); geometry is the page dims (invariant).
+      highDepthData = decoded.highDepthData;
       break;
     }
 
@@ -104,6 +100,11 @@ export async function decodeWebp(
   const orientation = metadata.capture?.orientation;
   if (orientation && orientation !== 1) {
     const rotated = await applyExifOrientation(displayBlob, dimensions, orientation);
+    // Pre-rotation dims: the naked buffer is still in this geometry — capture
+    // them before `dimensions` is swapped to the post-EXIF (possibly swapped)
+    // display dims.
+    const nakedW = dimensions.w;
+    const nakedH = dimensions.h;
     displayBlob = rotated.blob;
     dimensions = rotated.dimensions;
 
@@ -111,17 +112,10 @@ export async function decodeWebp(
     // OWN width/height — `dimensions` above is already the rotated display dims.
     // Left pre-EXIF, the f16 buffer mismatches its display proxy: mis-strided /
     // mis-sized for orientation 5-8, mirrored/inverted for 2/3/4.
-    if (highDepthSource) {
-      const rotatedNaked = rotateNakedRgba(
-        highDepthSource.data, highDepthSource.width, highDepthSource.height, orientation,
-      );
-      highDepthSource = {
-        data: rotatedNaked.data,
-        width: rotatedNaked.width,
-        height: rotatedNaked.height,
-      };
+    if (highDepthData) {
+      highDepthData = rotateNakedRgba(highDepthData, nakedW, nakedH, orientation).data;
     }
   }
 
-  return [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0, highDepthSource }];
+  return [{ displayBlob, width: dimensions.w, height: dimensions.h, index: 0, highDepthData }];
 }

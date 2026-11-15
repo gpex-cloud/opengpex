@@ -29,7 +29,7 @@
  *   - wide (adobe-rgb / prophoto-rgb): the canvas has no native tag for these, so
  *     CPU-fold source → working P3 and tag a display-p3 canvas.
  * The full-precision line is NOT this function's concern — on the `vips` channel
- * it travels on the vips f16 `highDepthSource`, colour-management-agnostic at the
+ * it travels on the vips f16 high-depth line, colour-management-agnostic at the
  * source gamut; on the `wide-gamut-8` channel `decodeWideGamut8` lifts it (below).
  *
  * {@link decodeWideGamut8} — the `wide-gamut-8` channel (8-bit wide gamut read via
@@ -47,7 +47,6 @@ import type { WorkingColorSpace, GamutId } from '@opengpex/editor/core/types';
 import {
   convertImageDataColorSpace,
   wideGamut8ToF16,
-  type WideGamutHighDepth,
 } from '@opengpex/editor/core/engine/color';
 import { readSourceEncodedRgba } from '../utils';
 
@@ -93,10 +92,10 @@ export async function renderDisplayProxy(
 export interface WideGamut8Decoded {
   readonly displayBlob: Blob;
   /**
-   * Unclamped f16-linear naked pixels of the SOURCE gamut. Inline shape is
-   * compatible with `DecodeResult.highDepthSource`, so it mounts directly.
+   * Unclamped f16-linear naked pixels of the SOURCE gamut. BARE bytes —
+   * geometry is the sibling `width`/`height` (single geometry authority).
    */
-  readonly highDepthSource: WideGamutHighDepth;
+  readonly highDepthData: Uint16Array;
   readonly width: number;
   readonly height: number;
 }
@@ -119,5 +118,5 @@ export async function decodeWideGamut8(
   const { data, w, h } = await readSourceEncodedRgba(source);
   const highDepthSource = wideGamut8ToF16(data, w, h, srcGamut);
   const displayBlob = await renderDisplayProxy(data, w, h, srcGamut);
-  return { displayBlob, highDepthSource, width: w, height: h };
+  return { displayBlob, highDepthData: highDepthSource.data, width: w, height: h };
 }

@@ -19,6 +19,7 @@
 
 import { shapeToPathData } from '@opengpex/editor/core/geometry/operators/shape';
 import { computeFragmentCenter, getOrientationMatrix } from '@opengpex/editor/core/geometry/operators/transform';
+import { assertPayload, getLayerKind, TRANSPARENT_PIXEL } from './kinds';
 import { LAYER_ROLE_CONFIGS, HOST_LAYER_ORDER } from '@opengpex/editor/core/helpers/config';
 import {
   Layer, Frame, VectorMask, BitmapMask, LayerRole,
@@ -28,7 +29,7 @@ import {
 /** Type-safe role configuration index helper */
 const roleConfigMap = LAYER_ROLE_CONFIGS as Record<string, { label: string; order: number; follow: boolean } | undefined>;
 
-export const TRANSPARENT_PIXEL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
 
 /**
  * LayerFactory: Core business domain logic
@@ -41,6 +42,10 @@ export const LayerFactory = {
   // 1. Templates & Prototypes
   // =================================================================================
 
+  // ═══════════════════════════════════════════════════════════════════
+  // ① Creation — manufacturing new records (createLayer is THE entry;
+  // getBlank doubles as the field-clearing mask; masks/naming are creation hygiene)
+  // ═══════════════════════════════════════════════════════════════════
   /**
    * getNewFrame: Artboard production factory (formerly createFrame)
    * Standardizes the initial structure and default state of the artboard.
@@ -68,17 +73,30 @@ export const LayerFactory = {
   },
 
   /**
-   * getNewLayer: Layer production factory (formerly createLayer)
-   * Completes the ID and all default values, returning a complete layer instance.
+   * createLayer: THE single layer production entry. Completion pipeline:
+   *   shared blank template → generic live-layer template → factory-assigned
+   * id (`l-` prefix; each kind's normalize may override, e.g. the group row
+   * emits `g-`) → the kind row's `normalize` (payload validation, provenance
+   * stamp folding, per-type completion diffs) → forced `type` → the zero-rect
+   * visibleShape fixup.
+   *
+   * Derivative layer records inside the layer domain (fragments, paste,
+   * duplicates) also complete through here: their patch carries the inherited
+   * fields and the kind's normalize validates the inherited payload.
+   * `getBlank` remains public for role-clone assembly.
    */
-  getNewLayer(patch: Partial<Layer> = {}): Layer {
-    const id = patch.id || `l-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-
-    const layer = {
+  createLayer(type: Layer['type'] | 'blank', patch: Partial<Omit<Layer, 'type'>> = {}): Layer {
+    // 'blank' is a CREATION discriminator (empty placeholder host), not a
+    // layer kind: getLayerKind resolves it to the image kind MINUS its
+    // payload gate, and the record lands as an 'image' layer.
+    const kind = getLayerKind(type);
+    assertPayload(kind, patch);
+    const completed: Partial<Layer> = {
       ...this.getBlank(),
-      id,
-      name: 'New Layer',
-      type: 'image',
+      // The generic live-layer template: neutral pose, visible, interactive,
+      // host role. Per-type differences layer over it via the kind row's
+      // `normalize` (which also names the layer — e.g. the group container's
+      // dormant conventions).
       cx: 0,
       cy: 0,
       scale: 1,
@@ -90,45 +108,10 @@ export const LayerFactory = {
       interactive: true,
       flip: { h: false, v: false },
       bounding: { w: 0, h: 0 },
-      ...patch
-    } as Layer;
-
-    // 💡 Follows design principle: visibleShape always has meaning. If not specified, defaults to match bounding
-    if (layer.visibleShape && layer.visibleShape.rect.w === 0 && layer.visibleShape.rect.h === 0 && layer.bounding.w > 0) {
-      layer.visibleShape = asLocalShape({ x: 0, y: 0, w: layer.bounding.w, h: layer.bounding.h });
-    }
-
-    return layer;
-  },
-
-  /**
-   * getNewGroup: Group layer production factory.
-   * Creates a group layer with no pixel data, used purely for organizational grouping in the UI.
-   * Group layers are skipped by the rendering pipeline (type:'group' has no bitmap).
-   */
-  getNewGroup(patch: Partial<Layer> = {}): Layer {
-    const id = patch.id || `g-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-    return {
-      id,
-      name: patch.name || 'Group',
-      type: 'group',
-      src: TRANSPARENT_PIXEL,
-      assetId: 'asset-transparent-pixel',
-      cx: 0,
-      cy: 0,
-      scale: 1,
-      rotation: 0,
-      opacity: 1,
-      visible: true,
-      locked: false,
-      interactive: false,       // Groups are not hit-testable on canvas
-      flip: { h: false, v: false },
-      bounding: { w: 0, h: 0 },
-      vectorMasks: [],
-      bitmapMasks: [],
-      collapsed: false,
-      ...patch,
-    } as Layer;
+      ...kind.normalize(patch),
+      type: kind.type,
+    };
+    return completed as Layer;
   },
 
   /**
@@ -266,6 +249,9 @@ export const LayerFactory = {
   // 2. Structural Orchestration
   // =================================================================================
 
+  // ═══════════════════════════════════════════════════════════════════
+  // ② Triplet structure — host/exchange/frag mechanics, ordering, insertion
+  // ═══════════════════════════════════════════════════════════════════
   /**
    * expandLayers: Core structural completion, automatically completing Triplet sub-layers based on role configuration.
    */
@@ -477,25 +463,15 @@ export const LayerFactory = {
     return layer;
   },
 
-  /**
-   * resolveHostAbove: the host layer sitting directly ABOVE an insertion slot,
-   * i.e. the layer that will end up right on top of a layer inserted at `insertAt`.
-   * Resolves a triplet sub-layer (hostId) up to its host. Returns null when the
-   * slot is at the top of the stack or is undefined (no reference → push to top).
-   */
-  resolveHostAbove(frame: Frame, insertAt: number | undefined): Layer | null {
-    if (typeof insertAt !== 'number') return null;
-    const order = frame.layers.order;
-    if (insertAt >= order.length) return null;
-    const l = frame.layers.byId[order[insertAt]];
-    if (!l) return null;
-    return l.hostId ? (frame.layers.byId[l.hostId] ?? null) : l;
-  },
 
   // =================================================================================
   // 7. Layer Edge Identity
   // =================================================================================
 
+  // ═══════════════════════════════════════════════════════════════════
+  // ③ Feather/edge classification (pure feather algorithms live below the object:
+  // AA_MARGIN / patchEdgeFeatherRepad / computeFragmentFeathering)
+  // ═══════════════════════════════════════════════════════════════════
   /**
    * resolveLayerEdgeType: which physical carrier holds this layer's EDGE.
    * Feather-agnostic — it answers "where does the edge live", and every
@@ -666,53 +642,7 @@ patchEdgeFeatherRepad(
 // Pure functions for traversing the Cut-Link lineage tree (upward and downward).
 // Co-located with LayerFactory since both deal with layer structure & metadata.
 
-/**
- * findDownstreamFragments: Find all layers that were cut FROM a given layer.
- *
- * A downstream fragment is a layer whose `metadata.sourceLayerId` equals
- * the given layerId AND has an `assocMaskId` (confirming cut relationship,
- * not just a copy).
- *
- * @param layerId - The source layer to search downstream from
- * @param allLayers - All layers in the frame (flat array)
- * @returns Array of downstream cut fragment layers
- */
-export function findDownstreamFragments(layerId: string, allLayers: Layer[]): Layer[] {
-  return allLayers.filter(l =>
-    !l.hostId && // Only host layers are real fragments (skip exchange/frag triplet sub-layers)
-    l.metadata?.sourceLayerId === layerId && l.metadata?.assocMaskId
-  );
-}
 
-/**
- * findUpstreamAssetId: Trace upward through the Cut-Link chain to find the
- * original source assetId.
- *
- * Walks `metadata.sourceLayerId` links until it finds a layer with an `assetId`,
- * or reaches a dead end. Includes cycle detection.
- *
- * @param layerId - Starting layer id
- * @param frame - The frame containing all layers
- * @returns The root assetId, or null if not resolvable
- */
-export function findUpstreamAssetId(layerId: string, frame: Frame): string | null {
-  let current = frame.layers.byId[layerId];
-  const visited = new Set<string>();
-
-  while (current) {
-    if (visited.has(current.id)) return null; // cycle protection
-    visited.add(current.id);
-
-    // If current layer has an assetId, that's our root
-    if (current.assetId) return current.assetId;
-
-    // Walk up via sourceLayerId
-    const parentId = current.metadata?.sourceLayerId as string | undefined;
-    if (!parentId) return null;
-    current = frame.layers.byId[parentId];
-  }
-  return null;
-}
 
 /**
  * Anti-alias safety margin (px) added to the feather radius when expanding a

@@ -130,17 +130,18 @@ export async function buildGifFrameContent(
 
   const frameAssets = await Promise.all(
     framesToImport.map(async (f) => {
-      const { assetId, url: assetUrl } = await assets.register(f.displayBlob, {
+      const { assetId, url: assetUrl } = await assets.register({
+        displayBlob: f.displayBlob,
         width: f.width,
         height: f.height,
-        ...f.colorIdentity,
+        colorIdentity: f.colorIdentity,
         precomputedHash: fileHash ? `${fileHash}#${f.index}` : undefined,
       });
       return { assetId, assetUrl, delay: f.delay || 100, index: f.index, width: f.width, height: f.height };
     }),
   );
 
-  const frameLayers: Layer[] = frameAssets.map((fa, i) => LayerFactory.getNewLayer({
+  const frameLayers: Layer[] = frameAssets.map((fa, i) => LayerFactory.createLayer('image', {
     name: `Frame ${i + 1}`,
     src: fa.assetUrl,
     assetId: fa.assetId,
@@ -207,7 +208,7 @@ export async function importAnimatedGif(
   const firstLayerId = content.layers.order[0];
   const firstLayer = content.layers.byId[firstLayerId];
   const thumbResult = await pixels.image.resample(firstLayer.src, { maxSize: 512, format: 'image/webp', quality: 0.9 });
-  const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register(thumbResult.displayBlob, { width: thumbResult.width, height: thumbResult.height, precomputedHash: thumbResult.precomputedHash });
+  const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register({ displayBlob: thumbResult.displayBlob, width: thumbResult.width, height: thumbResult.height, precomputedHash: thumbResult.precomputedHash });
 
   // 4. Assemble and add frame
   const frameName = file.name.replace(/\.[^.]+$/, '');

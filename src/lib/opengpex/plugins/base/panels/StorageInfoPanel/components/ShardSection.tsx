@@ -11,27 +11,42 @@
 
 "use client";
 
-import React from "react";
+import React, { useState } from "react";
+import { ChevronRight, ChevronDown } from "lucide-react";
 import * as Prot from "../protocols";
 import { formatBytes } from "./shared";
 
 interface ShardSectionProps {
   shards: Prot.DBShardMetric[];
+  stateBytes: number;
 }
 
 /**
  * IndexedDB shard metrics section for the left dashboard column
  */
-export function ShardSection({ shards }: ShardSectionProps) {
+export function ShardSection({ shards, stateBytes }: ShardSectionProps) {
+  // Collapsed by default: the shard list is reference data, not a headline metric.
+  const [expanded, setExpanded] = useState(false);
   return (
     <div className="space-y-3 bg-[var(--bg-stage)] border border-[var(--border-subtle)] dark:border-white/[0.08] p-4 rounded-2xl">
-      <div className="text-[10px] font-black uppercase tracking-wider text-[var(--text-muted)] flex items-center justify-between">
-        <span>IndexedDB Shard Index</span>
-        <span className="font-mono text-[9px] text-[var(--text-muted)] ">
-          {shards.length} Shards
+      <div
+        onClick={() => setExpanded((v) => !v)}
+        className="text-[10px] font-black uppercase tracking-wider text-[var(--text-muted)] flex items-center justify-between cursor-pointer select-none"
+      >
+        <span className="flex items-center gap-1.5">
+          {expanded ? (
+            <ChevronDown size={12} />
+          ) : (
+            <ChevronRight size={12} />
+          )}
+          Store Shard Index
+        </span>
+        <span className="font-mono text-[9px] text-[var(--text-muted)] whitespace-nowrap">
+          {formatBytes(stateBytes)} / {shards.length} shards
         </span>
       </div>
 
+      {expanded && (
       <div className="space-y-1.5 text-[9px] font-mono">
         {shards.map((shard) => (
           <div
@@ -56,6 +71,7 @@ export function ShardSection({ shards }: ShardSectionProps) {
           </div>
         ))}
       </div>
+      )}
     </div>
   );
 }

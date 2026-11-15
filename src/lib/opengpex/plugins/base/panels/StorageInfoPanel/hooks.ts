@@ -21,18 +21,4 @@ export {
 } from './hooks/index';
 export type { ModelCacheFileEntry, ModelCacheGroup, ModelCacheInfo } from './hooks/index';
 
-import * as P from './protocols';
 
-/**
- * Copy reference details to clipboard
- */
-export const copyAssetUsages = (asset: P.AssetMetric) => {
-  const usageLines = asset.usages.map(u =>
-    `- [${u.source.toUpperCase()}] ${u.frameName}${u.layerName ? ` > ${u.layerName}` : ''}`
-  );
-  const text = `Asset ID: ${asset.id}\nSize: ${asset.size} bytes\nType: ${asset.type}\nReferences (${asset.refCount}):\n${usageLines.join('\n')}`;
-
-  navigator.clipboard.writeText(text).then(() => {
-    console.log('Copied asset usages to clipboard');
-  });
-};

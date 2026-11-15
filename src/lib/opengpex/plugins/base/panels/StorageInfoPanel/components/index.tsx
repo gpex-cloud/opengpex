@@ -20,3 +20,4 @@ export { AssetSectionHUD, AssetTreeNode } from './AssetSection';
 export { HistoryTreeNode } from './HistorySection';
 export { ShardSection } from './ShardSection';
 export { ModelCacheTreeNode } from './ModelCacheSection';
+export { StoreAuditHUD, StoreAuditTreeNode, StoreAuditDetails } from './StoreAuditSection';

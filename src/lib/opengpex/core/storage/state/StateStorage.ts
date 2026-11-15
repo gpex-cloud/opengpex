@@ -99,6 +99,27 @@ export class StateStorage {
   // Artboard reference tracking in memory for $O(1)$ dirty checking
   private lastSavedFrameRefs = new Map<string, Frame>();
 
+  /**
+   * One-shot credits allowing the NEXT save to write an EMPTY frame index.
+   * Minted only by sanctioned destructive flows (confirmed deletion of the
+   * last frame; LandingPage Start Fresh). See the guard in `save`.
+   */
+  private emptyIndexAuthorizations = 0;
+
+  /** Sanction the next empty-index save (consumed once; reset by any non-empty save). */
+  authorizeEmptyIndexSave(): void {
+    this.emptyIndexAuthorizations++;
+  }
+
+  /** Best-effort read of the currently persisted meta (null on any failure — the guard then stays open). */
+  private async readPersistedMeta(): Promise<ProjectMeta | null> {
+    try {
+      return await StateDriver.getItem<ProjectMeta>('project_meta');
+    } catch {
+      return null;
+    }
+  }
+
   constructor(
     private assets: AssetService,
     /**
@@ -116,6 +137,43 @@ export class StateStorage {
     try {
       const updates: Record<string, unknown> = {};
       const frameIds: string[] = [];
+
+      // ── EMPTY-INDEX GUARD (2026-11-14 wipe incident) ──
+      // The autosave must never silently shrink a NON-EMPTY persisted index
+      // to zero: that single write is what turned "workspace emptied once"
+      // into permanent data loss (the next boot's orphan-shard GC then
+      // physicalized it). An empty-index save is sanctioned only through
+      // explicit authorization — today: the confirmed deletion of the last
+      // frame (useEditorStore) and the LandingPage's Start Fresh. Anything
+      // else reaching this point with an empty order is a BUG: block the
+      // ENTIRE save (the previous good state stays on disk untouched) and
+      // leave a forensics-grade log for the next occurrence.
+      if (state.frames.order.length === 0) {
+        const prev = await this.readPersistedMeta();
+        const prevCount = prev?.frameIds?.length ?? 0;
+        if (prevCount > 0 && this.emptyIndexAuthorizations === 0) {
+          console.error(
+            '[StateStorage] EMPTY-INDEX SAVE BLOCKED — a save attempted to shrink the persisted frame index ' +
+            `${prevCount} → 0 without authorization. THE ENTIRE SAVE WAS SKIPPED; the previous state is intact on disk. ` +
+            `Previously persisted frame ids: [${(prev?.frameIds ?? []).join(', ')}]. ` +
+            'A code path emptied frames.order without a sanctioned deletion (confirmed frame-remove / Start Fresh). ' +
+            'Capture this stack and report it.',
+            new Error('EMPTY-INDEX SAVE BLOCKED (forensics stack)'),
+          );
+          return;
+        }
+        if (prevCount > 0) {
+          this.emptyIndexAuthorizations--;
+          console.info(
+            '[StateStorage] Sanctioned empty-index save. ' +
+            `Prev frames: [${(prev?.frameIds ?? []).join(', ')}]; credits left: ${this.emptyIndexAuthorizations}`,
+          );
+        }
+      } else {
+        // A non-empty save invalidates stale credits: authorization exists to
+        // bless the ONE transition into empty, not later unrelated saves.
+        this.emptyIndexAuthorizations = 0;
+      }
 
       // 1. Physical dirty checking based on === references
       const dirtyFrames = state.frames.order.map(id => state.frames.byId[id]).filter(f => this.lastSavedFrameRefs.get(f.id) !== f);
