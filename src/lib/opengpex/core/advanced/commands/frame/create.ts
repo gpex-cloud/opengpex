@@ -43,6 +43,7 @@ import { EditorCommand, EditorContextValue, LocalShape, asLocalShape } from '@op
 import { polygonToShape } from '@opengpex/editor/core/geometry/operators/polygon';
 
 import { getClipBox, getDefaultCanvasClipBox } from '@opengpex/editor/core/helpers/selection';
+import { createFrameThumbnail } from '@opengpex/editor/core/helpers/thumbnail';
 import { newBranchName, newBranchSourceFileName, newFrameId } from './_naming';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 import type { ImageMetadata } from '@opengpex/editor/core/files/types';
@@ -176,15 +177,16 @@ export const FrameCreateCommands = {
         };
 
         // ── Step 4: Generate thumbnail (bounds pre-aligned to composite region).
-        // WebP straight from the Worker: skips a PNG encode/decode round-trip,
-        // and the returned hash describes the stored artifact.
-        const thumbResult = await pixels.image.resample(bundle.url, { maxSize: 512, format: 'image/webp', quality: 0.9 });
-        const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register({
-          displayBlob: thumbResult.displayBlob,
-          width: thumbResult.width,
-          height: thumbResult.height,
-          precomputedHash: thumbResult.precomputedHash,
-        });
+        // The shared frame-thumbnail authority with an alpha-bounds scan: the
+        // baked composite is a fresh product with no precomputed contentBounds,
+        // so the helper scans its display blob once for the opaque-alpha bbox
+        // and crops the thumbnail to it — a composite with transparent margins
+        // yields a content-filling thumbnail instead of a see-through one.
+        const { assetId: thumbAssetId, src: thumbAssetUrl } = await createFrameThumbnail(
+          { pixels, assets },
+          { url: bundle.url, width: composited.width, height: composited.height },
+          { autoScan: true },
+        );
         const contentBounds = { x: 0, y: 0, w: composited.width, h: composited.height };
 
         // ── Step 5: Camera + base layer + new frame assembly ────────────────

@@ -409,6 +409,12 @@ export const LayerItem = React.memo(
                 setIsMasksExpanded={setIsMasksExpanded}
                 canMergeBack={canMergeBack}
                 canMergeBackAll={canMergeBackAll}
+                canRasterize={
+                  // Logical fragments are image-typed (a crop window on the
+                  // shared source asset), so rasterize must key on nature as
+                  // well as type.
+                  layer.nature === "logical" || layer.type !== "image"
+                }
                 mergeFragmentsCount={mergeFragmentsCount}
                 availableGroups={availableGroups}
                 currentGroupId={layer.groupId}

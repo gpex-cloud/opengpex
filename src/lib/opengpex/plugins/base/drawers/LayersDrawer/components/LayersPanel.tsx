@@ -19,7 +19,7 @@
 
 "use client";
 
-import React, { useRef, useMemo, useState } from "react";
+import React, { useEffect, useRef, useMemo, useState } from "react";
 import {
   Layers,
   Eye,
@@ -139,6 +139,21 @@ export function LayersPanel({
       setIsScrolling(false);
     }, 150);
   };
+
+  // Reveal the active layer row on an ACTIVE-LAYER CHANGE driven from outside
+  // this panel (the seek path: the animation player selects the target frame's
+  // layer). `nearest` is a no-op when the row is already in view, so regular
+  // in-panel clicks don't jerk the list; a user scroll in progress takes
+  // precedence. Rows carry their layer id as the DOM id (Reorder.Item), and a
+  // collapsed-group child has no row yet — that stays unrevealed (GIF frame
+  // layers, the seek source, are never grouped).
+  const lastActiveScrollRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activeLayerId || activeLayerId === lastActiveScrollRef.current) return;
+    lastActiveScrollRef.current = activeLayerId;
+    if (isScrolling) return;
+    document.getElementById(activeLayerId)?.scrollIntoView({ block: "nearest" });
+  }, [activeLayerId, isScrolling]);
 
   const hostLayers = useMemo(
     () =>

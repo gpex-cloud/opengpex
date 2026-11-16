@@ -25,7 +25,7 @@ import FancyButton from "@opengpex/editor/widgets/FancyButton";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import type { CommandInstance } from "@opengpex/editor/core/types";
 import type { AnimatedImagesConfig } from "../protocols";
-import type { AnimatedImageSequence } from "../hooks";
+import type { AnimatedImageSequence } from "../sequence";
 
 interface ImagesExportProps {
    config: AnimatedImagesConfig;

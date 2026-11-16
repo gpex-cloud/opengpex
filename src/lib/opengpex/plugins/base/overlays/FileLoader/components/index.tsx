@@ -203,13 +203,19 @@ export function FileLoaderComponent() {
           stacking context, which would cap this layer at 100 and let stage
           overlays (marching ants, 300) paint over it. As a sibling it competes
           in the root context at NOTIFICATION, above stage overlays and modal
-          backdrops alike. */}
+          backdrops alike. Both HUDs below declare deferToPrompt: the importing
+          HUD would otherwise paint over the frame-count / overwrite dialogs it
+          triggers itself, and the drop-target HUD would advertise a new import
+          while the user is mid-decision on the current one. The underlying
+          signal is never cleared, so the importing HUD reappears on its own
+          once the prompt resolves. */}
       <div
         className="fixed inset-0 flex items-center justify-center p-4 pointer-events-none"
         style={{ zIndex: EDITOR_Z_INDEX.MODAL.NOTIFICATION }}
       >
         <EditorHUD
           isVisible={isOver}
+          deferToPrompt
           title="Ready to Drop"
           subtitle="Release to add as new project"
           icon={
@@ -220,6 +226,7 @@ export function FileLoaderComponent() {
         />
         <EditorHUD
           isVisible={isImporting}
+          deferToPrompt
           title={getImportingTitle(importingSignal)}
           subtitle={importingSignal?.subtitle ?? "Preparing image for workspace"}
           icon={

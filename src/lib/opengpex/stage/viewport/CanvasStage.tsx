@@ -19,7 +19,7 @@
 
 'use client';
 
-import React, { useRef, useLayoutEffect, useEffect, useCallback } from 'react';
+import React, { useRef, useLayoutEffect, useEffect, useCallback, useMemo } from 'react';
 import { PERF_MON } from '@opengpex/editor/core/helpers/config';
 import { useEditorState, useEditorServices } from '@opengpex/editor/core/context';
 import { useFastSync } from '@opengpex/editor/core/state/volatile';
@@ -29,6 +29,11 @@ import {
   GpuDevice,
   DISPLAY_CHANNEL_SIGNAL_KEY,
 } from '@opengpex/editor/core/engine';
+import {
+  STAGE_OMITTED_LAYERS_SIGNAL_KEY,
+  omittedLayers,
+} from './CanvasStageFilter';
+import { mergeFrameSnapshot } from '@opengpex/editor/core/state/volatile/merge';
 import { RenderController } from '@opengpex/editor/core/engine/RenderController';
 
 /**
@@ -55,6 +60,19 @@ export default function CanvasStage() {
   // renderTick as a per-tick input — the controller diffs it itself, no
   // out-of-band dirty signaling needed.
   const channelMask = state.interaction.signals[DISPLAY_CHANNEL_SIGNAL_KEY];
+
+  // [Stage content filter] Sessions that present some layers elsewhere (the
+  // animation playback overlay) publish the layer ids to omit through the
+  // stage's OWN generic signal — the stage knows "skip these layers", never
+  // WHY (no playback/sequence vocabulary crosses this boundary). Memoized
+  // frame copy: the stable reference keeps the render caches warm (one
+  // rebuild on publish, none per playback frame). Document state is never
+  // written; clearing the signal restores the full frame.
+  const omittedLayerIds = state.interaction.signals[STAGE_OMITTED_LAYERS_SIGNAL_KEY] as readonly string[] | null;
+  const filteredFrame = useMemo(
+    () => omittedLayers(activeFrame, omittedLayerIds),
+    [activeFrame, omittedLayerIds],
+  );
 
   // ─── [Per-document HDR presentation switch] ───
   // `frame.hdrRender === true` selects the SURFACE mode (SDR: bgra8unorm +
@@ -133,9 +151,16 @@ export default function CanvasStage() {
   useFastSync(canvasRef, true, (v, f, cam) => {
     const canvas = canvasRef.current;
     if (!canvas || !f || !cam) return;
+    // During a playback session the stage renders the SILENCED frame (its
+    // layers re-merged with the fast-sync draft so live gestures on remaining
+    // layers still preview); otherwise the merged frame verbatim.
+    const renderedFrame =
+      omittedLayerIds && filteredFrame
+        ? mergeFrameSnapshot(v, filteredFrame).frame
+        : f;
     getController().renderTick({
       canvas,
-      frame: f,
+      frame: renderedFrame,
       camera: cam,
       viewportDim: state.ui.viewportDim,
       dpr: window.devicePixelRatio || 1,

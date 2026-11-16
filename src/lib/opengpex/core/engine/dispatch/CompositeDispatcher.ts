@@ -74,6 +74,8 @@ import type {
   LayerPoseOverride,
 } from '@opengpex/editor/core/types';
 import { asWorldShape } from '@opengpex/editor/core/types';
+import { snapWorldRectEdgesToPixel } from '@opengpex/editor/core/geometry/operators/snapping';
+
 
 /**
  * The gamut of the GPU working buffer the readback comes out of.
@@ -210,7 +212,10 @@ export class CompositeDispatcher {
   }> {
     await this.warmHighDepth(layers);
 
-    const roiRect = roi.rect;
+    // The ROI must sit ON the document pixel lattice (see
+    // snapWorldRectEdgesToPixel): a bitmap baked off-lattice displays
+    // half-a-texel shifted on odd-dimension canvases.
+    const roiRect = snapWorldRectEdgesToPixel(roi.rect, frame.canvas);
     const roiW = Math.max(1, Math.ceil(roiRect.w));
     const roiH = Math.max(1, Math.ceil(roiRect.h));
 

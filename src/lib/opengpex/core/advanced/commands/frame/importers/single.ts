@@ -26,6 +26,7 @@
 import { asLocalShape, EditorContextValue } from '@opengpex/editor/core/types';
 import { getDefaultCanvasClipBox } from '@opengpex/editor/core/helpers/selection';
 import { newFrameId } from '../_naming';
+import { createFrameThumbnail } from '@opengpex/editor/core/helpers/thumbnail';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
 const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
@@ -70,14 +71,16 @@ export async function importSingleImage(
   // was never acceptable post-adjust).
   const bundle = await assets.storeBundle(page, sourceBlob);
 
-  // 2. Generate thumbnail (content bounds is precomputed during file decode).
-  // WebP straight from the Worker: skips a PNG encode/decode round-trip, and
-  // the returned hash describes the stored artifact (register consumes it).
-  const thumbResult = await pixels.image.resample(bundle.url, { maxSize: 512, format: 'image/webp', quality: 0.9 });
+  // 2. Generate thumbnail via the shared frame-thumbnail authority. The decode
+  // path precomputed the page's opaque-alpha bbox (`contentBounds`); cropping
+  // to it keeps canvases whose content sits in one corner (sprite sheets,
+  // pasted scans) from producing an all-transparent-looking thumbnail.
+  const { assetId: thumbAssetId, src: thumbAssetUrl } = await createFrameThumbnail(
+    { pixels, assets },
+    { url: bundle.url, width: page.width, height: page.height },
+    { rect: page.contentBounds },
+  );
   const contentBounds = page.contentBounds ?? { x: 0, y: 0, w: page.width, h: page.height };
-
-  // 3. Register thumbnail asset (dimensions from resample output)
-  const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register({ displayBlob: thumbResult.displayBlob, width: thumbResult.width, height: thumbResult.height, precomputedHash: thumbResult.precomputedHash });
 
   // 4. Camera calculation
   const { insets } = state.ui.theme.config;

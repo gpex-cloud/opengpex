@@ -23,6 +23,7 @@
 import { asLocalShape, Layer, EditorContextValue, NormalizedState, CameraState, LocalShape, Dimensions } from '@opengpex/editor/core/types';
 import type { ImageMetadata } from '@opengpex/editor/core/files/types';
 import { getDefaultCanvasClipBox } from '@opengpex/editor/core/helpers/selection';
+import { createFrameThumbnail } from '@opengpex/editor/core/helpers/thumbnail';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
 const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
@@ -113,7 +114,15 @@ export async function buildGifFrameContent(
       for (let i = 0; i < totalFrames; i += step) {
         const si = framesToImport[i];
         const delay = keepFps ? (si.delay || 100) : (si.delay || 100) * step;
-        sampled.push({ ...si, delay, index: sampled.length });
+        // Keep the ORIGINAL source index in `index` — do NOT renumber to the
+        // sampled slot. The per-frame asset id mints as `${fileHash}#${index}`,
+        // whose contract is "frame `index` of this source file": the same id
+        // must resolve to the same frame regardless of which decimation choice
+        // produced it, or content-addressed dedupe in `register` silently
+        // returns a DIFFERENT frame for that slot (previously: renumbered ids
+        // collided with an earlier import's records, so a decimated re-import
+        // rendered the old import's first-N consecutive frames).
+        sampled.push({ ...si, delay });
       }
       framesToImport = sampled;
       actions.notifyHUD(
@@ -137,7 +146,7 @@ export async function buildGifFrameContent(
         colorIdentity: f.colorIdentity,
         precomputedHash: fileHash ? `${fileHash}#${f.index}` : undefined,
       });
-      return { assetId, assetUrl, delay: f.delay || 100, index: f.index, width: f.width, height: f.height };
+      return { assetId, assetUrl, delay: f.delay || 100, index: f.index, width: f.width, height: f.height, contentBounds: f.contentBounds };
     }),
   );
 
@@ -149,7 +158,15 @@ export async function buildGifFrameContent(
     locked: false,
     visible: i === 0,
     bounding: { w: fa.width, h: fa.height },
-    visibleShape: asLocalShape({ x: 0, y: 0, w: fa.width, h: fa.height }),
+    // Crop window = the frame's own opaque-content bbox (decode precomputes it
+    // per page). The window stays in source-canvas coordinates and is NOT
+    // re-based: the layer's local space remains the full logical canvas, so
+    // the cropped region renders exactly where it always did — the transparent
+    // margins it excludes contribute nothing to compositing. What it changes:
+    // the LayersDrawer tile (object-view-box against source dims) shows the
+    // frame's content filling the square instead of a mostly transparent
+    // checkerboard when content sits in one corner.
+    visibleShape: asLocalShape(fa.contentBounds ?? { x: 0, y: 0, w: fa.width, h: fa.height }),
     metadata: {
       gifSequenceId,
       gifFrameIndex: i, gifFrameDelay: fa.delay, gifTotalFrames: framesToImport.length,
@@ -202,13 +219,21 @@ export async function importAnimatedGif(
   const content = await buildGifFrameContent(ctx, decoded, rawFileHash);
   if (!content) return ''; // User cancelled
 
-  // 3. Generate thumbnail — WebP straight from the Worker: skips a PNG
-  // encode/decode round-trip, and the returned hash describes the stored
-  // artifact (register consumes it).
+  // 3. Generate thumbnail via the shared frame-thumbnail authority. GIF frames
+  // composite over the full logical canvas, so the first frame's content can
+  // sit in one small region — the decode-precomputed `contentBounds` crop
+  // keeps the thumbnail showing actual content instead of a mostly
+  // transparent checkerboard. The first kept frame is always `pages[0]`
+  // (decimation sampling starts at index 0), so the page's bounds match the
+  // first layer's asset coordinates.
   const firstLayerId = content.layers.order[0];
   const firstLayer = content.layers.byId[firstLayerId];
-  const thumbResult = await pixels.image.resample(firstLayer.src, { maxSize: 512, format: 'image/webp', quality: 0.9 });
-  const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register({ displayBlob: thumbResult.displayBlob, width: thumbResult.width, height: thumbResult.height, precomputedHash: thumbResult.precomputedHash });
+  const firstPage = decoded.pages[0];
+  const { assetId: thumbAssetId, src: thumbAssetUrl } = await createFrameThumbnail(
+    { pixels, assets },
+    { url: firstLayer.src, width: firstPage.width, height: firstPage.height },
+    { rect: firstPage.contentBounds },
+  );
 
   // 4. Assemble and add frame
   const frameName = file.name.replace(/\.[^.]+$/, '');

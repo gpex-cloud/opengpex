@@ -146,8 +146,33 @@ interface GifencGlobals {
     finish(): void;
     bytes(): Uint8Array;
   };
-  quantize: (rgba: Uint8Array, maxColors: number) => number[][];
-  applyPalette: (rgba: Uint8Array, palette: number[][]) => Uint8Array;
+  quantize: (rgba: Uint8Array, maxColors: number, opts?: { format?: string }) => number[][];
+  applyPalette: (rgba: Uint8Array, palette: number[][], format?: string) => Uint8Array;
+}
+
+/**
+ * GIF has no partial transparency: every palette entry is either fully
+ * opaque or the single transparent slot. Anti-aliased edges in the source
+ * RGBA carry LOW-alpha pixels that are nearly invisible on screen — if they
+ * reach the quantizer with their small alphas intact, rgba4444 clusters them
+ * into opaque slots and they materialize as stray solid-colored pixels in
+ * the output (a phantom pixel in a shape corner, stray dots along a stroke).
+ *
+ * Binarizing the alpha channel BEFORE quantization turns this into
+ * deterministic behavior: pixels below the threshold become fully
+ * transparent (faint AA halos vanish), pixels at or above it become fully
+ * opaque (a hard edge — which GIF is anyway). The threshold sits at 50%:
+ * anything visibly more-than-halfway opaque belongs to the shape, anything
+ * fainter belongs to the background.
+ */
+export const GIF_ALPHA_THRESHOLD = 128;
+
+export function binarizeAlpha(rgba: Uint8Array, threshold: number = GIF_ALPHA_THRESHOLD): Uint8Array {
+  const out = new Uint8Array(rgba); // copy — callers may keep the original
+  for (let i = 3; i < out.length; i += 4) {
+    out[i] = out[i] >= threshold ? 255 : 0;
+  }
+  return out;
 }
 
 async function ensureGifuctJs(): Promise<GifuctJsGlobals> {
@@ -240,10 +265,20 @@ export class GifHandler implements ImageFormatHandler {
     const rgba = new Uint8Array(imageData.data.buffer);
 
     const gif = gifenc.GIFEncoder();
-    const palette = gifenc.quantize(rgba, 256);
-    const indexed = gifenc.applyPalette(rgba, palette);
+    // Same transparency contract as encodeSequence: alpha binarization first
+    // (GIF has no partial transparency — see binarizeAlpha), then rgba4444
+    // quantization keeps an alpha channel so transparent pixels survive as
+    // one palette slot instead of collapsing onto a near-opaque color.
+    const binarized = binarizeAlpha(rgba);
+    const palette = gifenc.quantize(binarized, 256, { format: 'rgba4444' });
+    const transparentIndex = palette.findIndex((c) => c[3] === 0);
+    const indexed = gifenc.applyPalette(binarized, palette, 'rgba4444');
 
-    gif.writeFrame(indexed, canvas.width, canvas.height, { palette, delay: 100 });
+    gif.writeFrame(indexed, canvas.width, canvas.height, {
+      palette,
+      delay: 100,
+      ...(transparentIndex >= 0 ? { transparent: true, transparentIndex } : {}),
+    });
     gif.finish();
 
     const output = gif.bytes();
@@ -268,12 +303,26 @@ export class GifHandler implements ImageFormatHandler {
     const gif = gifenc.GIFEncoder();
 
     for (const frame of frames) {
-      const palette = gifenc.quantize(frame.rgba, maxColors);
-      const indexed = gifenc.applyPalette(frame.rgba, palette);
+      // Alpha binarization first (GIF has no partial transparency — see
+      // binarizeAlpha: low-alpha AA pixels would materialize as stray opaque
+      // dots), then rgba4444 keeps a 4-bit alpha channel through quantization
+      // so fully transparent pixels cluster into one palette slot.
+      const rgba = binarizeAlpha(frame.rgba);
+      const palette = gifenc.quantize(rgba, maxColors, { format: 'rgba4444' });
+      const transparentIndex = palette.findIndex((c) => c[3] === 0);
+      const indexed = gifenc.applyPalette(rgba, palette, 'rgba4444');
+      const hasTransparency = transparentIndex >= 0;
       gif.writeFrame(indexed, frame.width, frame.height, {
         palette,
         delay: frame.delay,
         repeat: options?.loop ?? 0,
+        ...(hasTransparency
+          ? // Restore-to-background disposal: each frame is a full-canvas
+            // snapshot, so its transparent regions must reveal NOTHING from
+            // the previous frame — the default keep disposal would let the
+            // prior frame bleed through every transparent pixel.
+            { transparent: true, transparentIndex, disposal: 2 }
+          : {}),
       });
     }
 

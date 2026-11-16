@@ -41,6 +41,7 @@ export const EDITOR_Z_INDEX = {
     BACKDROP: 0,          // L0: canvas backdrop
     CONTENT: 100,         // L1: LayerStack (CanvasStage artboard wrapper)
     GIZMOS: 200,          // L2: STAGE_GIZMOS slot — guide lines, anchor points (island inside the transform stage)
+    PLAYBACK: 250,        // L2 component step: animation playback surface (sibling canvas above stage content, below ants)
     OVERLAY: 300,         // L3: STAGE_OVERLAY slot — marching ants, brush canvas surface, text editor
     GUIDES: 310,          // L3 component step: SmartGuides snap lines (one step above the ants, DOM order independent)
     FEEDBACK: 400,        // L4: stage-level displacement/angle chip

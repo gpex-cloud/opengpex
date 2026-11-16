@@ -34,9 +34,10 @@ import {
   FolderOutput,
   PenTool,
   Maximize2,
+  Image as ImageIcon,
 } from "lucide-react";
 import { useEditorServices, usePluginCommands } from "@opengpex/editor/core/context";
-import { ADV_LAYER_MERGE_BACK } from "@opengpex/editor/core/advanced/protocols";
+import { ADV_LAYER_MERGE_BACK, ADV_LAYER_MERGE_RASTERIZE } from "@opengpex/editor/core/advanced/protocols";
 import { PenOverlayAPI } from "@opengpex/editor/plugins/base/overlays/PenOverlay/protocols";
 import ActionDropdown, {
   ActionOption,
@@ -61,6 +62,8 @@ interface LayerMenuProps {
   canMergeBack?: boolean;
   /** Whether this layer has fragments that can be merged back (hole masks whose fragment still exists) */
   canMergeBackAll?: boolean;
+  /** Whether this layer can be rasterized into a pixel image (non-image layers and logical fragments) */
+  canRasterize?: boolean;
   /** Live fragment count behind `canMergeBackAll` (menu description) */
   mergeFragmentsCount?: number;
   /** Available group layers this layer can be moved into (empty if none or already in a group) */
@@ -87,6 +90,7 @@ export const LayerMenu = React.memo(
     setIsMasksExpanded,
     canMergeBack,
     canMergeBackAll,
+    canRasterize,
     mergeFragmentsCount,
     availableGroups,
     currentGroupId,
@@ -146,6 +150,17 @@ export const LayerMenu = React.memo(
         value: "merge-all-fragments",
         icon: <Layers size={12} />,
         description: `(${mergeFragmentsCount ?? 0})`,
+      });
+    }
+
+    // Rasterize — bake this layer into a pixel image. Offered on non-image
+    // layers (text / marker / solid fill / effect-carrying paint) and on
+    // logical fragments, where the bake also terminates their cut links.
+    if (canRasterize) {
+      options.push({
+        label: "Rasterize",
+        value: "rasterize",
+        icon: <ImageIcon size={12} />,
       });
     }
 
@@ -214,6 +229,8 @@ export const LayerMenu = React.memo(
         // Both actions dispatch the same unified mergeBack command —
         // the command auto-detects fragment vs source role based on layer metadata.
         actions.executeCommand(ADV_LAYER_MERGE_BACK, { layerId });
+      } else if (val === "rasterize") {
+        actions.executeCommand(ADV_LAYER_MERGE_RASTERIZE, { layerId });
       } else if (val === "release-path") {
         actions.executeCommand(PenOverlayAPI.commands.releaseToDraft.uid, { frameId: activeFrameId, layerId });
       } else if (val === "delete") {

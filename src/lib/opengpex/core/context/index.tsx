@@ -634,6 +634,31 @@ export function useEditorState() {
 }
 
 /**
+ * useBlockingPromptOpen: Reports whether a blocking prompt band overlay
+ * (FancyChoice / FancyConfirm at the PROMPT seat, 4800) is currently open.
+ *
+ * Surfaces rendered at the NOTIFICATION seat (4810) — one step ABOVE the
+ * prompt band — use this to defer to an open prompt: a progress or status HUD
+ * left visible while the user is being asked a question would paint directly
+ * on top of the dialog. The suppression rule is priority-based ("a blocking
+ * question outranks progress feedback"), NOT a claim that background work is
+ * paused, so it stays correct for future surfaces whose work genuinely
+ * continues in parallel (e.g. background download progress).
+ *
+ * Scope: PROMPT band only. DIALOG-band modals (4020) are deliberately NOT
+ * detected — the z-index spec guarantees transient error notifications stay
+ * visible above dialogs, and a blanket gate here would break that contract.
+ * Any future DIALOG-band suppression is a separate, per-surface decision.
+ *
+ * Render-time gating only: callers must keep their underlying state intact so
+ * the surface reappears on its own once the prompt resolves.
+ */
+export function useBlockingPromptOpen(): boolean {
+  const { state } = useEditorState();
+  return !!state.choice?.isVisible || !!state.confirm?.isVisible;
+}
+
+/**
  * usePluginConfig: Explicitly gets the dynamic configuration for a specific plug-in ID
  * @param pluginId Unique identifier of the plug-in (uid)
  */

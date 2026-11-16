@@ -38,7 +38,7 @@
 import type { Capabilities } from '@opengpex/editor/core/engine/gpu/device/Capabilities';
 import { UNKNOWN_CAPABILITIES } from '@opengpex/editor/core/engine/gpu/device/Capabilities';
 import type { GpuInfo } from '@opengpex/editor/core/engine/gpu/GpuInfo';
-import { GpuDevice, type SurfaceConfig } from '@opengpex/editor/core/engine/gpu/device/GpuDevice';
+import { GpuDevice, getSharedGpuDevice, type SurfaceConfig } from '@opengpex/editor/core/engine/gpu/device/GpuDevice';
 import type { Scene, LayerNode } from '@opengpex/editor/core/engine/pipeline/scene/Scene';
 import { TexturePool, estimateTextureBytes } from '@opengpex/editor/core/engine/gpu/resources/TexturePool';
 import { ResidentTransientCache } from '@opengpex/editor/core/engine/gpu/resources/ResidentTransientCache';
@@ -118,7 +118,7 @@ function onQueueDone(queue: GPUQueue, cb: () => void): void {
 const IDLE_RENDER_SHRINK_MS = 30_000;
 
 export class WebGpuEngine implements IEngine {
-  private readonly gpu = new GpuDevice();
+  private readonly gpu = getSharedGpuDevice();
 
   private texturePool: TexturePool | null = null;
   /**

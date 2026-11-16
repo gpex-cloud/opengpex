@@ -18,7 +18,7 @@
  */
 
 import { Matrix3x3 } from '../matrix';
-import { CameraState, Dimensions, Frame, Layer, WorldPoint, Rect, asWorldPoint, Point2D, WorldRect, asLocalRect, LocalRect } from '@opengpex/editor/core/types';
+import { CameraState, Dimensions, Frame, Layer, WorldPoint, Rect, asWorldPoint, Point2D, WorldRect, asLocalRect, asWorldRect, LocalRect } from '@opengpex/editor/core/types';
 import { getLayerWorldMatrix } from './transform';
 import { worldToLocalRect, localToWorldRect } from './space';
 
@@ -751,12 +751,49 @@ export function snapRectToPixel(
  * outward snap is impossible — floor/ceil of a non-empty rect spans ≥ 1) are
  * guarded to a 1px minimum anyway.
  */
-export function snapRectEdgesToPixel(rect: LocalRect): LocalRect {
+export function snapLocalRectEdgesToPixel(rect: LocalRect): LocalRect {
   const x0 = Math.floor(rect.x);
   const y0 = Math.floor(rect.y);
   const x1 = Math.ceil(rect.x + rect.w);
   const y1 = Math.ceil(rect.y + rect.h);
   return asLocalRect({ x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) });
+}
+
+/**
+ * snapWorldRectEdgesToPixel — the WORLD-space sibling of
+ * `snapLocalRectEdgesToPixel`: same outward pixel snap, expressed for the
+ * canvas-centered world basis the internal composite/bake paths use.
+ *
+ * The world origin sits at the canvas CENTER, so the document's texel
+ * boundaries live at `x = -canvas.w / 2 + i` — the INTEGERS on an even
+ * canvas, the HALF-integers on an odd one. A rect snapped in world integers
+ * (what `extractAABB` produces) therefore sits OFF the document lattice
+ * exactly when the canvas dimension is odd: a bitmap baked into such a ROI
+ * has its texels straddle two document texels and displays bilinearly
+ * averaged — soft and half-a-texel shifted (real-device A/B: the same
+ * content merges pixel-crisp on a 1024×1024 canvas and blurs on 115×384).
+ *
+ * The snap itself is not new logic — it delegates to `snapLocalRectEdgesToPixel`
+ * after translating into frame-local coordinates, where document texel
+ * boundaries are integral whatever the parity. Edges only ever move OUTWARD;
+ * for an even canvas the round-trip is bit-identical to the plain integer
+ * snap.
+ */
+export function snapWorldRectEdgesToPixel(rect: WorldRect, canvas: Dimensions): WorldRect {
+  const local = snapLocalRectEdgesToPixel(
+    asLocalRect({
+      x: rect.x + canvas.w / 2,
+      y: rect.y + canvas.h / 2,
+      w: rect.w,
+      h: rect.h,
+    }),
+  );
+  return asWorldRect({
+    x: local.x - canvas.w / 2,
+    y: local.y - canvas.h / 2,
+    w: local.w,
+    h: local.h,
+  });
 }
 
 // ─── Canvas Viewport Pixel-Snap ──────────────────────────────────────────────

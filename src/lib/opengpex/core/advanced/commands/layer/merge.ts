@@ -22,6 +22,8 @@
 import { EditorContextValue, EditorCommand, Layer } from '@opengpex/editor/core/types';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 import { EditorActions } from '@opengpex/editor/core/types';
+import { LayerUtils } from '@opengpex/editor/core/layer/utils';
+import { craftPayloadStrip } from '@opengpex/editor/core/layer/services/merging';
 
 /**
  * removeSourceHoles — remove the given hole masks from one source layer in a
@@ -213,6 +215,18 @@ export const LayerMergeCommands = {
         // Shared bake primitive (services/baking.ts): composite → register → warm.
         const bake = await layers.bake.bakeToAsset(activeFrame, [layer]);
 
+        // Sever every cut relationship touching the rasterized layer BEFORE
+        // its own record is rewritten: the source's hole masks stay as
+        // content (deletion never heals, neither does rasterization) and
+        // downstream fragments degrade to plain layers. Craft payloads are
+        // stripped for the same reason the merge bake strips them — stale
+        // craft metadata would misroute the craft panels on the new image
+        // layer.
+        const { targetPatch, otherPatches } = LayerUtils.breakCutLinks(activeFrame, layer.id);
+        for (const { layerId, patch } of otherPatches) {
+          actions.updateLayer(activeFrame.id, layerId, patch);
+        }
+
         layers.factory.updateLayer(activeFrame.id, (tx) => {
           tx.edit(layer.id)
             .setAsset({ assetId: bake.assetId, url: bake.url })
@@ -221,9 +235,14 @@ export const LayerMergeCommands = {
 
         // After rasterization, the layer becomes a pure bitmap — all non-destructive
         // effects (masks, adjustments) are now baked into the pixel data and must be
-        // cleared to prevent double-application during rendering.
+        // cleared to prevent double-application during rendering. The recorded cut
+        // contour is cleared too: resetWithBounds moved the layer's local origin,
+        // so the old rings now live in a stale plane (Refocus falls back to the rect).
         actions.updateLayer(activeFrame.id, layer.id, {
           type: 'image',
+          ...craftPayloadStrip(),
+          ...targetPatch,
+          contour: undefined,
           textData: undefined,
           bitmapMasks: [],
           vectorMasks: [],

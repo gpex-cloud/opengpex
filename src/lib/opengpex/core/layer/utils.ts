@@ -18,7 +18,7 @@
  */
 
 import {
-  Layer, asLocalShape, type Point2D,
+  Layer, Frame, asLocalShape, type Point2D,
 } from '@opengpex/editor/core/types';
 import { intersectPathWithPath } from '@opengpex/editor/core/geometry/poly-clip';
 import { parsePathDataToRings, ringsToPathData, shapeToPoint2D } from '@opengpex/editor/core/geometry/operators/point2d';
@@ -138,5 +138,84 @@ export const LayerUtils = {
     );
     if (!res || !res.pathData) return undefined;
     return parsePathDataToRings(res.pathData);
+  },
+
+  /**
+   * breakCutLinks: sever every cut relationship touching the target layer
+   * while the layer itself SURVIVES — the rasterize counterpart of the
+   * 'break-link' semantics of removeLayers. Deletion never heals, and
+   * neither does rasterization: hole masks stay as content (they render at
+   * their true cut line) and only the POINTERS die, so the holes stop
+   * counting as mergeable fragments while Merge Back can no longer reach a
+   * dangling provenance.
+   *
+   * The target can hold BOTH roles at once — a cut chain A→B→C makes B a
+   * fragment of A and the source of C — so both directions break in one
+   * call and one function guarantees "both die together", matching how the
+   * merge bake terminates its participants' relationships in a single pass:
+   *
+   * 1. Target is a fragment (`metadata.sourceLayerId` + `assocMaskId`):
+   *    its provenance pair is stripped, and the source's hole mask
+   *    (`id === assocMaskId`) loses `assocLayerId` — the mask itself stays.
+   *    Pure-copy provenance (`sourceLayerId` without `assocMaskId`) is
+   *    stripped too: a baked product carries no cut semantics.
+   * 2. Target is a cut source (other fragments reference it): each
+   *    referencing fragment's provenance is stripped (the same degradation
+   *    the merge bake applies to out-of-set downstream layers), because the
+   *    target's baked pixels no longer honor the cut relationship. The
+   *    target's own hole masks are NOT touched here — the bake bakes them
+   *    into pixels and the caller clears them with the rest of the layer's
+   *    masks.
+   *
+   * PURE: returns patches and performs no writes. The caller applies
+   * `targetPatch` together with its own baked-layer patch and each
+   * `otherPatches` entry through its state layer, in any order.
+   */
+  breakCutLinks(frame: Frame, targetId: string): {
+    targetPatch: Partial<Layer>;
+    otherPatches: Array<{ layerId: string; patch: Partial<Layer> }>;
+  } {
+    const target = frame.layers.byId[targetId];
+    if (!target) return { targetPatch: {}, otherPatches: [] };
+
+    const sourceLayerId = target.metadata?.sourceLayerId as string | undefined;
+    const assocMaskId = target.metadata?.assocMaskId as string | undefined;
+
+    const targetPatch: Partial<Layer> = {};
+    const otherPatches: Array<{ layerId: string; patch: Partial<Layer> }> = [];
+
+    // Direction 1 — target is a fragment: strip its provenance pair and
+    // unlink the source's hole mask (kept as content, pointer cleared).
+    if (sourceLayerId || assocMaskId) {
+      targetPatch.metadata = { ...target.metadata, sourceLayerId: undefined, assocMaskId: undefined };
+    }
+    if (sourceLayerId && assocMaskId) {
+      const source = frame.layers.byId[sourceLayerId];
+      if (source?.vectorMasks?.some(m => m.id === assocMaskId && m.assocLayerId)) {
+        otherPatches.push({
+          layerId: sourceLayerId,
+          patch: {
+            vectorMasks: source.vectorMasks.map(m =>
+              m.id === assocMaskId ? { ...m, assocLayerId: undefined } : m
+            ),
+          },
+        });
+      }
+    }
+
+    // Direction 2 — target is a cut source: degrade every fragment that
+    // references it (cut fragments via the full pair, copy fragments via
+    // sourceLayerId alone) to a plain layer with no cut lineage.
+    for (const id of frame.layers.order) {
+      if (id === targetId) continue;
+      const fragment = frame.layers.byId[id];
+      if (!fragment || fragment.metadata?.sourceLayerId !== targetId) continue;
+      otherPatches.push({
+        layerId: id,
+        patch: { metadata: { ...fragment.metadata, sourceLayerId: undefined, assocMaskId: undefined } },
+      });
+    }
+
+    return { targetPatch, otherPatches };
   }
 };

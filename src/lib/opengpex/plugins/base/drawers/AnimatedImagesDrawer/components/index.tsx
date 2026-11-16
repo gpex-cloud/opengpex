@@ -21,9 +21,9 @@
 
 import { Clapperboard } from "lucide-react";
 
-import { useAnimatedImagesPlayer, useAnimatedImagesExport } from "./hooks";
-import { PlayerBar } from "./components/PlayerBar";
-import { ImagesExport } from "./components/ImagesExport";
+import { useAnimatedImagesPlayer, useAnimatedImagesExport } from "../hooks";
+import { PlayerBar } from "./PlayerBar";
+import { ImagesExport } from "./ImagesExport";
 
 /**
  * AnimatedImagesComponent: Main plugin component for animated image playback and export.

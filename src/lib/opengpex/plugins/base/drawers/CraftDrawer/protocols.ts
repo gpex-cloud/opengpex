@@ -198,7 +198,7 @@ export interface CraftDrawerConfig {
   /** User-configured text style preset for next text layer creation */
   pendingTextData?: PendingTextData;
   /** Mosaic brush size preset */
-  mosaicSizePreset: 'S' | 'M' | 'L' | 'XL';
+  mosaicSizePreset: 'XS' | 'S' | 'M' | 'L' | 'XL';
   /** Active marker sub-type (persisted across tool switches; default resolves to first registered kind) */
   activeMarkerKind?: MarkerKind;
   /**
@@ -247,6 +247,7 @@ export type PendingMarkerStyle = Partial<MarkerDataBase> & {
 
 /** Preset sizes for mosaic tool (brushDiameter, blockSize) */
 export const MOSAIC_SIZE_PRESETS = {
+  XS: { brushDiameter: 10, blockSize: 4 },
   S: { brushDiameter: 20, blockSize: 8 },
   M: { brushDiameter: 40, blockSize: 16 },
   L: { brushDiameter: 80, blockSize: 32 },

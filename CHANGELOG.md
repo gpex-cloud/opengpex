@@ -2,6 +2,16 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.52
+
+- Layers: the layer menu gains Rasterize for layers that can be converted to pixels — a fragment's link to its source is cut (the source's hole stays as a permanent mask) and the baked result keeps its exact position, so Refocus and outline tools see the real pixels from then on
+- Image Formats: baked selections on odd-width canvases stay pixel-sharp — the bake no longer lands on a half-pixel grid that rendered noticeably blurrier and shifted by half a pixel compared to even-sized canvases
+- Playback: animated GIF playback moves onto a dedicated lightweight render pipeline — playback no longer recomposites the whole document on every frame, runs at the GIF's own frame timing, and gains a progress bar with click/drag seeking, pause/resume, and auto-selection of the current frame's layer in the layers panel; the playing frames are hidden from the static canvas so transparent GIFs don't show a double image
+- Image Formats: frame thumbnails are cropped to the image's actual content — sources whose pixels occupy only a small region of the canvas (such as an animation whose first frame is drawn in a corner) show that content instead of a mostly transparent thumbnail
+- Image Formats: choosing a frame limit when importing an animated GIF now samples the animation at even intervals, as the dialog describes — re-importing the same GIF with a frame limit no longer shows the first frames of an earlier import
+- Layers: re-cutting a feathered fragment from an older document with a hard selection no longer loses its soft edge — the cut bakes the rendered falloff instead of silently hardening the fragment and mismatching the source's soft hole (new documents could never reach this state; this is a compatibility fix for pre-2.0.49 documents)
+- Workspace: progress and status HUDs no longer paint on top of a question the editor is asking — while a blocking prompt (overwrite / frame-count / similar dialogs) is open, defer-enabled HUDs step aside and reappear on their own once it is answered, and stale feedback messages are cleared the moment the question is raised
+
 ## 2.0.51
 
 - Image Formats: 16-bit images keep one authoritative color identity end to end — cold reload, resize and cache eviction all read the same record, and the high-depth cache now stores bare pixels only (no per-entry color copies that could drift or degrade)

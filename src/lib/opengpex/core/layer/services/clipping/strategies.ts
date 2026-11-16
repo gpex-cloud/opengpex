@@ -88,6 +88,19 @@ export function createFragmentOperations(
    */
   function resolveNature(frame: Frame, layer: Layer, feather: number): 'logical' | 'physical' | undefined {
     if (feather > 0) return 'physical';
+    // A logical feathered fragment's soft edge is RENDER-TIME (tight geometry +
+    // one shape-global `featherPx` over the shared source pixels) — the pixels
+    // carry no falloff, so a hard logical recut would drop that implicit mask
+    // and harden the product along the old contour while the source keeps its
+    // soft hole (seam mismatch; band content shown fully opaque). Bake instead:
+    // the physical render bakes the rendered falloff into the product's alpha.
+    // Only LEGACY documents reach this state — the current pipeline always
+    // bakes a feathered peel on landing (mergeExchange) and routes feathered
+    // clip commands to the physical form, so no new logical feathered fragment
+    // can be produced. A PHYSICAL fragment carries the same `featherPx` purely
+    // as a transform record with its band already baked into the shared
+    // asset's alpha, so the gate must NOT fire there — hence the nature read.
+    if (layer.nature === 'logical' && (layer.visibleShape?.featherPx ?? 0) > 0) return 'physical';
     if ((layer.bitmapMasks ?? []).some(m => m.enabled)) return 'physical';
     if ((layer.vectorMasks ?? []).some(m => m.enabled && (m.feather ?? 0) > 0)) return 'physical';
     // The type half of the gate lives in the LayerKind table's `clippable`

@@ -19,7 +19,7 @@
 
 "use client";
 
-import React from "react";
+import React, { useCallback, useRef } from "react";
 import { Play, Pause, Square, SkipBack, SkipForward, Repeat } from "lucide-react";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import type { AnimatedImagesPlayerState, AnimatedImagesPlayerActions } from "../hooks";
@@ -32,11 +32,44 @@ interface AnimatedImagesPlayerBarProps {
 /**
  * PlayerBar: Animation playback controls.
  *
- * Renders Play/Pause/Stop/Prev/Next buttons with progress bar.
+ * Renders Play/Pause/Stop/Prev/Next buttons with a SEEKABLE progress bar.
  * Format-agnostic — works with any animation sequence type.
  */
 export const PlayerBar = React.memo(function PlayerBar({ state, actions }: AnimatedImagesPlayerBarProps) {
    const { currentIndex, isPlaying, loopEnabled, totalFrames, progress, sequence } = state;
+   const barRef = useRef<HTMLDivElement>(null);
+   const scrubbingRef = useRef(false);
+
+   /** Map a pointer x within the bar to a frame index. */
+   const indexFromEvent = useCallback(
+      (e: React.PointerEvent): number => {
+         const rect = barRef.current?.getBoundingClientRect();
+         if (!rect || rect.width === 0 || totalFrames <= 1) return 0;
+         const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+         return Math.round(ratio * (totalFrames - 1));
+      },
+      [totalFrames],
+   );
+
+   // Scrub contract: the playhead follows the pointer live through the cheap
+   // channel for the current mode, while the SELECTION write lands exactly
+   // once — on pointer-up. A drag would otherwise fire dozens of
+   // setActiveLayer dispatches.
+   const onPointerDown = (e: React.PointerEvent) => {
+      if (totalFrames <= 1) return;
+      scrubbingRef.current = true;
+      e.currentTarget.setPointerCapture(e.pointerId);
+      actions.seekTo(indexFromEvent(e), { select: false });
+   };
+   const onPointerMove = (e: React.PointerEvent) => {
+      if (!scrubbingRef.current) return;
+      actions.seekTo(indexFromEvent(e), { select: false });
+   };
+   const onPointerUp = (e: React.PointerEvent) => {
+      if (!scrubbingRef.current) return;
+      scrubbingRef.current = false;
+      actions.seekTo(indexFromEvent(e)); // default: select the target layer
+   };
 
    if (!sequence) return null;
 
@@ -52,12 +85,20 @@ export const PlayerBar = React.memo(function PlayerBar({ state, actions }: Anima
             </span>
          </div>
 
-         {/* Progress bar */}
-          <div className="h-1 w-full bg-[var(--bg-stage)] rounded-full overflow-hidden border border-[var(--border-subtle)]">
-             <div
-                className="h-full bg-teal-400/60 transition-all duration-75 rounded-full"
-                style={{ width: `${progress}%` }}
-             />
+         {/* Progress bar — clickable / draggable seek */}
+          <div
+             ref={barRef}
+             onPointerDown={onPointerDown}
+             onPointerMove={onPointerMove}
+             onPointerUp={onPointerUp}
+             className="h-2.5 -my-0.5 w-full flex items-center cursor-pointer touch-none"
+          >
+             <div className="h-1 w-full bg-[var(--bg-stage)] rounded-full overflow-hidden border border-[var(--border-subtle)]">
+                <div
+                   className="h-full bg-teal-400/60 transition-none rounded-full"
+                   style={{ width: `${progress}%` }}
+                />
+             </div>
           </div>
 
          {/* Controls */}
@@ -111,6 +152,7 @@ export const PlayerBar = React.memo(function PlayerBar({ state, actions }: Anima
                size="sm"
                className="text-[var(--text-muted)] hover:text-[var(--text-main)]"
             />
+
 
             {/* Loop toggle — right-aligned */}
             <ActionButton

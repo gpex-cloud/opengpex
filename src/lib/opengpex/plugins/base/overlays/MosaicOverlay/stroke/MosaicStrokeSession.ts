@@ -324,11 +324,34 @@ export class MosaicStrokeSession implements StrokeSession {
           if (py + blockSize <= r.y || py >= r.y + r.h) continue;
         }
 
-        // Circular brush check: block center must be within brush radius
-        const blockCx = px + blockSize / 2;
-        const blockCy = py + blockSize / 2;
-        const dx = blockCx - cx;
-        const dy = blockCy - cy;
+        // Circular brush coverage check: any block whose area intersects the
+        // brush circle gets pixelated. Distance from the circle center to the
+        // block's closest point must be within the radius. This guarantees the
+        // block under the pointer is always painted, so the mosaic footprint
+        // follows the visible brush ring instead of appearing offset by up to
+        // blockSize/2 (the previous center-in-radius test skipped blocks whose
+        // centers fell outside the circle even though they sat under it).
+        //
+        // Why a single click can look like "3x4 with a corner missing":
+        // the candidate window [cx - r, cx + r] spans 2r pixels, and the block
+        // index range floor((cx-r)/blockSize)..floor((cx+r)/blockSize) yields
+        // 3 OR 4 columns/rows depending on where the pointer falls relative to
+        // the grid (e.g. XS: r=5, blockSize=4, cx=0.5 → indexes -2..1 = 4
+        // columns). The outermost column is only grazed by the circle, and its
+        // diagonal corner block's closest point can sit outside the radius
+        // (XS worst case: sqrt(4.5^2 + 4.5^2) ≈ 6.36 > 5), so it is skipped —
+        // the missing corner is genuinely outside the brush circle. The
+        // stamped shape is therefore the TRUE projection of the brush circle
+        // onto the mosaic grid: which blocks light up and which corner gets
+        // cut varies with grid phase, but the painted footprint always equals
+        // exactly what the visible brush ring covers. This is by design; do
+        // not "fix" it by inflating the test radius (e.g. r + blockSize/2) —
+        // that would make the painted stroke wider than the nominal brush
+        // diameter.
+        const nearestX = Math.max(px, Math.min(cx, px + blockSize));
+        const nearestY = Math.max(py, Math.min(cy, py + blockSize));
+        const dx = nearestX - cx;
+        const dy = nearestY - cy;
         if (dx * dx + dy * dy > radius * radius) continue;
 
         // Pixelate this block

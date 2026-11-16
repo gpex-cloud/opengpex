@@ -848,6 +848,15 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
     case 'SET_HISTORY':
       return { ...state, history: action.payload };
 
+    // SHOW_CONFIRM / SHOW_CHOICE clear any transient HUD message raised BEFORE
+    // the prompt: by the time a blocking question is on screen that feedback is
+    // stale, and the NOTIFICATION seat (4810) sits above PROMPT (4800), so a
+    // leftover message would paint over the dialog. Transient notifications
+    // raised AFTER the prompt opened are unaffected by this clear and remain
+    // visible above it by design (see the z-index spec's stacking guarantees).
+    // Persistent progress surfaces are NOT cleared here — they hide themselves
+    // at render time via useBlockingPromptOpen and reappear when the prompt
+    // resolves.
     case 'SHOW_CONFIRM':
       return {
         ...state,
@@ -857,7 +866,8 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
           message: action.payload.message,
           type: action.payload.type || 'info',
           variant: action.payload.variant || 'square'
-        }
+        },
+        interaction: { ...state.interaction, hud: null }
       };
 
     case 'HIDE_CONFIRM':
@@ -866,7 +876,8 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
     case 'SHOW_CHOICE':
       return {
         ...state,
-        choice: { isVisible: true, ...action.payload }
+        choice: { isVisible: true, ...action.payload },
+        interaction: { ...state.interaction, hud: null }
       };
     case 'HIDE_CHOICE':
       return { ...state, choice: null };

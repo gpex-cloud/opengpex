@@ -21,10 +21,20 @@
 
 import React, { useEffect, useRef } from 'react';
 import { Motion } from '@opengpex/editor/core/motion';
+import { useBlockingPromptOpen } from '@opengpex/editor/core/context';
 
 interface EditorHUDProps {
   /** Whether visible */
   isVisible?: boolean;
+  /**
+   * Defer to an open blocking prompt (FancyChoice / FancyConfirm at PROMPT,
+   * 4800): while one is open this HUD hides, then reappears on its own when
+   * the prompt resolves — the caller keeps its underlying state intact.
+   * Opt-in because suppression is a per-surface semantic decision: error
+   * notifications intentionally stay ABOVE prompts (z-index spec stacking
+   * guarantee) and overlays below the prompt band must not defer.
+   */
+  deferToPrompt?: boolean;
   /** Message type determining color theme */
   type?: 'info' | 'success' | 'error';
   /** Icon element */
@@ -45,6 +55,7 @@ interface EditorHUDProps {
  */
 export default function EditorHUD({
   isVisible = true,
+  deferToPrompt = false,
   type,
   icon,
   title,
@@ -53,17 +64,19 @@ export default function EditorHUD({
   yOffset = 20
 }: EditorHUDProps) {
   const ref = useRef<HTMLDivElement>(null);
+  const promptOpen = useBlockingPromptOpen();
+  const effectiveVisible = isVisible && !(deferToPrompt && promptOpen);
 
   useEffect(() => {
-    if (isVisible && ref.current) {
-      Motion.fromTo(ref.current, 
-        { opacity: 0, scale: 0.95, y: yOffset }, 
+    if (effectiveVisible && ref.current) {
+      Motion.fromTo(ref.current,
+        { opacity: 0, scale: 0.95, y: yOffset },
         { opacity: 1, scale: 1, y: 0, duration: 0.4, ease: "expo.out", overwrite: "auto" }
       );
     }
-  }, [isVisible, yOffset]);
+  }, [effectiveVisible, yOffset]);
 
-  if (!isVisible) return null;
+  if (!effectiveVisible) return null;
 
   const isError = type === 'error';
 

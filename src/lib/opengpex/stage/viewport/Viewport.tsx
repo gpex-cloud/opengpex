@@ -34,6 +34,7 @@ import CanvasStage from "./CanvasStage";
 
 import { Frame, AssetService } from "@opengpex/editor/core/types";
 import { imageBitmapCache, getGpuEngine, GpuDevice } from "@opengpex/editor/core/engine";
+import { PlaybackStage } from "./PlaybackStage";
 
 interface ViewportProps {
   frameId: string;
@@ -213,6 +214,16 @@ function ViewportInner({ frame }: ViewportInnerProps) {
           style={{ zIndex: EDITOR_Z_INDEX.STAGE.CONTENT }}
         >
           <CanvasStage />
+        </div>
+
+        {/* Animation playback overlay (engine playback pipeline): sits above
+            the stage composite, below the stage overlays — a playing sequence
+            is silenced in the stage render and its frames present here. */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{ zIndex: EDITOR_Z_INDEX.STAGE.PLAYBACK }}
+        >
+          <PlaybackStage />
         </div>
 
         <PluginSlot

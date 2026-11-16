@@ -27,6 +27,7 @@
 import type { EditorContextValue } from '@opengpex/editor/core/types';
 import type { DecodeResult, DecodeOptions } from '@opengpex/editor/core/files/types';
 import { toFile, needsRasterSize, classifyDecode } from '@opengpex/editor/core/files';
+import { createFrameThumbnail } from '@opengpex/editor/core/helpers/thumbnail';
 import type { ImportOptions } from './_types';
 import { promptVectorDpi } from './vector';
 
@@ -340,23 +341,17 @@ export async function createFrameFromAsset(
 
   const canvas = { w: bounding.w, h: bounding.h };
 
-  // ── Thumbnail: crop the slice out of the shared asset and scale to the
-  // same 512 long edge the file-import thumbnails use (`importSingleImage`)
-  // — one Worker pass via resample's targetRect (crop + scale + WebP encode
-  // together); no main-thread decode of the (possibly huge) shared asset.
-  const thumbResult = await pixels.image.resample(asset.url, {
-    maxSize: 512,
-    targetRect: visibleShape,
-    sourceGamut: asset.gamut,
-    format: 'image/webp',
-    quality: 0.9,
-  });
-  const { assetId: thumbAssetId, url: thumbAssetUrl } = await assets.register({
-    displayBlob: thumbResult.displayBlob,
-    width: thumbResult.width,
-    height: thumbResult.height,
-    precomputedHash: thumbResult.precomputedHash,
-  });
+  // ── Thumbnail: the shared frame-thumbnail authority, cropping the slice out
+  // of the shared asset via its own crop window (NOT resampled whole): a
+  // fragment frame's canvas shows only the slice, so a full-asset thumbnail
+  // would picture a different document than the frame opens. One Worker pass
+  // via resample's targetRect (crop + scale + WebP encode together); no
+  // main-thread decode of the (possibly huge) shared asset.
+  const { assetId: thumbAssetId, src: thumbAssetUrl } = await createFrameThumbnail(
+    { pixels, assets },
+    { url: asset.url, gamut: asset.gamut, width: asset.width, height: asset.height },
+    { rect: visibleShape },
+  );
 
   // ── Frame metadata: the asset's own colour identity is the document truth
   // (bit depth / gamut), same anchor `branchFromSelection` uses. No EXIF is

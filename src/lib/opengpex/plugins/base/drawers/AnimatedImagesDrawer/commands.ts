@@ -19,8 +19,10 @@
 
 import { EditorContextValue, EditorCommand, Frame, Layer } from '@opengpex/editor/core/types';
 import type { GifHandler } from '@opengpex/editor/core/files/handlers/gif';
+import { blobToImageData } from '@opengpex/editor/core/engine/utils/pixel-utils';
 
 import * as P from './protocols';
+import { detectAnimatedImageSequences, frameDelayOf } from './sequence';
 
 /**
  * ANIMATED_IMAGES_COMMANDS: Declarative command configurations for animated images plugin.
@@ -76,14 +78,11 @@ async function exportAnimatedGif(
 ): Promise<Blob> {
    const { files } = ctx;
 
-   // Collect GIF sequence layers (host layers only — no parentId)
-   const hostLayers = activeFrame.layers.order
-      .map(id => activeFrame.layers.byId[id])
-      .filter((l): l is Layer => !!l && !l.hostId);
-
-   const sequenceLayers = hostLayers
-      .filter(l => l.metadata?.gifSequenceId)
-      .sort((a, b) => ((a.metadata?.gifFrameIndex as number) || 0) - ((b.metadata?.gifFrameIndex as number) || 0));
+   // The shared sequence orchestration: membership/order identical to what
+   // playback plays — every host layer of an animation frame, in layer-stack
+   // order — so an exported GIF never diverges from what was previewed.
+   const sequences = detectAnimatedImageSequences(activeFrame);
+   const sequenceLayers = sequences.length > 0 ? sequences[0].layers : [];
 
    // If no multi-frame sequence found, export single frame
    if (sequenceLayers.length <= 1) {
@@ -92,35 +91,35 @@ async function exportAnimatedGif(
       return files.encode(bitmap, 'image/gif', {});
    }
 
-   // Animated export: load each frame layer's asset directly
+   // Animated export: composite each frame through the real render pipeline
    ctx.actions.notifyHUD(`Encoding GIF: ${sequenceLayers.length} frames...`, 'info');
 
    const { w, h } = activeFrame.canvas;
    const gifFrames: Array<{ rgba: Uint8Array; width: number; height: number; delay: number }> = [];
 
    for (const seqLayer of sequenceLayers) {
-      // Load the frame layer's PNG asset directly (bypasses renderer)
-      const src = seqLayer.src;
-      if (!src) continue;
-
-      const bitmap = await createImageBitmap(await fetch(src).then(r => r.blob()));
-
-      // Extract RGBA from ImageBitmap
-      const canvas = new OffscreenCanvas(w, h);
-      const offCtx = canvas.getContext('2d')!;
-      offCtx.drawImage(bitmap, 0, 0, w, h);
-      bitmap.close();
-
-      const imageData = offCtx.getImageData(0, 0, w, h);
-      const rgba = new Uint8Array(imageData.data.buffer);
-
-      // Use per-frame delay or global override
-      const originalDelay = (seqLayer.metadata?.gifFrameDelay as number) || 100;
+      // Per-frame delay or global override — computed for every layer, with or
+      // without an asset (a blank layer is still a frame on the timeline).
       const delay = config.frameRateOverride > 0
          ? Math.round(1000 / config.frameRateOverride)
-         : originalDelay;
+         : frameDelayOf(seqLayer);
 
-      gifFrames.push({ rgba, width: w, height: h, delay });
+      // SOLO COMPOSITE (what the player shows): composite the whole frame with
+      // only this layer visible. Handed-drawing the layer's asset would ignore
+      // its pose (position/size/masks/adjustments) and stretch whatever the
+      // asset's intrinsic size is onto the full canvas — correct only for
+      // imported GIF frames whose asset happens to be canvas-sized, absurd for
+      // any painted/pasted layer. One full composite per frame also makes
+      // asset-less layers transparent frames by construction (no special case).
+      const composited = await pixels.render.compositeFrame(soloLayerView(activeFrame, seqLayer.id));
+      const imageData = await blobToImageData(composited.displayBlob);
+
+      gifFrames.push({
+         rgba: new Uint8Array(imageData.data.buffer, imageData.data.byteOffset, imageData.data.byteLength),
+         width: w,
+         height: h,
+         delay,
+      });
    }
 
    if (gifFrames.length === 0) {
@@ -130,4 +129,18 @@ async function exportAnimatedGif(
    // config.loop: boolean → GIF loop count: 0 = infinite loop, 1 = play once
    const gifHandler = files.getHandlerByMimeType('image/gif') as GifHandler;
    return gifHandler.encodeSequence(gifFrames, { loop: config.loop ? 0 : 1 });
+}
+
+/**
+ * soloLayerView — a read-only frame view in which exactly one HOST layer is
+ * visible (sub-lives follow their host untouched). Pure shallow copy: nothing
+ * is written to the document. This is the export-side twin of what playback
+ * shows (the pipeline hides every other sequence layer via the stage filter).
+ */
+function soloLayerView(frame: Frame, layerId: string): Frame {
+   const byId: Record<string, Layer> = {};
+   for (const [id, layer] of Object.entries(frame.layers.byId)) {
+      byId[id] = layer.hostId ? layer : { ...layer, visible: id === layerId };
+   }
+   return { ...frame, layers: { byId, order: frame.layers.order } };
 }

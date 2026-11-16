@@ -120,10 +120,6 @@ export function createBakeOperations(
   pixels: PixelService,
   assets: AssetService
 ) {
-  // geometry is unused today but kept in the factory signature for parity
-  // with the other service families (and for the R3 outline geometry needs).
-  void geometry;
-
   /**
    * bakeToAsset — the trio every bake site used to hand-roll: composite the
    * participants through the single WebGPU RenderGraph, register the result

@@ -400,3 +400,21 @@ export class GpuDevice {
   }
 }
 
+
+// ─── Engine-wide shared device instance ──────────────────────────────────────
+//
+// There is exactly ONE negotiated GpuDevice for the whole editor. The scene
+// engine (WebGpuEngine) drives init/attach/lifecycle on it; sibling pipelines
+// (playback) acquire the same instance from here — a public declaration point
+// for the device, not an accessor bolted onto the engine facade.
+
+let _sharedGpuDevice: GpuDevice | null = null;
+
+/** The editor's single GpuDevice instance (created on first call; `init`
+ * negotiates the adapter/device idempotently). Callers that only need the
+ * raw WebGPU device should still go through the instance's `getDevice()`
+ * AFTER the engine has booted — before `init` it reports null. */
+export function getSharedGpuDevice(): GpuDevice {
+  if (!_sharedGpuDevice) _sharedGpuDevice = new GpuDevice();
+  return _sharedGpuDevice;
+}

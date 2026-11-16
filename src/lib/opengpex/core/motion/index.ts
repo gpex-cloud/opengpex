@@ -246,31 +246,48 @@ export const Motion = {
 // dropping CPU from ~6-12% to near zero during static editing pauses.
 // ────────────────────────────────────────────────────────────────────────────────
 
-if (typeof document !== 'undefined') {
-  const IDLE_FPS = 4;
-  const FULL_FPS = 120;
-  const IDLE_TIMEOUT_MS = 2000;
+/** Idle power management state — module scope so the public activity-lock
+ * API (see setTickerActivityLock) shares one governor with the event
+ * listeners registered in the browser-only block below. */
+const IDLE_FPS = 4;
+const FULL_FPS = 120;
+const IDLE_TIMEOUT_MS = 2000;
+let _idleTimer: ReturnType<typeof setTimeout> | null = null;
+let _isIdle = false;
+/** Activity locks (ref-counted by token): sessions whose CONTENT is a
+ * continuous animation (e.g. the playback pipeline). While any lock is held,
+ * the idle throttle MUST NOT engage — an animation is by definition
+ * user-visible activity, even with zero input events (watching a progress
+ * bar produces no pointer/key events, and pointermove is deliberately not a
+ * wake event). Without the lock, ticker.fps(4) lands ~2s into playback and
+ * the playhead bursts 6-7 frames per tick (2026-11-16 device finding). */
+const _tickerActivityLocks = new Set<string>();
 
-  let _idleTimer: ReturnType<typeof setTimeout> | null = null;
-  let _isIdle = false;
+/** Restore full ticker rate and restart idle timer */
+function wakeFromIdle(): void {
+  if (_isIdle) {
+    _isIdle = false;
+    gsap.ticker.fps(FULL_FPS);
+  }
+  // Reset idle countdown
+  if (_idleTimer !== null) clearTimeout(_idleTimer);
+  _idleTimer = setTimeout(enterIdle, IDLE_TIMEOUT_MS);
+}
 
-  /** Restore full ticker rate and restart idle timer */
-  function wakeFromIdle() {
-    if (_isIdle) {
-      _isIdle = false;
-      gsap.ticker.fps(FULL_FPS);
-    }
-    // Reset idle countdown
+/** Drop ticker to low-power rate */
+function enterIdle(): void {
+  if (_tickerActivityLocks.size > 0) {
+    // An animation session holds the clock at full rate — never throttle.
+    // Re-arm the countdown instead; the session's release re-evaluates.
     if (_idleTimer !== null) clearTimeout(_idleTimer);
     _idleTimer = setTimeout(enterIdle, IDLE_TIMEOUT_MS);
+    return;
   }
+  _isIdle = true;
+  gsap.ticker.fps(IDLE_FPS);
+}
 
-  /** Drop ticker to low-power rate */
-  function enterIdle() {
-    _isIdle = true;
-    gsap.ticker.fps(IDLE_FPS);
-  }
-
+if (typeof document !== 'undefined') {
   // --- Tier 1: Page Visibility (full sleep when tab hidden) ---
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) {
@@ -307,4 +324,31 @@ if (typeof document !== 'undefined') {
 
   // Start initial idle timer
   wakeFromIdle();
+
+}
+
+/**
+ * Activity lock for continuous-animation sessions (playback pipeline etc.):
+ * while at least one lock is held, the idle power throttle never engages and
+ * the ticker stays at full rate — regardless of input events (watching an
+ * animation produces none). Acquire on session start, release on session
+ * end; locks are ref-counted by token.
+ */
+export function setTickerActivityLock(token: string, active: boolean): void {
+  if (active) {
+    const firstLock = _tickerActivityLocks.size === 0;
+    _tickerActivityLocks.add(token);
+    if (firstLock) {
+      // Either leave idle, or re-arm the countdown from now — the governor's
+      // next enterIdle() will see the lock and refuse to throttle.
+      gsap.ticker.fps(FULL_FPS);
+      wakeFromIdle();
+    }
+  } else {
+    _tickerActivityLocks.delete(token);
+    if (_tickerActivityLocks.size === 0) {
+      // Last release: restart the idle window from this point.
+      wakeFromIdle();
+    }
+  }
 }

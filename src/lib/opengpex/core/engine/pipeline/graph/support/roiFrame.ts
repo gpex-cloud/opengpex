@@ -38,7 +38,7 @@
  *     escaping the resident rect (zoom-out / pan) does.
  *   • derive (first frame or escape): the block-quantized visible rect
  *     (`getVisibleRect`) snapped OUTWARD to integer document pixels
- *     (`snapRectEdgesToPixel` — the texel-phase guarantee) then clipped to
+ *     (`snapLocalRectEdgesToPixel` — the texel-phase guarantee) then clipped to
  *     the document. Null when the viewport is fully off-document: NO
  *     rebuild, the stale roi keeps presenting (its quad mapping off-screen
  *     is what clears the swapchain via the present pass loadOp:'clear').
@@ -64,7 +64,7 @@ import type { LocalRect } from '@opengpex/editor/core/types';
 import { asLocalRect } from '@opengpex/editor/core/types';
 import { getVisibleRect } from '@opengpex/editor/core/geometry/operators/camera';
 import { getRectIntersection } from '@opengpex/editor/core/geometry/operators/space';
-import { snapRectEdgesToPixel } from '@opengpex/editor/core/geometry/operators/snapping';
+import { snapLocalRectEdgesToPixel } from '@opengpex/editor/core/geometry/operators/snapping';
 import { resolveRoiDensity, workingFormatBpp } from './compositeBudget';
 import {
   densityCompositeDims,
@@ -181,7 +181,7 @@ export function resolveRoiFrame(input: {
     // document pixel grid — rest misalignment + a phase jump on every rebuild.
     // Integer origin × integer density = zero phase, so rebuilds never move
     // block positions.
-    const snapped = snapRectEdgesToPixel(visible.rect);
+    const snapped = snapLocalRectEdgesToPixel(visible.rect);
     const clipped = getRectIntersection(snapped, docRect);
     if (!clipped) return offDocument;
     rect = clipped;

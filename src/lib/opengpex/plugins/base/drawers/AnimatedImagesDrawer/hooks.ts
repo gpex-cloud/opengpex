@@ -12,7 +12,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ * along with this program. If not, see <https://www.gnu.org/licenses/>.
  *
  * SPDX-License-Identifier: GPL-3.0-only
  */
@@ -21,75 +21,39 @@
 
 import { useMemo, useCallback, useEffect, useRef, useState } from 'react';
 import { useEditorState, useEditorServices, usePluginSelfConfig, usePluginCommands } from '@opengpex/editor/core/context';
-import { Frame, Layer } from '@opengpex/editor/core/types';
+import { Layer } from '@opengpex/editor/core/types';
 import { GifHandler } from '@opengpex/editor/core/files/handlers/gif';
+import {
+  PLAYBACK_SESSION_SIGNAL_KEY,
+  PLAYBACK_SEEK_SIGNAL_KEY,
+  type PlaybackSessionSpec,
+} from '@opengpex/editor/core/engine/playback';
+import { STAGE_OMITTED_LAYERS_SIGNAL_KEY } from '@opengpex/editor/stage/viewport/CanvasStageFilter';
+import { detectAnimatedImageSequences, frameDelayOf, type AnimatedImageSequence } from './sequence';
 import type { AnimatedImagesDrawerCommandsMap } from './commands.d';
 import type { AnimatedImagesConfig } from './protocols';
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Animation Sequence Detection (format-agnostic)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-export interface AnimatedImageSequence {
-   type: 'gif' | 'apng' | 'webp-anim';
-   sequenceId: string;
-   layers: Layer[];
-   totalFrames: number;
-   totalDuration: number; // ms
-}
-
-/**
- * Detect animation sequences in a frame by scanning layer metadata.
- * Supports multiple sequence types for future extensibility.
- */
-export function detectAnimatedImageSequences(frame: Frame): AnimatedImageSequence[] {
-   const hostLayers = frame.layers.order
-      .map(id => frame.layers.byId[id])
-      .filter((l): l is Layer => !!l && !l.hostId);
-
-   // Group by gifSequenceId
-   const gifGroups = new Map<string, Layer[]>();
-   for (const layer of hostLayers) {
-      const seqId = layer.metadata?.gifSequenceId as string | undefined;
-      if (seqId) {
-         if (!gifGroups.has(seqId)) gifGroups.set(seqId, []);
-         gifGroups.get(seqId)!.push(layer);
-      }
-   }
-
-   const sequences: AnimatedImageSequence[] = [];
-   for (const [sequenceId, layers] of gifGroups) {
-      if (layers.length <= 1) continue;
-      const sorted = layers.sort(
-         (a, b) => ((a.metadata?.gifFrameIndex as number) || 0) - ((b.metadata?.gifFrameIndex as number) || 0),
-      );
-      const totalDuration = sorted.reduce(
-         (sum, l) => sum + ((l.metadata?.gifFrameDelay as number) || 100),
-         0,
-      );
-      sequences.push({
-         type: 'gif',
-         sequenceId,
-         layers: sorted,
-         totalFrames: sorted.length,
-         totalDuration,
-      });
-   }
-
-   // Future: detect apngSequenceId, webpAnimSequenceId, etc.
-
-   return sequences;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// useAnimatedImagesPlayer: Smooth rAF-based playback with FPS override support
+// useAnimatedImagesPlayer — THIN UI CONTROLLER over the engine playback
+// pipeline (core/engine/playback/).
+//
+// 2026-11-16 architecture: this hook owns NO playback machinery — no rAF
+// loop, no per-frame document writes, no warm-up dance. Playback runs in the
+// engine's presentation pipeline; the hook's entire job is:
+//   1. publish a PlaybackSessionSpec (frame table from layer metadata) on
+//      play, clear it on pause/stop;
+//   2. land ONE document commit per session (the frame the playhead stops
+//      on) — the document-write budget of a whole playback session;
+//   3. seek double-channel: playhead via the pipeline (cheap), layer
+//      selection via setActiveLayer (user intent only — automatic ticks
+//      NEVER touch selection).
 // ═══════════════════════════════════════════════════════════════════════════════
 
 export interface AnimatedImagesPlayerState {
    sequence: AnimatedImageSequence | null;
    currentIndex: number;
    isPlaying: boolean;
-   isWarming: boolean; // Pre-warm phase (loading spinner)
+   isWarming: boolean; // decode-ahead pre-roll (loading spinner)
    loopEnabled: boolean;
    totalFrames: number;
    progress: number; // 0-100
@@ -102,6 +66,12 @@ export interface AnimatedImagesPlayerActions {
    prevFrame: () => void;
    nextFrame: () => void;
    gotoFrame: (index: number) => void;
+   /**
+    * SEEK (user intent): moves the playhead AND selects the target frame's
+    * layer (LayersDrawer highlight). `opts.select: false` skips the selection
+    * write — used by scrub drags that select once on pointer-up.
+    */
+   seekTo: (index: number, opts?: { select?: boolean }) => void;
    toggleLoop: () => void;
    recalculateFps: () => void;
 }
@@ -119,13 +89,11 @@ export function useAnimatedImagesPlayer(): {
    const [currentIndex, setCurrentIndex] = useState(0);
 
    const playingRef = useRef(false);
-   const rafRef = useRef<number | null>(null);
-   const lastFrameTimeRef = useRef(0);
    const currentIndexRef = useRef(0);
    const sequenceRef = useRef<AnimatedImageSequence | null>(null);
    const configRef = useRef<AnimatedImagesConfig>(selfConfig);
-   const warmedRef = useRef(false); // Texture cache pre-warm flag
-   const animationLoopRef = useRef<((ts: number) => void) | null>(null);
+   // Seek-request revision counter (see PLAYBACK_SEEK_SIGNAL_KEY).
+   const seekRevRef = useRef(0);
 
    // Keep config ref up to date (via effect to avoid ref access during render)
    useEffect(() => { configRef.current = selfConfig; });
@@ -140,30 +108,41 @@ export function useAnimatedImagesPlayer(): {
    // Keep sequence ref up to date (via effect to avoid ref access during render)
    useEffect(() => { sequenceRef.current = sequence; });
 
+   /** Per-frame delay table: user FPS override wins, else per-frame metadata. */
+   const frameDelays = useCallback((seq: AnimatedImageSequence): number[] => {
+      const fpsOverride = configRef.current?.frameRateOverride;
+      if (fpsOverride && fpsOverride > 0) {
+         const uniform = 1000 / fpsOverride;
+         return seq.layers.map(() => uniform);
+      }
+      return seq.layers.map(frameDelayOf);
+   }, []);
+
    /* eslint-disable react-hooks/refs */
-   // Synchronously terminate playback if sequenceId changes during render phase (Solution B)
+   // Synchronously terminate playback if sequenceId changes during render phase
    const prevSequenceIdRef = useRef<string | null>(null);
    if (prevSequenceIdRef.current !== sequence?.sequenceId) {
       prevSequenceIdRef.current = sequence?.sequenceId || null;
       playingRef.current = false;
-      if (rafRef.current) {
-         cancelAnimationFrame(rafRef.current);
-         rafRef.current = null;
-      }
    }
    /* eslint-enable react-hooks/refs */
 
-   // Reset playback state when sequence changes (e.g., user switches to another frame and back)
+   /** Clear both session signals (pause/stop/sequence-change/unmount). */
+   const clearSession = useCallback(() => {
+      actions.setStateSignal(PLAYBACK_SESSION_SIGNAL_KEY, null);
+      actions.setStateSignal(STAGE_OMITTED_LAYERS_SIGNAL_KEY, null);
+   }, [actions]);
+
+   // Reset playback state when sequence changes (e.g., user switches to another
+   // frame and back). The session signals are orphans by definition — the doc
+   // was never mutated during playback, so dropping them restores the
+   // committed document view verbatim.
    useEffect(() => {
-      // Stop any running animation loop
-      if (rafRef.current) {
-         cancelAnimationFrame(rafRef.current);
-         rafRef.current = null;
-      }
       playingRef.current = false;
       // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional state reset on sequence change
       setIsPlaying(false);
-      warmedRef.current = false; // Reset pre-warm cache for new sequence
+      setIsWarming(false);
+      clearSession();
 
       if (!sequence) return;
       const visibleIdx = sequence.layers.findIndex(l => l.visible !== false);
@@ -179,37 +158,35 @@ export function useAnimatedImagesPlayer(): {
    // (e.g., user deletes frames, or switches to a different GIF)
    useEffect(() => {
       if (!sequence || sequence.totalFrames === 0) return;
-      const delays = sequence.layers.map(l => (l.metadata?.gifFrameDelay as number) || 100);
-      const fps = GifHandler.calculateFps(delays);
+      const fps = GifHandler.calculateFps(sequence.layers.map(frameDelayOf));
       setSelfConfig({ frameRateOverride: fps });
    // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on sequenceId + totalFrames, not full objects
    }, [sequence?.sequenceId, sequence?.totalFrames]);
 
-   // Cleanup on unmount
+   // Cleanup on unmount: a session must never outlive its owner.
    useEffect(() => {
       return () => {
-         if (rafRef.current) cancelAnimationFrame(rafRef.current);
          playingRef.current = false;
+         clearSession();
       };
-   }, []);
+   }, [clearSession]);
 
    /**
-    * Show a specific frame: atomically set visibility for all sequence layers.
-    * This is a single updateFrame call — no intermediate render between hide/show.
+    * COMMIT — the ONLY document write in the playback system: land `index`
+    * as the sequence's committed visibility (single atomic updateFrame).
+    * At most once per pause / stop / paused-seek — never per animation tick.
     */
-   const showFrame = useCallback((index: number) => {
+   const commitFrame = useCallback((index: number) => {
       if (!activeFrame || !sequenceRef.current) return;
       const seq = sequenceRef.current;
       if (index < 0 || index >= seq.totalFrames) return;
 
-      // Build the entire updated byId map in one pass — atomic visibility switch
       const updatedById: Record<string, Layer> = { ...activeFrame.layers.byId };
       for (let i = 0; i < seq.layers.length; i++) {
          const layer = seq.layers[i];
          updatedById[layer.id] = { ...updatedById[layer.id], visible: i === index };
       }
 
-      // Single atomic state update — no gap between hiding old frame and showing new one
       actions.updateFrame(activeFrame.id, {
          layers: { byId: updatedById, order: activeFrame.layers.order },
       });
@@ -218,160 +195,68 @@ export function useAnimatedImagesPlayer(): {
       setCurrentIndex(index);
    }, [activeFrame, actions]);
 
-   /**
-    * Get the frame interval in ms.
-    * If frameRateOverride > 0, use it (uniform timing for all frames).
-    * Otherwise, use the per-frame gifFrameDelay from metadata.
-    */
-   const getFrameDelay = useCallback((index: number): number => {
-      const fpsOverride = configRef.current?.frameRateOverride;
-      if (fpsOverride && fpsOverride > 0) {
-         return 1000 / fpsOverride;
-      }
-      // Use per-frame delay from metadata
-      const seq = sequenceRef.current;
-      if (!seq) return 100;
-      const delay = (seq.layers[index]?.metadata?.gifFrameDelay as number) || 100;
-      return delay;
-   }, []);
-
-   /**
-    * requestAnimationFrame-based animation loop.
-    * Accumulates elapsed time and advances frames when the delay threshold is met.
-    * Respects loop config: when loop is off, stops at the last frame.
-    */
-   const animationLoop = useCallback((timestamp: number) => {
-      if (!playingRef.current || !sequenceRef.current) return;
-
-      const elapsed = timestamp - lastFrameTimeRef.current;
-      const delay = getFrameDelay(currentIndexRef.current);
-
-      if (elapsed >= delay) {
-         const seq = sequenceRef.current;
-         const isLastFrame = currentIndexRef.current === seq.totalFrames - 1;
-
-         if (isLastFrame && !configRef.current?.loop) {
-            // No loop: stop playback and reset to first frame
-            playingRef.current = false;
-            setIsPlaying(false);
-            if (rafRef.current) {
-               cancelAnimationFrame(rafRef.current);
-               rafRef.current = null;
-            }
-            showFrame(0);
-            return;
-         }
-
-         const nextIndex = (currentIndexRef.current + 1) % seq.totalFrames;
-         showFrame(nextIndex);
-         lastFrameTimeRef.current = timestamp;
-      }
-
-      rafRef.current = requestAnimationFrame((ts) => animationLoopRef.current?.(ts));
-   }, [showFrame, getFrameDelay]);
-
-   // Keep animationLoop ref up to date for all consumers that need latest version
-   useEffect(() => { animationLoopRef.current = animationLoop; });
-
-   /**
-    * Pre-warm: Set ALL sequence layers visible simultaneously in a single batch
-    * to force the rendering engine to create texture tiles for all of them.
-    * The canvas visually shows the current (top) frame unchanged since all frames
-    * occupy the same bounds and overlap. After 2 rAF ticks (ensuring GPU upload),
-    * restore the starting frame and begin normal playback.
-    */
-   const warmAndPlay = useCallback((startIndex: number) => {
-      if (!sequenceRef.current || !activeFrame) return;
-      const seq = sequenceRef.current;
-
-      setIsWarming(true);
-
-      // Step 1: Make ALL sequence layers visible, but move the current frame's
-      // layer to the END of the order array (top of z-stack) so it stays visually
-      // on top. This way all other textures get created underneath without any flash.
-      const currentLayerId = seq.layers[startIndex].id;
-      const warmOrder = [...activeFrame.layers.order];
-      const currentOrderIdx = warmOrder.indexOf(currentLayerId);
-      if (currentOrderIdx >= 0) {
-         warmOrder.splice(currentOrderIdx, 1);
-         warmOrder.push(currentLayerId);
-      }
-
-      const updatedById: Record<string, Layer> = { ...activeFrame.layers.byId };
-      for (let i = 0; i < seq.layers.length; i++) {
-         const layer = seq.layers[i];
-         updatedById[layer.id] = { ...updatedById[layer.id], visible: true };
-      }
-      actions.updateFrame(activeFrame.id, {
-         layers: { byId: updatedById, order: warmOrder },
-      });
-
-      // Step 2: Wait 3 rAF ticks (~48ms) for rendering engine to process all texture tiles
-      let tickCount = 0;
-      const waitForRender = () => {
-         if (!playingRef.current) {
-            // Cancelled during warm-up — restore original order and visibility
-            showFrame(startIndex);
-            actions.updateFrame(activeFrame.id, {
-               layers: { ...activeFrame.layers, order: activeFrame.layers.order },
-            });
-            setIsWarming(false);
-            return;
-         }
-         tickCount++;
-         if (tickCount < 3) {
-            rafRef.current = requestAnimationFrame(waitForRender);
-         } else {
-            // Step 3: Warm-up complete — restore original order + starting frame visibility
-            warmedRef.current = true;
-            setIsWarming(false);
-
-            // Restore original layer order and set only starting frame visible
-            const restoredById: Record<string, Layer> = { ...activeFrame.layers.byId };
-            for (let i = 0; i < seq.layers.length; i++) {
-               const layer = seq.layers[i];
-               restoredById[layer.id] = { ...restoredById[layer.id], visible: i === startIndex };
-            }
-            actions.updateFrame(activeFrame.id, {
-               layers: { byId: restoredById, order: activeFrame.layers.order },
-            });
-            currentIndexRef.current = startIndex;
-            setCurrentIndex(startIndex);
-
-            // Begin real playback
-            lastFrameTimeRef.current = performance.now();
-            rafRef.current = requestAnimationFrame(animationLoopRef.current!);
-         }
-      };
-
-      rafRef.current = requestAnimationFrame(waitForRender);
-   }, [activeFrame, actions, showFrame]);
-
    const play = useCallback(() => {
-      if (!sequence) return;
+      const seq = sequenceRef.current;
+      if (!seq || !activeFrame) return;
       playingRef.current = true;
       setIsPlaying(true);
+      setIsWarming(true);
 
-      if (!warmedRef.current) {
-         // First play: pre-warm texture caches before starting real playback
-         warmAndPlay(currentIndexRef.current);
-      } else {
-         // Already warmed: start immediately
-         lastFrameTimeRef.current = performance.now();
-         rafRef.current = requestAnimationFrame(animationLoopRef.current!);
-      }
-   }, [sequence, warmAndPlay]);
+      // Publish the session. The spec snapshots the frame table (already
+      // carrying the FPS override) — the pipeline never reads the document
+      // again while playing. `commands` is the plugin↔controller bridge
+      // (controller installs seek on start); onFrameChange feeds the UI.
+      const delays = frameDelays(seq);
+      const spec: PlaybackSessionSpec = {
+         sequenceId: seq.sequenceId,
+         loop: !!configRef.current?.loop,
+         startIndex: currentIndexRef.current,
+         frames: seq.layers.map((layer, i) => ({
+            layerId: layer.id,
+            assetId: layer.assetId,
+            src: layer.src,
+            delay: delays[i],
+         })),
+         onFrameChange: (index: number) => {
+            currentIndexRef.current = index;
+            setCurrentIndex(index);
+            setIsWarming(false); // first presented frame ends the pre-roll
+         },
+         onEnded: () => {
+            // Non-loop session finished (or device lost): the pipeline drops
+            // its presentation; the plugin ends the session document-side.
+            playingRef.current = false;
+            setIsPlaying(false);
+            setIsWarming(false);
+            clearSession();
+            commitFrame(0);
+         },
+      };
+
+      actions.setStateSignal(PLAYBACK_SESSION_SIGNAL_KEY, spec);
+      // Stage silence: the sequence's layer ids leave the stage frame while
+      // the overlay presents them (alpha frames would double-composite).
+      actions.setStateSignal(STAGE_OMITTED_LAYERS_SIGNAL_KEY, seq.layers.map(l => l.id));
+   }, [activeFrame, actions, clearSession, commitFrame, frameDelays]);
 
    const pause = useCallback(() => {
+      if (!playingRef.current) return;
       playingRef.current = false;
       setIsPlaying(false);
-      if (rafRef.current) {
-         cancelAnimationFrame(rafRef.current);
-         rafRef.current = null;
+      setIsWarming(false);
+      clearSession();
+      // Freeze the playhead into the document — the single commit of a
+      // playback session (the transient never mutated the document) — and
+      // select the stopped frame's layer so the LayersDrawer reveals it.
+      const stopped = currentIndexRef.current;
+      commitFrame(stopped);
+      if (activeFrame) {
+         const layer = sequenceRef.current?.layers[stopped];
+         if (layer) actions.setActiveLayer(activeFrame.id, layer.id);
       }
-   }, []);
+   }, [activeFrame, actions, clearSession, commitFrame]);
 
-   // Pause animation when a modal dialog (confirm or choice) is shown (Solution A)
+   // Pause animation when a modal dialog (confirm or choice) is shown
    const isModalVisible = !!(state.confirm?.isVisible || state.choice?.isVisible);
    useEffect(() => {
       if (isModalVisible && playingRef.current) {
@@ -382,28 +267,55 @@ export function useAnimatedImagesPlayer(): {
    const stop = useCallback(() => {
       playingRef.current = false;
       setIsPlaying(false);
-      if (rafRef.current) {
-         cancelAnimationFrame(rafRef.current);
-         rafRef.current = null;
+      setIsWarming(false);
+      clearSession();
+      commitFrame(0);
+   }, [clearSession, commitFrame]);
+
+   /**
+    * SEEK (user intent — two-channel design): the playhead goes through the
+    * cheap channel for the current mode (pipeline command while playing, one
+    * document commit while paused); the SELECTION write runs only here —
+    * user-initiated seeks select the target frame's layer so the
+    * LayersDrawer highlights it. The automatic animation tick NEVER touches
+    * selection.
+    */
+   const seekTo = useCallback((index: number, opts?: { select?: boolean }) => {
+      if (!activeFrame || !sequenceRef.current) return;
+      const seq = sequenceRef.current;
+      const clamped = Math.max(0, Math.min(seq.totalFrames - 1, index));
+
+      if (playingRef.current) {
+         // Playhead channel: publish a seek request the playback surface
+         // consumes on its next effect pass (the pipeline's clock jumps).
+         seekRevRef.current += 1;
+         actions.setStateSignal(PLAYBACK_SEEK_SIGNAL_KEY, {
+            sequenceId: seq.sequenceId,
+            index: clamped,
+            rev: seekRevRef.current,
+         });
+      } else {
+         commitFrame(clamped);
       }
-      showFrame(0);
-   }, [showFrame]);
+      if (opts?.select !== false) {
+         const targetLayer = seq.layers[clamped];
+         if (targetLayer) actions.setActiveLayer(activeFrame.id, targetLayer.id);
+      }
+   }, [activeFrame, actions, commitFrame]);
 
    const prevFrame = useCallback(() => {
-      if (!sequence) return;
-      const prevIndex = (currentIndex - 1 + sequence.totalFrames) % sequence.totalFrames;
-      showFrame(prevIndex);
-   }, [sequence, currentIndex, showFrame]);
+      if (!sequenceRef.current) return;
+      seekTo((currentIndexRef.current - 1 + sequenceRef.current.totalFrames) % sequenceRef.current.totalFrames);
+   }, [seekTo]);
 
    const nextFrame = useCallback(() => {
-      if (!sequence) return;
-      const nextIndex = (currentIndex + 1) % sequence.totalFrames;
-      showFrame(nextIndex);
-   }, [sequence, currentIndex, showFrame]);
+      if (!sequenceRef.current) return;
+      seekTo((currentIndexRef.current + 1) % sequenceRef.current.totalFrames);
+   }, [seekTo]);
 
    const gotoFrame = useCallback((index: number) => {
-      showFrame(index);
-   }, [showFrame]);
+      seekTo(index);
+   }, [seekTo]);
 
    const toggleLoop = useCallback(() => {
       setSelfConfig({ loop: !selfConfig?.loop });
@@ -411,8 +323,7 @@ export function useAnimatedImagesPlayer(): {
 
    const recalculateFps = useCallback(() => {
       if (!sequence || sequence.totalFrames === 0) return;
-      const delays = sequence.layers.map(l => (l.metadata?.gifFrameDelay as number) || 100);
-      const fps = GifHandler.calculateFps(delays);
+      const fps = GifHandler.calculateFps(sequence.layers.map(frameDelayOf));
       setSelfConfig({ frameRateOverride: fps });
    }, [sequence, setSelfConfig]);
 
@@ -429,7 +340,7 @@ export function useAnimatedImagesPlayer(): {
          totalFrames,
          progress,
       },
-      actions: { play, pause, stop, prevFrame, nextFrame, gotoFrame, toggleLoop, recalculateFps },
+      actions: { play, pause, stop, prevFrame, nextFrame, gotoFrame, seekTo, toggleLoop, recalculateFps },
    };
 }
 

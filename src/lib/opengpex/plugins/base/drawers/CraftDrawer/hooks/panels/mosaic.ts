@@ -37,7 +37,7 @@ export function useMosaicPanel() {
   const presetValues = MOSAIC_SIZE_PRESETS[sizePreset];
 
   const setSizePreset = useCallback(
-    (preset: 'S' | 'M' | 'L' | 'XL') => {
+    (preset: 'XS' | 'S' | 'M' | 'L' | 'XL') => {
       setSelfConfig({ mosaicSizePreset: preset } as Partial<CraftDrawerConfig>);
     },
     [setSelfConfig]
