@@ -31,17 +31,27 @@ const eslintConfig = defineConfig([
     },
   },
   // ─── Service boundary enforcement ───────────────────────────────────────────
-  // Plugins and commands must NOT directly import from internal operator modules.
-  // They should access functionality via injected services (GeometryService, etc.)
-  // See: docs/opengpex/plans/20260712_service_compliance_checklist.md
+  // FEATURE layers (plugins, stage interaction, advanced commands) must NOT
+  // directly import from internal geometry operator modules: the operator
+  // layer is pure math; the "when/why" business decisions live on the
+  // services (GeometryService, LayerService — e.g. layers.snap.snapLayerPlacement).
+  // Exempt: core/engine (the snap single source holder), core/geometry and
+  // core/layer themselves (operator + service implementations).
   {
-    files: ["src/lib/opengpex/plugins/**/*.{ts,tsx}"],
+    files: [
+      "src/lib/opengpex/plugins/**/*.{ts,tsx}",
+      "src/lib/opengpex/stage/**/*.ts",
+      "src/lib/opengpex/core/advanced/**/*.ts",
+    ],
     rules: {
       "no-restricted-imports": ["error", {
         patterns: [
           {
-            group: ["@opengpex/editor/core/geometry/operators/*"],
-            message: "Plugins must not import internal geometry operators directly. Use the GeometryService via context or InteractionEvent instead (e.g. geometry.transform.*, e.geometry.space.*).",
+            group: [
+              "@opengpex/editor/core/geometry/operators/*",
+              "**/core/geometry/operators/*",
+            ],
+            message: "Feature layers must not import internal geometry operators directly. Use the injected services instead (geometry.*, layers.snap.* via context or InteractionEvent).",
           },
         ],
       }],

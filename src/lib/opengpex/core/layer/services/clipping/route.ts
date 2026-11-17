@@ -56,7 +56,7 @@ import {
   Frame, Layer, VectorMask, GeometryService, asLocalShape, type LocalPolygon,
 } from '@opengpex/editor/core/types';
 import { matchRule, type DecisionRule } from '@opengpex/editor/core/helpers/decision-table';
-import { computeConfinementFromLayer } from '@opengpex/editor/core/helpers/selection';
+import { LayerUtils } from '../../utils';
 import { type RegionOverlap } from '@opengpex/editor/core/geometry/poly-clip';
 import { LayerFactory } from '../../factory';
 import type { createFragmentOperations } from './strategies';
@@ -180,7 +180,7 @@ export function createClipRoutingOperations(
       metadata,
       // Clipboard products keep the source name; paste adds its own suffix.
       name: intoFrame
-        ? LayerFactory.getNewLayerName(frame.layers.order.map(lid => frame.layers.byId[lid]), `${layer.name} Copy`)
+        ? LayerFactory.getNewLayerNameFor(frame, `${layer.name} Copy`)
         : layer.name,
       vectorMasks: LayerFactory.cleanInheritedMasks(layerData.vectorMasks),
       bitmapMasks: LayerFactory.cleanInheritedMasks(layerData.bitmapMasks),
@@ -308,7 +308,7 @@ export function createClipRoutingOperations(
     // so the selection is projected once and the command layer only applies
     // its write/no-write policy.
     const confinement = result.newLayer
-      ? (computeConfinementFromLayer(frame, result.newLayer) ?? undefined)
+      ? (LayerUtils.computeConfinementFromLayer(frame, result.newLayer) ?? undefined)
       : undefined;
     // Route truth for tests: the classifier's verdict for this exact cut.
     return { ...result, confinement, overlap };

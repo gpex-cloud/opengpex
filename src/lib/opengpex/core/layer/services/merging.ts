@@ -117,6 +117,11 @@ export function findStackingConflicts(
     if (!between || participantIds.has(between.id)) continue;
     if (!between.visible || between.type === 'group' || between.hostId) continue;
 
+    // Exact continuous bounds (getLayerBoundingBox never lattice-snaps):
+    // this is a relative-geometry overlap test. An outward integer snap
+    // would inflate a box that merely TOUCHES the sandwich by up to a pixel
+    // and falsely report a stacking conflict for layers that never overlap
+    // the content.
     const box = geometry.space.getLayerBoundingBox(between);
     const coveredNow = participants.some(p =>
       order.indexOf(p.id) > i &&

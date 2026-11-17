@@ -26,6 +26,7 @@ import { getClipBox } from "@opengpex/editor/core/helpers/selection";
 
 import { useImageInfoMetadata, useExportConfig, useClipMode } from "./hooks";
 import { isComfyUiWorkflow, fileCarriesHdr } from "@opengpex/editor/core/files";
+import { DrawerHeader } from "@opengpex/editor/workspace/components/DrawerHeader";
 import { FrameInfoPanel } from "./components/FrameInfoPanel";
 import { AiGenerationPanel } from "./components/AiGenerationPanel";
 import { ResizeExportControls } from "./components/ResizeExportControls";
@@ -123,19 +124,21 @@ export function ImageInfoComponent() {
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
       {/* Header */}
-      <div className="flex justify-between items-center h-6 shrink-0">
-        <div className="flex items-center gap-2">
-          <Info size={12} className="text-indigo-600 dark:text-indigo-400" />
+      <DrawerHeader
+        icon={<Info size={12} className="text-indigo-600 dark:text-indigo-400" />}
+        title={
           <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)]">
             Informations
           </span>
-          {(!!activeFrame.extra?.ai_generation || isComfyUiWorkflow(meta.imageMetadata)) && (
+        }
+        leftExtras={
+          (!!activeFrame.extra?.ai_generation || isComfyUiWorkflow(meta.imageMetadata)) ? (
             <span className="ml-1 text-[8px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-1.5 py-0.5 rounded shadow-sm border border-amber-500/20 uppercase flex items-center gap-1">
               AI Generated
             </span>
-          )}
-        </div>
-      </div>
+          ) : null
+        }
+      />
 
       {/* Info Panels — lightweight, render immediately */}
       <div className="space-y-2">

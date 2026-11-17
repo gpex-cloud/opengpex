@@ -190,7 +190,7 @@ export const LayerItem = React.memo(
             )}
           </div>
 
-          <div className="relative z-10 flex-1 flex items-center h-full px-1.5 gap-2 group/content">
+          <div className="relative z-10 flex-1 min-w-0 flex items-center h-full px-1.5 gap-2 group/content">
             <div
               onPointerDown={(e) => dragControls.start(e)}
               style={{ touchAction: "none" }}
@@ -276,7 +276,14 @@ export const LayerItem = React.memo(
                       <ImageAsset
                         assetId={layer.assetId}
                         src={layer.src}
-                        className="w-full h-full object-cover select-none pointer-events-none"
+                        // Contain, not cover: elongated content (a thin baked
+                        // brush stroke, a hairline rasterized line) would be
+                        // cover-scaled until its short edge fills the square
+                        // slot and the actual content cropped away. Contain
+                        // letterboxes instead — the whole content stays
+                        // visible with transparent margins, the same visual
+                        // contract as the square-padded frame thumbnails.
+                        className="w-full h-full object-contain select-none pointer-events-none"
                         draggable="false"
                         style={cropStyle}
                         fallback={
@@ -290,7 +297,7 @@ export const LayerItem = React.memo(
               })()}
             </div>
 
-            <div className="flex-1 min-w-0 flex items-center gap-1.5">
+            <div className="flex-1 min-w-0 flex items-center gap-1">
               <span
                 onClick={(e) => {
                   e.stopPropagation();
@@ -305,18 +312,18 @@ export const LayerItem = React.memo(
               >
                 #{index + 1}
               </span>
-              <div className="flex items-center gap-1 truncate">
+              <div className="flex-1 min-w-0 flex items-center gap-1">
                 <Tooltip
                   content={layer.name}
                   position="top"
                   align="center"
                   uppercase={false}
                   showOnHover={layer.name.length > 14}
+                  containerClassName="min-w-0"
                 >
                   <EditableLabel
                     value={layer.name}
                     doubleClick={true}
-                    maxDisplayLength={14}
                     onCommit={(v) =>
                       renameCmd?.execute({
                         frameId: activeFrameId,
@@ -367,7 +374,7 @@ export const LayerItem = React.memo(
                 }
                 variant="glass"
                 size="sm"
-                className={`w-6 h-6 ${layer.visible ? (isActive ? "text-blue-400" : "text-[var(--text-main)] group-hover/layer") : ""}`}
+                className={`w-5 h-6 ${layer.visible ? (isActive ? "text-blue-400" : "text-[var(--text-main)] group-hover/layer") : ""}`}
               />
               <ActionButton
                 onClick={(e) => {
@@ -387,7 +394,7 @@ export const LayerItem = React.memo(
                 }
                 variant="glass"
                 size="sm"
-                className={`w-6 h-6 ${layer.locked ? "" : "text-[var(--text-muted)]"}`}
+                className={`w-5 h-6 ${layer.locked ? "" : "text-[var(--text-muted)]"}`}
               />
 
               <LayerMenu

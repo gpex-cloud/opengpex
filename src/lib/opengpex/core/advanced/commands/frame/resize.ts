@@ -19,9 +19,10 @@
 
 'use client';
 
-import { asLocalShape, EditorContextValue, EditorCommand, Layer } from '@opengpex/editor/core/types';
-import { getDefaultCanvasClipBox } from '@opengpex/editor/core/helpers/selection';
-import { presets } from '@opengpex/editor/core/helpers/preferences';
+import {EditorContextValue, EditorCommand, Layer} from '@opengpex/editor/core/types';
+
+import {getDefaultCanvasClipBox} from '@opengpex/editor/core/helpers/selection';
+import {presets} from '@opengpex/editor/core/helpers/preferences';
 const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
@@ -189,10 +190,9 @@ export const FrameResizeCommands = {
       patches[primaryLayer.id] = {
         src: assetUrl,
         assetId,
-        bounding: { w: newW, h: newH },
-        visibleShape: asLocalShape({ x: 0, y: 0, w: newW, h: newH }),
-        cx: 0,
-        cy: 0,
+        // Shared pose-preserving rebaser (factory): the primary layer fills
+        // the new canvas, whose world center is the canvas center (cx=cy=0).
+        ...layers.factory.rebaseToBounds({ x: -newW / 2, y: -newH / 2, w: newW, h: newH }),
         rotation: 0,
         scale: 1,
       };

@@ -188,7 +188,7 @@ export function usePenToolLifecycle(isPenMode: boolean) {
     /** Hover highlight + cursor for one pointer position. Idempotent. */
     const applyHoverAndCursor = (vx: number, vy: number, frame: Frame, metaHeld: boolean, altHeld: boolean) => {
       const cam = actions.fast.latestCamera(frame.id);
-      const canvasPt = geometry.space.screenToLocal(vx, vy, frame, cam);
+      const canvasPt = geometry.space.screenToLocal(vx, vy, cam);
       const tol = PEN_HIT_TOLERANCE_SCREEN_PX / (cam?.k ?? 1);
 
       const draft = getPenDraft(frame);

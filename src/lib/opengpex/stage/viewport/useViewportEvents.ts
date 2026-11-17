@@ -85,8 +85,8 @@ export function useViewportEvents(
     const screenPoint = asViewportPoint({ x: e.clientX - rect.left, y: e.clientY - rect.top });
 
     const currentCam = actions.fast.latestCamera(frame.id);
-    const worldPoint = geometry.space.screenToWorld(screenPoint.x, screenPoint.y, frame, currentCam);
-    const canvasPoint = geometry.space.worldToLocal(worldPoint.x, worldPoint.y, frame);
+    const worldPoint = geometry.space.screenToWorld(screenPoint.x, screenPoint.y, frame.canvas, currentCam);
+    const canvasPoint = geometry.space.worldToLocal(worldPoint.x, worldPoint.y, frame.canvas);
 
     const springSuppressed = actions.fast.spring.isSuppressed();
 
@@ -115,13 +115,14 @@ export function useViewportEvents(
       },
       pointer: extractPointerInfo(e),
       geometry,
+      layers: services.layers,
       pixels: services.pixels,
       assets: services.assets,
       actions,
       state,
       activeFrame: frame,
     };
-  }, [containerRef, frame, geometry, services.pixels, services.assets, actions, state]);
+  }, [containerRef, frame, geometry, services.layers, services.pixels, services.assets, actions, state]);
 
   const lastEventRef = useRef<React.PointerEvent | React.MouseEvent | PointerEvent | MouseEvent | null>(null);
 

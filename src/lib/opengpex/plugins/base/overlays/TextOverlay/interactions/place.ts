@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { InteractionHandler, InteractionEvent, Layer, asWorldRect } from '@opengpex/editor/core/types';
+import { InteractionHandler, InteractionEvent, Layer, asLocalRect } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { CraftDrawerAPI, getReferenceFontSize } from '../../../drawers/CraftDrawer/protocols';
 import type { PendingTextData } from '../../../drawers/CraftDrawer/protocols';
@@ -96,9 +96,8 @@ export const createTextPlaceHandler = (): InteractionHandler => {
   ): Layer => {
     const frame = e.activeFrame;
     const { pending, fontSize, lineHeight } = readPendingStyle(e);
-    const layersArray = frame.layers.order.map(id => frame.layers.byId[id]);
     return LayerFactory.createLayer('text', {
-      name: LayerFactory.getNewLayerName(layersArray, 'Text'),
+      name: e.layers.factory.getNewLayerNameFor(frame, 'Text'),
       cx: geometry.cx,
       cy: geometry.cy,
       bounding: { w: geometry.w, h: geometry.h },
@@ -133,17 +132,18 @@ export const createTextPlaceHandler = (): InteractionHandler => {
     // under the pointer with no extra offset.
     const boxLocalX = Math.max(0, point.x);
     const initW = getInitialPointTextBoxWidth(frame.canvas.w - boxLocalX);
-    // Convert boxLocalX to world space so snapRectToPixel and cx/cy aren't
-    // shifted by (+canvas.w/2, +canvas.h/2).
-    const worldPoint = e.geometry.space.localToWorld(boxLocalX, point.y, frame);
-    const alignedRect = e.geometry.snapping.snapRectToPixel(
-      asWorldRect({ x: worldPoint.x, y: worldPoint.y - initH / 2, w: initW, h: initH }),
-      frame.canvas
+    // Placement alignment happens in CANVAS-LOCAL space through the layer
+    // service's placement posture (round top-left); only the final center
+    // converts to world for the layer record.
+    // Only the world anchor is consumed here: the point-text record's w/h
+    // stay the measured init sizes (the aligned rect carries them verbatim).
+    const { worldCenter } = e.layers.snap.snapLayerPlacement(
+      asLocalRect({ x: boxLocalX, y: point.y - initH / 2, w: initW, h: initH }),
+      frame.canvas,
     );
-    const center = e.geometry.space.getRectCenter(alignedRect);
     const layer = buildTextLayer(
       e,
-      { cx: center.x, cy: center.y, w: initW, h: initH },
+      { cx: worldCenter.x, cy: worldCenter.y, w: initW, h: initH },
       { mode: 'auto_width' },
     );
     e.actions.executeCommand(CMD_PLACE_UID, { frameId: frame.id, layer });
@@ -165,10 +165,10 @@ export const createTextPlaceHandler = (): InteractionHandler => {
 
     const rectX = Math.min(start.x, end.x);
     const rectY = Math.min(start.y, end.y);
-    // Pixel alignment: snap the dragged size, keep the centre on the pointer path.
-    const cx = rectX + w / 2;
-    const cy = rectY + h / 2;
-    const worldCenter = e.geometry.space.localToWorld(cx, cy, frame);
+    // Placement alignment: the dragged box lands on the canvas-local integer
+    // lattice like every other placement path (same posture as the click
+    // path — previously this branch was the only unsnapped placement).
+    const { worldCenter } = e.layers.snap.snapLayerPlacement(asLocalRect({ x: rectX, y: rectY, w, h }), frame.canvas);
 
     const layer = buildTextLayer(
       e,

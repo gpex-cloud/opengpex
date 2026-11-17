@@ -70,7 +70,7 @@ struct SdfUniforms {
   stroke_width : f32,         // logical px
   head_scale   : f32,         // arrow head length factor (arrow / darrow only)
   hard_edge    : u32,         // 0: smoothstep AA (default), 1: binary hard edge
-  _pad1        : f32,
+  density      : f32,         // render-target texels per logical px (1 interactive; exportScale on supersampled export)
 
   // offset 32 (16 bytes) — stroke colour, working-gamut linear, straight alpha
   stroke_color : vec4<f32>,
@@ -88,6 +88,17 @@ struct SdfUniforms {
   //   star:         [points, sharpness]
   //   callout:      [body.x, body.y, body.w, body.h, tip.x, tip.y, cornerRadius, tailHalfBase]
   shape_params : array<vec4<f32>, 2>,
+
+  // offset 96 (16 bytes) — L2 analytic polygon solver control (sdfPolygonSolver).
+  solver        : u32,   // 0: legacy SDF/smoothstep, 1: analytic polygon coverage
+  outer_count   : u32,   // outer ring vertex count (≤ 32; 0 = no solver outline)
+  inner_count   : u32,   // stroke-inset ring vertex count (0 = solid shape)
+  poly_pad      : f32,
+
+  // offset 112 (512 bytes) — solver rings: 32 outer slots then 32 inner slots,
+  // packed TWO vertices per vec4 (uniform address space requires 16-byte array
+  // strides), each vertex in layer-local logical px (zero-padded tail).
+  poly_verts : array<vec4<f32>, 32>,
 };
 
 @group(0) @binding(0) var<uniform> u : SdfUniforms;
@@ -252,6 +263,181 @@ fn sdf_callout(p: vec2<f32>, body: vec4<f32>, tip: vec2<f32>, radius: f32, half_
   return min(d_body, d_tail);
 }
 
+// ── L1 Analytic coverage solver: axis-aligned rectangle ∩ texel cell ──
+//
+// Computes the exact fractional area of [rx0, rx1] × [ry0, ry1] that overlaps
+// the render target's texel cell centred on the fragment. The cell spans ONE
+// TARGET TEXEL: at interactive density (1) that is the 1×1 logical-pixel cell
+// [p−0.5, p+0.5]; on a supersampled export transient (density = exportScale)
+// one texel covers 1/density logical px per side, so the cell half-extent is
+// 0.5/density — the coverage stays a true area integral at EVERY density,
+// which is the whole point of this solver.
+//
+// The intersection of two 1D intervals [a, b] and [c, d] has length
+// max(0, min(b,d) - max(a,c)), so the 2D area is the product of the two 1D
+// overlaps. All operands are exact f32 (no transcendental functions), so for
+// integer-aligned geometry on integer pixel grids the result is an exact 0, 1,
+// or a representable rational — no fwidth, no smoothstep, no knife-edge noise.
+//
+// 'p' is the logical-pixel coordinate of the texel centre (== in.local: the
+// vertex shader maps the full-target quad through u.layer_size, so the
+// rasteriser's texel centres land at logical ((i+0.5)/density, (j+0.5)/density)).
+fn rect_cell_overlap(rx0: f32, ry0: f32, rx1: f32, ry1: f32, p: vec2<f32>) -> f32 {
+  let cell = 0.5 / max(u.density, 1e-4);
+  let ox = max(0.0, min(rx1, p.x + cell) - max(rx0, p.x - cell));
+  let oy = max(0.0, min(ry1, p.y + cell) - max(ry0, p.y - cell));
+  return ox * oy;
+}
+
+// Analytic stroke-ring coverage for an axis-aligned rectangle stroke ring.
+// The ring = outer rect [0, w] × [0, h]  minus  inner rect inset by stroke_w.
+// Returns coverage in [0, 1]; caller falls back to smoothstep when cornerRadius > 0.
+fn rect_ring_coverage(p: vec2<f32>, w: f32, h: f32, stroke_w: f32) -> f32 {
+  let outer = rect_cell_overlap(0.0, 0.0, w, h, p);
+  let inner_x0 = stroke_w;
+  let inner_y0 = stroke_w;
+  let inner_x1 = w - stroke_w;
+  let inner_y1 = h - stroke_w;
+  // If stroke is so wide that the inner rect has non-positive area, the whole
+  // outer rect is covered (solid fill through the ring).
+  var inner = 0.0;
+  if (inner_x1 > inner_x0 && inner_y1 > inner_y0) {
+    inner = rect_cell_overlap(inner_x0, inner_y0, inner_x1, inner_y1, p);
+  }
+  return clamp(outer - inner, 0.0, 1.0);
+}
+
+// Analytic fill coverage for an axis-aligned rectangle (inset rect only, used
+// when has_fill is set for a zero-corner-radius rect).
+fn rect_fill_coverage(p: vec2<f32>, w: f32, h: f32, stroke_w: f32) -> f32 {
+  let inner_x0 = stroke_w;
+  let inner_y0 = stroke_w;
+  let inner_x1 = w - stroke_w;
+  let inner_y1 = h - stroke_w;
+  if (inner_x1 <= inner_x0 || inner_y1 <= inner_y0) { return 0.0; }
+  return rect_cell_overlap(inner_x0, inner_y0, inner_x1, inner_y1, p);
+}
+
+// ── L2 Analytic polygon coverage solver (sdfPolygonSolver) ──────────────────
+//
+// The rings arrive as simple polygons in layer-local logical px (outer =
+// rendered outline, inner = stroke-inset ring). Coverage = the exact area of
+// (outer ∩ cell) − (inner ∩ cell): the subject polygon is clipped against the
+// four texel-cell half-planes with Sutherland–Hodgman, and the clipped area is
+// the shoelace sum of the result. SH on a CONCAVE subject with a convex window
+// can emit degenerate "bridge" edges along the window border when the subject
+// exits and re-enters — those bridges run collinearly in opposite directions
+// and cancel pairwise in the signed shoelace sum, so the total stays the true
+// intersection area (verified against a sub-sample oracle for U-shaped and
+// star-shaped subjects). Like L1 this is a pure area integral: no fwidth, no
+// smoothstep, no knife-edge noise, identical at every render density.
+
+// Max vertices after one SH pass = ring verts + 1 per clip plane (worst case).
+var<private> clip_a : array<vec2<f32>, 40>;
+var<private> clip_b : array<vec2<f32>, 40>;
+
+// The inner ring occupies the second half of the uniform vertex slots.
+const POLY_INNER_START : u32 = 32u;
+
+// Read one vertex from the two-per-vec4 packed uniform ring array.
+fn poly_vert(i : u32) -> vec2<f32> {
+  let packed = u.poly_verts[min(i / 2u, 31u)];
+  return select(vec2<f32>(packed.zw), vec2<f32>(packed.xy), i % 2u == 0u);
+}
+
+// Load a ring from the uniform block into the scratch (bounds-clamped: OOB
+// uniform reads must never be relied upon).
+fn poly_load(start: u32, count: u32) -> u32 {
+  let n = min(count, 32u);
+  for (var i = 0u; i < n; i = i + 1u) {
+    clip_a[i] = poly_vert(start + i);
+  }
+  return n;
+}
+
+// Clip polygon in clip_a (n vertices) against { p : dot(nrm, p) ≤ c }.
+// Returns the new vertex count (result back in clip_a).
+fn poly_clip(n_in : u32, nrm : vec2<f32>, c : f32) -> u32 {
+  var m = 0u;
+  for (var i = 0u; i < n_in; i = i + 1u) {
+    let j = select(0u, i + 1u, i + 1u < n_in);
+    let cur = clip_a[i];
+    let nxt = clip_a[j];
+    let dc = dot(nrm, cur) - c;
+    let dn = dot(nrm, nxt) - c;
+    if (dc <= 0.0) {
+      clip_b[m] = cur;
+      m = m + 1u;
+    }
+    if ((dc > 0.0 && dn < 0.0) || (dc < 0.0 && dn > 0.0)) {
+      let t = dc / (dc - dn);
+      clip_b[m] = vec2<f32>(cur.x + (nxt.x - cur.x) * t, cur.y + (nxt.y - cur.y) * t);
+      m = m + 1u;
+    }
+  }
+  for (var i = 0u; i < m; i = i + 1u) {
+    clip_a[i] = clip_b[i];
+  }
+  return m;
+}
+
+// Shoelace area of the clipped polygon (orientation-independent via abs).
+fn poly_area(n : u32) -> f32 {
+  var s = 0.0;
+  for (var i = 0u; i < n; i = i + 1u) {
+    let j = select(0u, i + 1u, i + 1u < n);
+    s += clip_a[i].x * clip_a[j].y - clip_a[j].x * clip_a[i].y;
+  }
+  return abs(s) * 0.5;
+}
+
+// Exact area of ring [start, count) ∩ texel cell centred at logical point p.
+fn poly_cell_area(start : u32, count : u32, p : vec2<f32>) -> f32 {
+  if (count == 0u) { return 0.0; }
+  let h = 0.5 / max(u.density, 1e-4);
+  var n = poly_load(start, count);
+  n = poly_clip(n, vec2<f32>(1.0, 0.0), p.x + h);
+  n = poly_clip(n, vec2<f32>(-1.0, 0.0), h - p.x);
+  n = poly_clip(n, vec2<f32>(0.0, 1.0), p.y + h);
+  n = poly_clip(n, vec2<f32>(0.0, -1.0), h - p.y);
+  if (n < 3u) { return 0.0; }
+  return poly_area(n);
+}
+
+// Crossing-number point-in-ring test (hard-edge mode only; O(ring) per call).
+fn poly_contains(start : u32, count : u32, p : vec2<f32>) -> bool {
+  var inside = false;
+  let n = min(count, 32u);
+  var j = n - 1u;
+  for (var i = 0u; i < n; i = i + 1u) {
+    let vi = poly_vert(start + i);
+    let vj = poly_vert(start + j);
+    if ((vi.y > p.y) != (vj.y > p.y)) {
+      let cross = (vj.x - vi.x) * (p.y - vi.y) / (vj.y - vi.y) + vi.x;
+      if (p.x < cross) { inside = !inside; }
+    }
+    j = i;
+  }
+  return inside;
+}
+
+// L2 analytic coverage for the solver rings (straight-alpha compose downstream).
+fn solver_coverage(p : vec2<f32>, stroke_cov : ptr<function, f32>, fill_cov : ptr<function, f32>) {
+  if (u.hard_edge == 1u) {
+    // Hard edge keeps the binary centre-sample contract (same as the L1 rect
+    // hard path): a texel is fully in or fully out by its centre.
+    let inside = poly_contains(0u, u.outer_count, p)
+      && (u.inner_count == 0u || !poly_contains(POLY_INNER_START, u.inner_count, p));
+    *stroke_cov = select(0.0, 1.0, inside);
+    *fill_cov = select(0.0, 1.0, u.has_fill == 1u && u.inner_count > 0u
+      && poly_contains(POLY_INNER_START, u.inner_count, p));
+  } else {
+    let inner_area = poly_cell_area(POLY_INNER_START, u.inner_count, p);
+    *stroke_cov = clamp(poly_cell_area(0u, u.outer_count, p) - inner_area, 0.0, 1.0);
+    *fill_cov = select(0.0, inner_area, u.has_fill == 1u);
+  }
+}
+
 // Signed distance to the shape OUTLINE for the outline family (rounded_rect /
 // ellipse / star / callout: d = 0 is the outer boundary, stroke grows inward), or
 // to the SOLID shape for the solid family (arrow / line / darrow), which
@@ -300,6 +486,26 @@ fn shape_distance(p: vec2<f32>) -> f32 {
 
 @fragment
 fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
+  var stroke_cov: f32;
+  var fill_cov: f32;
+
+  // L2 analytic polygon solver: exact area-integral coverage from the
+  // screen-front expanded rings (star / polygon / callout / arrow / line /
+  // darrow — see sdfPolygonSolver). Solid shapes carry no inner ring, so the
+  // shared compose below degenerates to the stroke-only solid output.
+  if (u.solver == 1u && u.outer_count >= 3u) {
+    solver_coverage(in.local, &stroke_cov, &fill_cov);
+    let sa = u.stroke_color.a * stroke_cov;
+    let fa = u.fill_color.a * fill_cov;
+    let out_a = sa + fa * (1.0 - sa);
+    var out_rgb = vec3<f32>(0.0);
+    if (out_a > 1e-6) {
+      out_rgb = (u.stroke_color.rgb * sa
+               + u.fill_color.rgb * fa * (1.0 - sa)) / out_a;
+    }
+    return vec4<f32>(out_rgb, out_a);
+  }
+
   let d = shape_distance(in.local);
 
   // Analytic AA width from the screen-space gradient. The gradient is the
@@ -321,15 +527,50 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
   // Outline family (rounded_rect / ellipse / star / callout): a stroke RING
   // (shape − interior) over an optional fill, where the interior is the shape
   // inset by stroke_width (d + stroke_width ≤ 0).
-  var shape_cov = 1.0 - smoothstep(-aa, aa, d);
-  var interior_cov = 1.0 - smoothstep(-aa, aa, d + u.stroke_width);
-  if (u.hard_edge == 1u) {
-    // Hard edge: both coverages collapse to binary tests at their zero crossings.
-    shape_cov = select(0.0, 1.0, d <= 0.0);
-    interior_cov = select(0.0, 1.0, d + u.stroke_width <= 0.0);
+  //
+  // L1 fast path: axis-aligned rect with zero corner radius uses the analytic
+  // area-integral solver (rect_ring_coverage / rect_fill_coverage) instead of
+  // smoothstep + fwidth. This eliminates the knife-edge noise that appears when
+  // an edge falls exactly on a pixel grid boundary — the analytic solver returns
+  // exact 0, 1, or a true fractional overlap, so there is no floating-point
+  // phase dependence and the same geometry produces identical coverage at every
+  // render density (viewport DPR vs. 1:1 export).
+  //
+  // Corner-radius > 0 falls through to the smoothstep path (the analytic solver
+  // only handles straight edges; the rounded corners are handled by the SDF).
+  // The threshold is 0.5px: sub-half-pixel radii are visually indistinct from
+  // sharp corners and would still exhibit knife-edge noise on the straight sides,
+  // so they are also routed to the analytic path.
+  let corner_radius = u.shape_params[0].x;
+  if (u.shape_type == 0u && corner_radius < 0.5) {
+    if (u.hard_edge == 1u) {
+      // Hard edge keeps its binary contract on the analytic path too: a texel
+      // is fully in or fully out by its CENTRE (the same centre test the
+      // smoothstep path makes via d <= 0 / d + stroke_width <= 0). No
+      // fractional coverage leaks through — the AA-off toggle stays honest.
+      let sw = u.stroke_width;
+      let in_outer = in.local.x >= 0.0 && in.local.x <= u.layer_size.x
+                  && in.local.y >= 0.0 && in.local.y <= u.layer_size.y;
+      let in_inner = in.local.x >= sw && in.local.x <= u.layer_size.x - sw
+                  && in.local.y >= sw && in.local.y <= u.layer_size.y - sw;
+      stroke_cov = select(0.0, 1.0, in_outer && !in_inner);
+      fill_cov   = select(0.0, 1.0, u.has_fill == 1u && in_inner);
+    } else {
+      // Analytic rect ring coverage — no fwidth, no smoothstep, no knife-edge.
+      stroke_cov = rect_ring_coverage(in.local, u.layer_size.x, u.layer_size.y, u.stroke_width);
+      fill_cov   = select(0.0, rect_fill_coverage(in.local, u.layer_size.x, u.layer_size.y, u.stroke_width), u.has_fill == 1u);
+    }
+  } else {
+    var shape_cov    = 1.0 - smoothstep(-aa, aa, d);
+    var interior_cov = 1.0 - smoothstep(-aa, aa, d + u.stroke_width);
+    if (u.hard_edge == 1u) {
+      // Hard edge: both coverages collapse to binary tests at their zero crossings.
+      shape_cov    = select(0.0, 1.0, d <= 0.0);
+      interior_cov = select(0.0, 1.0, d + u.stroke_width <= 0.0);
+    }
+    stroke_cov = clamp(shape_cov - interior_cov, 0.0, 1.0);
+    fill_cov   = select(0.0, interior_cov, u.has_fill == 1u);
   }
-  let stroke_cov = clamp(shape_cov - interior_cov, 0.0, 1.0);
-  let fill_cov = select(0.0, interior_cov, u.has_fill == 1u);
 
   // Straight-alpha 'over': stroke above fill, in working-gamut linear light.
   let sa = u.stroke_color.a * stroke_cov;
@@ -347,5 +588,10 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
 }
 `;
 
-/** Size of the SDF uniform block in bytes (96 bytes = 24 float/u32 slots). */
-export const SDF_UNIFORM_BUFFER_SIZE = 96;
+/** Size of the SDF uniform block in bytes (624 = 96 base + 16 solver control + 512 poly rings). */
+export const SDF_UNIFORM_BUFFER_SIZE = 624;
+
+/** Uniform vertex slots per solver ring (must match `SDF_POLY_MAX_VERTS`). */
+export const SDF_POLY_UNIFORM_VERTS = 32;
+/** Uniform slot index where the inner (stroke-inset) ring starts. */
+export const SDF_POLY_INNER_START = 32;

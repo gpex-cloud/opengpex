@@ -325,12 +325,7 @@ export function useOverlayRotationSync(
 
     // 1. Calculate the physical position of the current canvas center on the screen (the rotation axis)
     const cam = frame.camera;
-    const center = geometry.space.localToScreen(
-      frame.canvas.w / 2,
-      frame.canvas.h / 2,
-      frame,
-      cam
-    );
+    const center = geometry.space.localToScreen(frame.canvas.w / 2, frame.canvas.h / 2, cam);
 
     // 2. Set the rotation axis to absolute screen pixel coordinates
     Motion.set(ref.current, {

@@ -41,7 +41,7 @@
  */
 
 import type { StrokePoint } from '@opengpex/editor/core/types';
-import { STROKE_BOX_PADDING_EXTRA_PX, TAPER_ARC_FRACTION } from './protocols';
+import { TAPER_ARC_FRACTION } from './protocols';
 
 /** An axis-aligned box in canvas coordinates. */
 export interface StrokeBox {
@@ -85,11 +85,17 @@ function clamp(v: number, lo: number, hi: number): number {
  * @returns The re-based trajectory + layer geometry, or `null` for an empty
  *          trajectory (nothing to place).
  *
- * The raw bounding box is inflated by `size / 2 + 1`: half the tip diameter is
- * how far the ribbon reaches from its centre-line, and the extra pixel covers
- * the fragment shader's analytic edge feather. Padding uses the full `size`
- * rather than the per-sample `size × pressure` so that a later pressure edit
- * cannot spill outside the box.
+ * The raw bounding box inflates by `size / 2` (the ribbon's coverage radius)
+ * and then resolves to the EXACT touched-texel bounds: texel centres sit on
+ * half-integers, so a texel is touched (non-zero coverage, centre distance
+ * ≤ radius, the test is inclusive) iff its centre ≥ minX − r — the touched
+ * span is `ceil(minX − r − 0.5)` .. `floor(maxX + r + 0.5)`. A plain
+ * floor/ceil on the radius bounds overshoots by one texel whenever the
+ * radius edge's fractional part exceeds 0.5 (the probe-verified off-by-one:
+ * declared 21×33 vs actual ink 20×32). Padding uses the full `size` rather
+ * than the per-sample `size × pressure` so that a later pressure edit cannot
+ * spill outside the box. What was removed (the legacy `+1px AA feather`
+ * headroom) WAS slack beyond even the touched span.
  */
 export function tightenStroke(
   points: readonly StrokePoint[],
@@ -178,23 +184,24 @@ export function tightenStroke(
     };
   }
 
-  const pad = Math.max(0, size) / 2 + STROKE_BOX_PADDING_EXTRA_PX;
+  const pad = Math.max(0, size) / 2;
   const cw = Math.max(1, canvas.w);
   const ch = Math.max(1, canvas.h);
 
-  // Pixel-align outwards, then clamp into the canvas ∩ (optional) selection
-  // bounding box. A stroke drawn entirely outside either bound collapses to a
-  // degenerate 1px box on that edge — it renders nothing, which is what a
-  // fully off-canvas (or fully out-of-selection) stroke should do. The clip
-  // rect arrives pre-inflated by its AA margin from the caller.
+  // Resolve the exact touched-texel bounds (see the JSDoc), then clamp into
+  // the canvas ∩ (optional) selection bounding box. A stroke drawn entirely
+  // outside either bound collapses to a degenerate 1px box on that edge — it
+  // renders nothing, which is what a fully off-canvas (or fully
+  // out-of-selection) stroke should do. The clip rect arrives pre-inflated by
+  // its AA margin from the caller.
   const loX = clipRect ? Math.max(0, clipRect.x) : 0;
   const loY = clipRect ? Math.max(0, clipRect.y) : 0;
   const hiX = clipRect ? Math.min(cw, clipRect.x + clipRect.w) : cw;
   const hiY = clipRect ? Math.min(ch, clipRect.y + clipRect.h) : ch;
-  const x0 = clamp(Math.floor(minX - pad), loX, hiX);
-  const y0 = clamp(Math.floor(minY - pad), loY, hiY);
-  const x1 = clamp(Math.ceil(maxX + pad), loX, hiX);
-  const y1 = clamp(Math.ceil(maxY + pad), loY, hiY);
+  const x0 = clamp(Math.ceil(minX - pad - 0.5), loX, hiX);
+  const y0 = clamp(Math.ceil(minY - pad - 0.5), loY, hiY);
+  const x1 = clamp(Math.floor(maxX + pad + 0.5), loX, hiX);
+  const y1 = clamp(Math.floor(maxY + pad + 0.5), loY, hiY);
 
   const w = Math.max(1, x1 - x0);
   const h = Math.max(1, y1 - y0);

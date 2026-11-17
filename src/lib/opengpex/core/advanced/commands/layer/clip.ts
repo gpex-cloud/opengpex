@@ -20,9 +20,7 @@
 'use client';
 
 import { EditorContextValue, EditorCommand, ClipboardLayerMetadata } from '@opengpex/editor/core/types';
-import { polygonToShape } from '@opengpex/editor/core/geometry/operators/polygon';
 import * as P from '@opengpex/editor/core/advanced/protocols';
-import { computeFragmentCenter } from '@opengpex/editor/core/geometry/operators/transform';
 import { LayerUtils } from '@opengpex/editor/core/layer/utils';
 import { createFrameFromAsset } from '../frame/importers';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
@@ -158,7 +156,7 @@ export const LayerClipCommands = {
     name: 'Paste',
     undoable: true,
     execute: async (ctx: EditorContextValue, payload?: ClipboardLayerMetadata | { e?: ClipboardEvent }): Promise<void> => {
-      const { activeFrame, activeLayer, clipboard, actions, state } = ctx;
+      const { activeFrame, activeLayer, clipboard, actions, state, geometry } = ctx;
 
       try {
         // ═══ Step 1: Read clipboard → always returns { metadata?, blob? } ═══
@@ -295,7 +293,7 @@ export const LayerClipCommands = {
           const sameCanvas = !!sourceFrame
             && sourceFrame.canvas.w === activeFrame.canvas.w
             && sourceFrame.canvas.h === activeFrame.canvas.h;
-          const centered = computeFragmentCenter(
+          const centered = geometry.transform.computeFragmentCenter(
             { x: 0, y: 0 },
             { x: source.visibleShape?.rect.x ?? 0, y: source.visibleShape?.rect.y ?? 0 },
             source.rotation ?? 0,
@@ -304,8 +302,8 @@ export const LayerClipCommands = {
           const pose = sameCanvas
             ? { cx: source.cx, cy: source.cy }
             : { cx: centered.x, cy: centered.y };
-          const smartName = ctx.layers.factory.getNewLayerName(
-            activeFrame.layers.order.map(id => activeFrame.layers.byId[id]), `${source.name} Copy`
+          const smartName = ctx.layers.factory.getNewLayerNameFor(
+            activeFrame, `${source.name} Copy`
           );
           const newLayer = ctx.layers.factory.createLayer(layerWithoutId.type, {
             ...layerWithoutId,
@@ -391,7 +389,7 @@ export const LayerClipCommands = {
       // frame-local shape straight to applyMask, which only happened to align
       // for trunk layers (cx=cy=0, no rotation/flip). Mirrors the drill path.
       const layerPoly = geometry.polygon.frameLocalToLayerLocal(box, activeFrame, targetLayer);
-      const localShape = polygonToShape(layerPoly);
+      const localShape = geometry.polygon.polygonToShape(layerPoly);
 
       // Area guard (replaces the old `!maskAsset` guard from the bitmap path):
       // a degenerate selection (single click, collinear points) yields an
@@ -457,9 +455,9 @@ export const LayerClipCommands = {
         // ═══ VectorMask path: add inverted VectorMask (no offscreen, no seam) ═══
         // Irregular (path) selections project through the polygon path so multi-ring
         // geometry survives; regular (rect/circle) selections project via shape space.
-        const drillShape = polygonToShape(box);
+        const drillShape = geometry.polygon.polygonToShape(box);
         const localShape = drillShape.type === 'path'
-          ? polygonToShape(geometry.polygon.frameLocalToLayerLocal(box, activeFrame, latestLayer))
+          ? geometry.polygon.polygonToShape(geometry.polygon.frameLocalToLayerLocal(box, activeFrame, latestLayer))
           : geometry.shape.frameLocalToLayerLocal(drillShape, activeFrame, latestLayer);
 
         ctx.layers.factory.updateLayer(activeFrame.id, tx => {

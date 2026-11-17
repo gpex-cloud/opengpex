@@ -43,6 +43,7 @@ import { AIBridgeIcon } from './icon';
 import FancyButton from "@opengpex/editor/widgets/FancyButton";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
+import { DrawerHeader } from "@opengpex/editor/workspace/components/DrawerHeader";
 import ComboInput from "@opengpex/editor/widgets/ComboInput";
 import FunctionTabs from "@opengpex/editor/widgets/FunctionTabs";
 import ComfyNumberInput from "@opengpex/editor/widgets/ComfyNumberInput";
@@ -206,10 +207,10 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1 overflow-hidden">
       {/* Header (always visible) */}
-      <motion.div layout="position" className="flex justify-between items-center h-6 shrink-0">
-        <div className="flex items-center gap-2">
-          <AIBridgeIcon className="text-indigo-600 dark:text-indigo-400" />
-          {config.endpoints.length <= 1 ? (
+      <DrawerHeader
+        icon={<AIBridgeIcon size={12} className="text-indigo-600 dark:text-indigo-400" />}
+        title={
+          config.endpoints.length <= 1 ? (
             <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)]">
               {activeEndpoint?.name || "AI Generation"}
             </span>
@@ -232,16 +233,18 @@ export const AIGenerationDrawer = React.memo(function AIGenerationDrawer() {
                 </div>
               )}
             />
-          )}
-        </div>
-        <ActionButton
-          onClick={() => openSettingsCmd?.execute()}
-          icon={<Settings size={12} />}
-          tooltip="AI Settings"
-          size="sm"
-          variant="glass"
-        />
-      </motion.div>
+          )
+        }
+        actions={
+          <ActionButton
+            onClick={() => openSettingsCmd?.execute()}
+            icon={<Settings size={12} />}
+            tooltip="AI Settings"
+            size="sm"
+            variant="glass"
+          />
+        }
+      />
 
       {/* Setup Screen (key missing) - shown below header so user can still switch providers */}
       {setupContent}

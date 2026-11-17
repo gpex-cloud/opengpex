@@ -25,6 +25,7 @@ import { ChartSpline, RotateCcw as ResetIcon } from "lucide-react";
 import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { AdjustmentDrawerCommandsMap } from "./commands.d";
 import SplitButton from "@opengpex/editor/widgets/SplitButton";
+import { DrawerHeader } from "@opengpex/editor/workspace/components/DrawerHeader";
 import { type ActionOption } from "@opengpex/editor/widgets/ActionDropdown";
 import ActionGroup, { type ActionGroupItem } from "@opengpex/editor/widgets/ActionGroup";
 import { BasicPanel } from "./panels/basic";
@@ -165,28 +166,28 @@ export const AdjustmentDrawerComponent = React.memo(function AdjustmentDrawerCom
 
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
-      <motion.div
-        layout="position"
-        className="flex justify-between items-center h-6 shrink-0"
-      >
-        <div className="flex items-center gap-2">
-          <ChartSpline size={12} className="text-indigo-600 dark:text-indigo-400" />
+      <DrawerHeader
+        icon={<ChartSpline size={12} className="text-indigo-600 dark:text-indigo-400" />}
+        title={
           <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)]">
             Adjmt
           </span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <GradingPanelButtonGroup />
-          <SplitButton
-            icon={<ResetIcon size={12} />}
-            tooltip={`Reset ${activeTool.charAt(0).toUpperCase() + activeTool.slice(1)}`}
-            onClick={handleResetPanel}
-            dropdownOptions={resetAllOptions}
-            onDropdownSelect={handleResetAllSelect}
-            dropdownAlign="right"
-          />
-        </div>
-      </motion.div>
+        }
+        actions={
+          <>
+            <GradingPanelButtonGroup />
+            <SplitButton
+              icon={<ResetIcon size={12} />}
+              tooltip={`Reset ${activeTool.charAt(0).toUpperCase() + activeTool.slice(1)}`}
+              onClick={handleResetPanel}
+              dropdownOptions={resetAllOptions}
+              onDropdownSelect={handleResetAllSelect}
+              dropdownAlign="right"
+            />
+          </>
+        }
+        actionsClassName="gap-1.5"
+      />
 
       {isDisabled ? (
         <motion.div
@@ -363,8 +364,8 @@ export function NumberField({
   //   - `label` present: fill parent width, sit under a small uppercase caption
   //   - no label:        fixed w-12 (Mixer's numeric column alignment)
   const inputClass = label
-    ? "w-full text-center text-[10px] font-mono rounded-sm bg-transparent border border-zinc-200 dark:border-white/10 px-1 py-0.5 focus:outline-none focus:border-[var(--accent-primary,#60a5fa)]"
-    : `w-12 text-center text-[10px] font-mono rounded-sm bg-transparent border px-1 py-0.5 focus:outline-none ${
+    ? "w-full text-center text-[10px] leading-tight font-mono rounded-sm bg-transparent border border-zinc-200 dark:border-white/10 px-1 py-0 focus:outline-none focus:border-[var(--accent-primary,#60a5fa)]"
+    : `w-12 text-center text-[10px] leading-tight font-mono rounded-sm bg-transparent border px-1 py-0 focus:outline-none ${
         disabled
           ? "border-transparent text-[var(--text-muted)] cursor-not-allowed"
           : "border-zinc-200 dark:border-white/10 focus:border-[var(--accent-primary,#60a5fa)]"

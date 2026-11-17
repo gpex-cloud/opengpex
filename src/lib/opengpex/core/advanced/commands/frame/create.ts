@@ -40,7 +40,6 @@
 'use client';
 
 import { EditorCommand, EditorContextValue, LocalShape, asLocalShape } from '@opengpex/editor/core/types';
-import { polygonToShape } from '@opengpex/editor/core/geometry/operators/polygon';
 
 import { getClipBox, getDefaultCanvasClipBox } from '@opengpex/editor/core/helpers/selection';
 import { createFrameThumbnail } from '@opengpex/editor/core/helpers/thumbnail';
@@ -133,7 +132,7 @@ export const FrameCreateCommands = {
       try {
         // ── Step 1: Composite the selection region — self-adaptive bit depth
         // and source gamut, no options.precision/dpr interference ──────
-        const branchShape: LocalShape = polygonToShape(box);
+        const branchShape: LocalShape = geometry.polygon.polygonToShape(box);
         const composited = await pixels.render.compositeFrame(activeFrame, branchShape);
 
         // ── Step 2: Golden Path ingest — display + high-depth naked pixels

@@ -34,6 +34,7 @@ import { motion } from "framer-motion";
 import { useEditorServices } from "@opengpex/editor/core/context";
 import { SettingsPanelAPI } from "../../panels/SettingsPanel/protocols";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
+import { DrawerHeader } from "@opengpex/editor/workspace/components/DrawerHeader";
 import FancyGroup, {
   type FancyGroupItem,
 } from "@opengpex/editor/widgets/FancyGroup";
@@ -277,30 +278,32 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
 
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
-      <motion.div
-        layout="position"
-        className="flex justify-between items-center h-6 shrink-0"
-      >
-        <div className="flex items-center gap-2">
+      <DrawerHeader
+        icon={
           <CraftDrawerIcon
             size={12}
             className="text-indigo-600 dark:text-indigo-400"
           />
+        }
+        title={
           <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)]">
             Drawing
           </span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <CraftPanelButtonGroup />
-          <button
-            onClick={handleOpenSettings}
-            className="p-1 rounded hover:bg-white/5 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
-            title="Font Settings"
-          >
-            <Settings size={12} />
-          </button>
-        </div>
-      </motion.div>
+        }
+        actions={
+          <>
+            <CraftPanelButtonGroup />
+            <button
+              onClick={handleOpenSettings}
+              className="p-1 rounded hover:bg-white/5 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
+              title="Font Settings"
+            >
+              <Settings size={12} />
+            </button>
+          </>
+        }
+        actionsClassName="gap-1.5"
+      />
 
       {ActivePanel && (
         <motion.div layout="position" className="flex flex-col">

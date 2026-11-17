@@ -171,10 +171,16 @@ export class Matrix3x3 implements IMatrix3x3 {
   }
 
   /**
-   * Extract Axis-Aligned Bounding Box (AABB)
-   * Logic: Calculates the bounding rectangle by transforming four corners.
+   * Exact continuous AABB: the transformed corners' min/max WITHOUT any
+   * lattice snapping. On an odd-dimension canvas the document texel lattice
+   * sits on half-integers, so snapping to world integers here would drag a
+   * correctly phase-aligned bounds half a texel off its lattice — pixel-window
+   * consumers align through the snap single source
+   * (`snapWorldRectToLatticeExpanded`), the only stage that knows the canvas
+   * lattice phase. The former world-integer-snapped `extractAABB` variant was
+   * retired: it was exactly that off-lattice second rounding point.
    */
-  static extractAABB(size: Size2D, matrix: Matrix3x3): Rect2D {
+  static extractAABBRaw(size: Size2D, matrix: Matrix3x3): Rect2D {
     const halfW = size.w / 2;
     const halfH = size.h / 2;
     const corners = [
@@ -183,7 +189,7 @@ export class Matrix3x3 implements IMatrix3x3 {
       matrix.apply({ x: -halfW, y: halfH }),
       matrix.apply({ x: halfW, y: halfH })
     ];
-    
+
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const p of corners) {
       minX = Math.min(minX, p.x);
@@ -191,14 +197,12 @@ export class Matrix3x3 implements IMatrix3x3 {
       minY = Math.min(minY, p.y);
       maxY = Math.max(maxY, p.y);
     }
-    
-    const x = Math.floor(minX);
-    const y = Math.floor(minY);
+
     return {
-      x,
-      y,
-      w: Math.ceil(maxX) - x,
-      h: Math.ceil(maxY) - y
+      x: minX,
+      y: minY,
+      w: maxX - minX,
+      h: maxY - minY
     };
   }
 

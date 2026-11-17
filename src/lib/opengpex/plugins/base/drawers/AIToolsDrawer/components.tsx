@@ -21,9 +21,9 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
 import { Settings, ChevronDown } from 'lucide-react';
-import { motion } from 'framer-motion';
 import { useEditorState, useEditorServices, usePluginCommands, usePluginSelfConfig } from '@opengpex/editor/core/context';
 import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
+import { DrawerHeader } from '@opengpex/editor/workspace/components/DrawerHeader';
 import { initBusySync } from './_shared';
 import { bgRemoverStore } from './bgremover/store';
 import { segStore } from './segmentation/store';
@@ -131,9 +131,9 @@ export function AIToolsDrawerContent() {
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
       {/* ─── Header ──────────────────────────────────────────────── */}
-      <motion.div layout="position" className="flex justify-between items-center h-6 shrink-0">
-        <div className="flex items-center gap-2">
-          <AIToolsIcon className="text-indigo-600 dark:text-indigo-400" />
+      <DrawerHeader
+        icon={<AIToolsIcon size={18} className="text-indigo-600 dark:text-indigo-400" />}
+        title={
           <ActionDropdown
             options={AI_TOOLS.map(t => ({
               value: t.value,
@@ -153,15 +153,17 @@ export function AIToolsDrawerContent() {
               </div>
             )}
           />
-        </div>
-        <button
-          onClick={handleOpenSettings}
-          className="p-1 rounded hover:bg-white/5 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
-          title="Model Settings"
-        >
-          <Settings size={12} />
-        </button>
-      </motion.div>
+        }
+        actions={
+          <button
+            onClick={handleOpenSettings}
+            className="p-1 rounded hover:bg-white/5 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
+            title="Model Settings"
+          >
+            <Settings size={12} />
+          </button>
+        }
+      />
 
       {/* ─── Active Tool Panel ──────────────────────────────────── */}
       {activeTool === 'bg-removal' && <BgRemoverPanel />}

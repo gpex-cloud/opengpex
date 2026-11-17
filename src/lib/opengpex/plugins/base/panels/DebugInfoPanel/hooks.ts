@@ -276,7 +276,7 @@ export const useDebugInfo = () => {
     let activeLayerMetrics: DebugMetrics['activeLayer'] = null;
     if (layer) {
       const worldPos = { x: layer.cx, y: layer.cy };
-      const pPos = geometry.space.worldToLocal(worldPos.x, worldPos.y, activeFrame);
+      const pPos = geometry.space.worldToLocal(worldPos.x, worldPos.y, activeFrame.canvas);
       const localX = pPos.x - layer.bounding.w / 2;
       const localY = pPos.y - layer.bounding.h / 2;
       activeLayerMetrics = {
@@ -297,8 +297,8 @@ export const useDebugInfo = () => {
     }
 
     // Mouse core metrics
-    const mouseW = geometry.space.screenToWorld(currentMouse.vx, currentMouse.vy, activeFrame, cam);
-    const mouseP = geometry.space.screenToLocal(currentMouse.vx, currentMouse.vy, activeFrame, cam);
+    const mouseW = geometry.space.screenToWorld(currentMouse.vx, currentMouse.vy, activeFrame.canvas, cam);
+    const mouseP = geometry.space.screenToLocal(currentMouse.vx, currentMouse.vy, cam);
 
     // Clip core metrics
     const isReCanvas = state.getStateSignal(ClipOptionsAPI.signals.reCanvas);

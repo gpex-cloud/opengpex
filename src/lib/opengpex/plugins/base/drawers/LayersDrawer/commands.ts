@@ -222,7 +222,7 @@ export const LAYERS_COMMANDS = {
 
             const layersArray = activeFrame.layers.order.map(id => activeFrame.layers.byId[id]);
             const hostLayers = LayerFactory.getHostLayers(layersArray);
-            const name = LayerFactory.getNewLayerName(hostLayers, 'Layer');
+            const name = ctx.layers.factory.getNewLayerName(hostLayers, 'Layer');
 
             const activeLayer = activeFrame.activeLayerId ? activeFrame.layers.byId[activeFrame.activeLayerId] : undefined;
             const targetGroupId = activeLayer?.type === 'group' ? activeLayer.id : activeLayer?.groupId;
@@ -256,7 +256,7 @@ export const LAYERS_COMMANDS = {
 
             const layersArray = activeFrame.layers.order.map(id => activeFrame.layers.byId[id]);
             const hostLayers = LayerFactory.getHostLayers(layersArray);
-            const newName = LayerFactory.getNewLayerName(hostLayers, `${layer.name} Copy`);
+            const newName = ctx.layers.factory.getNewLayerName(hostLayers, `${layer.name} Copy`);
 
             const { id: _id, hostId: _pid, role: _role, ...layerData } = layer;
 
@@ -429,7 +429,7 @@ export const LAYERS_COMMANDS = {
             const hasSelection = selectedIds && selectedIds.length > 0;
 
             // Smart naming
-            const groupName = LayerFactory.getNewLayerName(hostLayers, 'Group');
+            const groupName = ctx.layers.factory.getNewLayerName(hostLayers, 'Group');
             const group = LayerFactory.createLayer('group', { name: groupName });
 
             if (hasSelection) {

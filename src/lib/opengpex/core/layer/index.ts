@@ -329,13 +329,13 @@ export function createLayerService(
       // layer.cx/cy uses the world coordinate system (origin at canvas center), directly using the screenToWorld result
       let cx, cy;
       if (screenPoint) {
-        const worldPos = geometry.space.screenToWorld(screenPoint.x, screenPoint.y, frame);
+        const worldPos = geometry.space.screenToWorld(screenPoint.x, screenPoint.y, frame.canvas, frame.camera);
         cx = worldPos.x;
         cy = worldPos.y;
       } else {
         const state = getState();
         const vDim = state.ui.viewportDim;
-        const worldCenter = geometry.space.screenToWorld(vDim.w / 2, vDim.h / 2, frame);
+        const worldCenter = geometry.space.screenToWorld(vDim.w / 2, vDim.h / 2, frame.canvas, frame.camera);
         cx = worldCenter.x;
         cy = worldCenter.y;
       }
@@ -375,10 +375,30 @@ export function createLayerService(
     resampleLayer: resampleOps.resampleLayer,
   };
 
+  // ── snap namespace ───────────────────────────────────────────────────────
+  // The placement business posture (see LayerSnapNamespace). The operator is
+  // pure math; THIS namespace is the only sanctioned access path for feature
+  // code — the "does this box align to the pixel lattice" decision lives here,
+  // never at the call site.
+  const snap: LayerService['snap'] = {
+    // Input and operator output are both branded LocalRect; the world views
+    // ride the same result: a placement IS rect + world rect + anchor. The
+    // conversions need only the canvas dimensions (lattice extent), not the
+    // whole frame — same contract as the geometry operators beneath it.
+    snapLayerPlacement: (rect, canvasDim, opts) => {
+      const aligned = geometry.snapping.snapLocalRectToLatticeRounded(rect, opts);
+      return {
+        rect: aligned,
+        worldRect: geometry.space.localToWorldRect(aligned, canvasDim),
+        worldCenter: geometry.space.getWorldRectCenter(aligned, canvasDim),
+      };
+    },
+  };
+
   // ── Public facade ────────────────────────────────────────────────────────
-  // The service is exactly the three namespaces. Pure record helpers live on
+  // The service is exactly the four namespaces. Pure record helpers live on
   // LayerFactory (this module's export) — call them there, not on the facade.
-  const service: LayerService = { factory, clip, bake };
+  const service: LayerService = { factory, clip, bake, snap };
 
   mergeOps.impl = createMergeOperations(geometry, service, actions).mergeLayers;
 

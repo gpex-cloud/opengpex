@@ -299,8 +299,8 @@ export function useClipCursor(
       const vx = ev.clientX - domRect.left;
       const vy = ev.clientY - domRect.top;
       const currentCam = actions.fast.latestCamera(frame.id);
-      const worldPt = geometry.space.screenToWorld(vx, vy, frame, currentCam);
-      const canvasPt = geometry.space.worldToLocal(worldPt.x, worldPt.y, frame);
+      const worldPt = geometry.space.screenToWorld(vx, vy, frame.canvas, currentCam);
+      const canvasPt = geometry.space.worldToLocal(worldPt.x, worldPt.y, frame.canvas);
 
       // Screen-px thresholds → canvas-local px via camera scale.
       const k = currentCam?.k ?? frame.camera.k;

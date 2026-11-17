@@ -533,7 +533,7 @@ export function findPenLayerBoxAt(
   frame: Frame,
   ptCanvas: { x: number; y: number },
 ): string | null {
-  const worldPoint = geometry.space.localToWorld(ptCanvas.x, ptCanvas.y, frame);
+  const worldPoint = geometry.space.localToWorld(ptCanvas.x, ptCanvas.y, frame.canvas);
   const hits = geometry.space.pickLayersAt(worldPoint, frame.layers);
   const hit = hits.find((l: Layer) =>
     l.type === 'vector' && !!l.penData && l.visible && !l.locked && (!l.role || l.role === 'host'),

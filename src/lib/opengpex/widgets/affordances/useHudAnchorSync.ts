@@ -141,8 +141,8 @@ export function useHudAnchorSync({ ref, active, getAnchorFrame, reveal = 'always
       const inside = hitTest
         ? (() => {
             const currentCam = actions.fast.latestCamera(frame.id);
-            const worldPt = geometry.space.screenToWorld(pt.x, pt.y, frame, currentCam);
-            const localPt = geometry.space.worldToLocal(worldPt.x, worldPt.y, frame);
+            const worldPt = geometry.space.screenToWorld(pt.x, pt.y, frame.canvas, currentCam);
+            const localPt = geometry.space.worldToLocal(worldPt.x, worldPt.y, frame.canvas);
             return hitTest(localPt, frame, currentCam);
           })()
         : // DEFAULT containment: the padded rotated ANCHOR BOX — the same

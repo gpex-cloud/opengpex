@@ -18,10 +18,11 @@
  */
 
 import {
-  Layer, Frame, asLocalShape, type Point2D,
+  Layer, Frame, asLocalShape, type Point2D, type LocalPolygon, type LocalShape,
 } from '@opengpex/editor/core/types';
 import { intersectPathWithPath } from '@opengpex/editor/core/geometry/poly-clip';
-import { parsePathDataToRings, ringsToPathData, shapeToPoint2D } from '@opengpex/editor/core/geometry/operators/point2d';
+import { parsePathDataToRings, ringsToPathData, shapeToPoint2D, point2dToLocalPolygon } from '@opengpex/editor/core/geometry/operators/point2d';
+import { layerLocalToFrameLocal } from '@opengpex/editor/core/geometry/operators/polygon';
 
 /**
  * LayerUtils: High-frequency pure function toolset for layer operations
@@ -110,34 +111,103 @@ export const LayerUtils = {
   },
 
   /**
+   * resolveFragmentOutline: the layer's recorded CUT OUTLINE as rings, the
+   * single degradation ladder every consumer of `Layer.contour` must go
+   * through. `contour` is BIRTH-RIGHT METADATA of cut-lineage layers — it
+   * records the selection AS DRAWN (the gesture, for Refocus / re-cut /
+   * selection re-arm), never a generic shape source; layers not born from a
+   * cut simply have none, and absent is the correct state for them.
+   * Degradation tiers:
+   *   1. the recorded `contour.rings`;
+   *   2. the `visibleShape` outline (any shape type — legacy feathered
+   *      logical fragments carry the tight rings as pathData; a plain
+   *      physical fragment's full-bounds rect serializes to the same rings
+   *      the callers' bounds fallback would produce);
+   *   3. null — the caller applies its OWN terminal fallback (re-cut
+   *      intersects against the full bounds; selection re-arm keeps the
+   *      current selection). No consumer may re-implement tiers 1-2.
+   */
+  resolveFragmentOutline(layer: Layer): Point2D[][] | null {
+    const recorded = layer.contour;
+    if (recorded && Array.isArray(recorded.rings) && recorded.rings.length > 0) {
+      return recorded.rings;
+    }
+    if (layer.visibleShape) {
+      return shapeToPoint2D(layer.visibleShape);
+    }
+    return null;
+  },
+
+  /**
    * intersectContour: ct2 = S ∩ ct1 — the new cut contour is the selection
    * intersected with the source's selection extent (both in the source's
    * coordinate space), the `Layer.contour` record a fragment carries for
-   * Refocus. The source's extent resolves in three tiers: the recorded
-   * `layer.contour` when the source is itself a fragment; otherwise the
-   * source plane (original layers — and legacy feathered logical fragments,
-   * whose `visibleShape` pathData carries the tight rings); otherwise the
-   * full bounds. Holes and bitmap masks do NOT participate — they are
-   * render facts carried by the source's masks, and Refocus must re-arm
-   * the selection AS DRAWN; the subtraction happens again at re-cut time
-   * through those same masks. Empty intersection (selection entirely
-   * outside the source's selection extent — possible over a feather band
-   * whose 50% line lies elsewhere) yields undefined: there is no contour
-   * to record.
+   * Refocus. The source's extent resolves through `resolveFragmentOutline`,
+   * with the full bounds as the terminal fallback (a layer with no visible
+   * shape record has no outline — its whole plane is its extent). Holes and
+   * bitmap masks
+   * do NOT participate — they are render facts carried by the source's
+   * masks, and Refocus must re-arm the selection AS DRAWN; the subtraction
+   * happens again at re-cut time through those same masks. Empty
+   * intersection (selection entirely outside the source's selection extent —
+   * possible over a feather band whose 50% line lies elsewhere) yields
+   * undefined: there is no contour to record.
    */
   intersectContour(layer: Layer, selRings: Point2D[][]): Point2D[][] | undefined {
-    const recorded = layer.contour;
-    const ct = recorded && Array.isArray(recorded.rings) && recorded.rings.length > 0
-      ? recorded.rings
-      : layer.visibleShape?.type === 'path' && layer.visibleShape.pathData
-        ? shapeToPoint2D(layer.visibleShape)
-        : shapeToPoint2D(asLocalShape({ x: 0, y: 0, w: layer.bounding.w, h: layer.bounding.h }, 'rect'));
+    const ct = LayerUtils.resolveFragmentOutline(layer)
+      ?? shapeToPoint2D(asLocalShape({ x: 0, y: 0, w: layer.bounding.w, h: layer.bounding.h }, 'rect'));
     const res = intersectPathWithPath(
       ringsToPathData(selRings),
       ringsToPathData(ct),
     );
     if (!res || !res.pathData) return undefined;
     return parsePathDataToRings(res.pathData);
+  },
+
+/**
+ * buildFragmentConfinement — project a fragment's cut outline into a frame
+ * selection polygon ("selection convergence": after an operation lands a
+ * fragment, the surviving selection should describe the TAKEN piece, not the
+ * once-drawn region).
+ *
+ * Coordinate contract (mirrors Refocus syncToOverlay): the rings — the
+ * recorded `contour` when present, else the `visibleShape` outline — live in
+ * the layer-local frame the fragment's geometry fields live in, and are
+ * projected through the fragment's own world matrix. Feather and AA ride the
+ * fragment's edge record (`visibleShape.featherPx` / `antiAliased`): the
+ * rings are the 50% contour, so re-arming with the same radius reproduces the
+ * exact soft band a re-cut would take.
+ *
+ * Returns null when the fragment carries no outline (no contour and no
+ * visibleShape) — callers keep the current selection in that case.
+ */
+  /**
+   * computeConfinementFromLayer — project a fragment's cut outline into a
+   * frame selection polygon ("selection convergence"): after an operation
+   * lands a fragment, the surviving selection should describe the TAKEN
+   * piece. Outlines resolve through {@link LayerUtils.resolveFragmentOutline};
+   * feather/AA ride the fragment's edge record (visibleShape.featherPx /
+   * antiAliased): the rings are the 50% contour, so re-arming with the same
+   * radius reproduces the exact soft band a re-cut would take. Terminal
+   * fallback = null (caller keeps the current selection).
+   */
+  computeConfinementFromLayer(
+      frame: Frame,
+      fragment: Layer,
+    ): LocalPolygon | null {
+    const vs = fragment.visibleShape as ({ featherPx?: number; antiAliased?: boolean } & LocalShape) | undefined;
+    // Outline resolution goes through the shared degradation ladder
+    // (contour → visibleShape path → null); the terminal fallback here is
+    // "keep the current selection".
+    const rings = LayerUtils.resolveFragmentOutline(fragment);
+    if (!rings || rings.length === 0) return null;
+    const feather = vs?.featherPx ?? 0;
+    const antiAliased = vs?.antiAliased !== false;
+    const localPoly = point2dToLocalPolygon(rings as never, {
+      antiAliased,
+      ...(feather > 0 ? { feather } : {}),
+    });
+    return layerLocalToFrameLocal(localPoly, fragment, frame);
   },
 
   /**

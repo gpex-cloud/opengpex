@@ -24,7 +24,7 @@ import {
   calculateResizedRect, clampRectWithAspect, clampPointToRect, balanceVectorByAspect,
   clampRectWithOverlap, getLayerBoundingBox, getRectIntersection, getSurroundingRects,
   isPointInRect, isPointInShape, testLayerHit, pickLayersAt, pickTopLayer,
-  getRectUnion, getMultiRectUnion, getRectCenter
+  getRectUnion, getMultiRectUnion, getLocalRectCenter, getWorldRectCenter
 } from './operators/space';
 import {
   asWorldRect, asLocalRect, asWorldPoint, asViewportRect,
@@ -49,7 +49,7 @@ import {
   invertRings, isBoundingRing, computePolygonBounds as computePolygonBoundsP2D,
   rectToLocalPolygon, ellipseToLocalPolygon
 } from './operators/point2d';
-import { snapRect, snapEdge, snapEdgeRotated, snapToPixel, snapRectToPixel } from './operators/snapping';
+import { snapRect, snapEdge, snapEdgeRotated, snapToPixel, snapLocalRectToLatticeRounded, snapWorldRectToLatticeExpanded } from './operators/snapping';
 import {
   decomposeMatrix,
   getLayerWorldMatrix,
@@ -89,30 +89,28 @@ export function createGeometryService(): GeometryService {
   return {
     Matrix: Matrix3x3,
     space: {
-      screenToWorld: (vx: number, vy: number, frame: Frame, camera?: CameraState) => screenToWorld(vx, vy, camera || frame.camera, frame.canvas),
-      worldToScreen: (wx: number, wy: number, frame: Frame, camera?: CameraState) => worldToScreen(wx, wy, camera || frame.camera, frame.canvas),
-      worldToLocal: (wx: number, wy: number, frame: Frame) => worldToLocal(wx, wy, frame.canvas),
-      localToWorld: (px: number, py: number, frame: Frame) => localToWorld(px, py, frame.canvas),
-      localToWorldRect: (rect: Rect, frame: Frame) => localToWorldRect(rect, frame.canvas),
+      screenToWorld: (vx: number, vy: number, canvasDim: Dimensions, camera: CameraState) => screenToWorld(vx, vy, camera, canvasDim),
+      worldToScreen: (wx: number, wy: number, canvasDim: Dimensions, camera: CameraState) => worldToScreen(wx, wy, camera, canvasDim),
+      worldToLocal: (wx: number, wy: number, canvasDim: Dimensions) => worldToLocal(wx, wy, canvasDim),
+      localToWorld: (px: number, py: number, canvasDim: Dimensions) => localToWorld(px, py, canvasDim),
+      localToWorldRect: (rect: Rect, canvasDim: Dimensions) => localToWorldRect(rect, canvasDim),
       localToWorldCenter: (
         startCenter: { cx: number; cy: number },
         startLocalRect: Rect,
         nextLocalRect: Rect,
         orientation: { rotation: number; flip?: { h: boolean; v: boolean } }
       ) => localToWorldCenter(startCenter, startLocalRect, nextLocalRect, orientation),
-      worldToLocalRect: (rect: WorldRect, frame: Frame) => worldToLocalRect(rect, frame.canvas),
-      screenToLocal: (vx: number, vy: number, frame: Frame, camera?: CameraState) => screenToLocal(vx, vy, camera || frame.camera),
-      localToScreen: (px: number, py: number, frame: Frame, camera?: CameraState) => localToScreen(px, py, camera || frame.camera),
-      localToScreenRect: (rect: Rect, frame: Frame, camera?: CameraState) => {
-        const cam = camera || frame.camera;
-        const { x, y } = localToScreen(rect.x, rect.y, cam);
-        const k = cam.k;
+      worldToLocalRect: (rect: WorldRect, canvasDim: Dimensions) => worldToLocalRect(rect, canvasDim),
+      screenToLocal: (vx: number, vy: number, camera: CameraState) => screenToLocal(vx, vy, camera),
+      localToScreen: (px: number, py: number, camera: CameraState) => localToScreen(px, py, camera),
+      localToScreenRect: (rect: Rect, camera: CameraState) => {
+        const { x, y } = localToScreen(rect.x, rect.y, camera);
+        const k = camera.k;
         return asViewportRect({ x, y, w: rect.w * k, h: rect.h * k });
       },
-      worldToScreenRect: (rect: WorldRect, frame: Frame, camera?: CameraState) => {
-        const cam = camera || frame.camera;
-        const { x, y } = worldToScreen(rect.x, rect.y, cam, frame.canvas);
-        const k = cam.k;
+      worldToScreenRect: (rect: WorldRect, canvasDim: Dimensions, camera: CameraState) => {
+        const { x, y } = worldToScreen(rect.x, rect.y, camera, canvasDim);
+        const k = camera.k;
         return asViewportRect({ x, y, w: rect.w * k, h: rect.h * k });
       },
       getLayerLocalAABB: (l: Layer, wr: WorldRect, extra?: LayerPoseOverride) => {
@@ -124,7 +122,8 @@ export function createGeometryService(): GeometryService {
       clampPointToRect: (p: Point2D, r: Dimensions) => clampPointToRect(p, r),
       balanceVectorByAspect: (v: Point2D, a: number, d: Point2D) => balanceVectorByAspect(v, a, d),
       getRectIntersection: <T extends Rect>(r1: T, r2: T, minSize?: number) => getRectIntersection(r1, r2, minSize),
-      getRectCenter: (rect: Rect) => getRectCenter(rect),
+      getLocalRectCenter: (rect: Rect) => getLocalRectCenter(rect),
+      getWorldRectCenter: (rect: Rect, canvasDim: Dimensions) => getWorldRectCenter(rect, canvasDim),
       getRectUnion: <T extends Rect>(r1: T, r2: T) => getRectUnion(r1, r2),
       getMultiRectUnion: <T extends Rect>(rects: T[]) => getMultiRectUnion(rects),
       getSurroundingRects: <T extends Rect>(outer: T, hole: T) => getSurroundingRects(outer, hole),
@@ -197,11 +196,14 @@ export function createGeometryService(): GeometryService {
         frame: Frame,
         options?: { threshold?: number; snapToCanvas?: boolean; snapToLayers?: boolean; maxSnapTargets?: number }
       ) => snapEdgeRotated(localRect, handle, pose, frame, options),
-      snapRectToPixel: (
-        targetRect: WorldRect,
-        canvasDim: Dimensions,
-        strategy?: 'round' | 'floor' | 'ceil'
-      ) => snapRectToPixel(targetRect, canvasDim, strategy),
+      // The lattice placement OPERATOR (pure math). The "when does a box
+      // align" decision lives at `layers.snap.snapLayerPlacement`, which
+      // consumes this method — service layers consume the geometry service,
+      // never operator modules directly.
+      snapLocalRectToLatticeRounded: (rect: LocalRect, opts?: { snapDimension?: boolean }) =>
+        snapLocalRectToLatticeRounded(rect, opts),
+      snapWorldRectToLatticeExpanded: (rect: WorldRect, canvasDim: Dimensions) =>
+        snapWorldRectToLatticeExpanded(rect, canvasDim),
     },
     shape: {
       getSmoothSvgPath: (shape: LocalShape) => getSmoothSvgPath(shape),

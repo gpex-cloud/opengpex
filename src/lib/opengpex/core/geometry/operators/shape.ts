@@ -389,6 +389,12 @@ export function worldToLocalShape(shape: WorldShape, target: Layer | Frame): Loc
 export function unitedShapeOfLayers(layers: Layer[]): WorldShape | null {
   if (layers.length === 0) return null;
 
+  // EXACT (unsnapped) bounds: the bake ROI consumer re-snaps onto the canvas
+  // texel lattice, whose phase depends on the canvas dimension's parity. A
+  // world-integer snap HERE would pre-empt that alignment with the wrong
+  // lattice on odd-dimension canvases, bloating the window by one phantom
+  // texel column per side (probe-verified: a 20px brush stroke baked 22px
+  // wide on a 115px canvas).
   const boxes = layers.map(l => getLayerBoundingBox(l));
   const unionBox = getMultiRectUnion(boxes);
   if (!unionBox) return null;

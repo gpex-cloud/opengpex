@@ -18,7 +18,7 @@
  */
 
 import { Frame, Layer, VectorMask, BitmapMask } from '@opengpex/editor/core/types/models';
-import { LocalShape, LocalPolygon, LocalRect, Dimensions } from '@opengpex/editor/core/types/primitives';
+import { LocalShape, LocalPolygon, LocalRect, WorldRect, Dimensions, Point2D } from '@opengpex/editor/core/types/primitives';
 import type { BakeToAssetOptions, BakeToAssetResult, BuildPhysicalPatchOptions } from './services/baking';
 import type { ClipMode, ClipFragmentResult } from './services/clipping/route';
 import type { MergeStrategyOp, MergeOptions } from './services/merging';
@@ -54,6 +54,10 @@ export interface LayerFactoryNamespace {
   createLayer: (type: Layer['type'] | 'blank', patch?: Partial<Omit<Layer, 'type'>>) => Layer;
   getNewFrame: (patch: Partial<Frame>) => Frame;
   getNewLayerName: (layers: Array<{ name: string }>, baseName?: string) => string;
+  /** Smart name resolved against ALL layers of the frame (the all-layers boilerplate collapsed); filtered-array callers use getNewLayerName directly. */
+  getNewLayerNameFor: (frame: Pick<Frame, 'layers'>, baseName?: string) => string;
+  /** Pose-preserving geometric quartet rebaser (bounds in → {cx, cy, bounding, visibleShape} out). */
+  rebaseToBounds: (bounds: { x: number; y: number; w: number; h: number }, opts?: { snapHalf?: boolean }) => { cx: number; cy: number; bounding: { w: number; h: number }; visibleShape: LocalShape };
   getBlank: () => Partial<Layer>;
   bakedLayerPatch: (bounds: { x: number; y: number; w: number; h: number }, opts?: BuildPhysicalPatchOptions) => Partial<Layer>;
   /** Ingest composition: decode + gamut sniff + asset registration, then layer production. */
@@ -96,6 +100,37 @@ export interface LayerBakeNamespace {
  * through the LayerKind table); clip / bake own the heavy async pixel
  * operations (clip decision table / asset pipeline respectively).
  */
+/**
+ * LayerSnapNamespace: LAYER PLACEMENT alignment on the canvas-local integer
+ * lattice — the BUSINESS home of the "when does a layer/element box align to
+ * the pixel grid" decision. The geometry operators stay pure math (they know
+ * HOW to snap, never WHEN); this namespace owns the placement posture:
+ * round the top-left (an odd-sized element keeps its natural half-integer
+ * center), round the size only when the tool re-derives its bounding from
+ * the same box after a resize. It is deliberately distinct from
+ * `geometry.snapping` (interactive guide/threshold snapping — a different
+ * family) and from the engine's window snap (`snapWorldRectToLatticeExpanded`,
+ * engine-internal single source for pixel windows).
+ */
+export interface LayerSnapNamespace {
+  /**
+   * Snap a canvas-local placement rect onto the integer lattice: rounds the
+   * top-left corner; `snapDimension: true` additionally rounds w/h (tools whose
+   * bounding must stay consistent between create and later resize paths).
+   * Returns the PLACEMENT RESULT as one bundle — the aligned rect (BRANDED
+   * LocalRect: the operator's coordinate-space provenance flows straight
+   * through, so consumers never re-wrap), the SAME rect in world coordinates
+   * (for callers anchoring in the cx/cy world basis), and its center resolved
+   * to world coordinates — a caller building a layer record needs no second
+   * center-conversion step.
+   */
+  snapLayerPlacement: (
+    rect: LocalRect,
+    canvasDim: Dimensions,
+    opts?: { snapDimension?: boolean }
+  ) => { rect: LocalRect; worldRect: WorldRect; worldCenter: Point2D };
+}
+
 export interface LayerService {
   /** Synchronous layer/frame record operations (creation + state changes + reads). */
   factory: LayerFactoryNamespace;
@@ -103,6 +138,8 @@ export interface LayerService {
   clip: LayerClipNamespace;
   /** Heavy async bake operations (asset pipeline). */
   bake: LayerBakeNamespace;
+  /** Layer placement alignment on the document pixel lattice (business posture). */
+  snap: LayerSnapNamespace;
 }
 /**
  * Triplet: Triplet structure (peel session: host / exchange / stamps)

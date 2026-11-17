@@ -25,21 +25,14 @@
  * @module plugins/base/overlays/BrushOverlay/interactions
  */
 
-import {
-  InteractionHandler,
-  InteractionEvent,
-  Layer,
-  StrokeData,
-  StrokePoint,
-  asLocalShape,
-} from '@opengpex/editor/core/types';
-import { LayerFactory } from '@opengpex/editor/core/layer';
-import { fromHex, type ColorValue } from '@opengpex/editor/core/engine/color';
-import { PERF_MON } from '@opengpex/editor/core/helpers/config';
-import { InteractionTransaction } from '@opengpex/editor/stage/interaction/Transaction';
-import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
-import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
-import { advanceRope, applyTaper, densifyTaperZones, taperZones, tightenStroke } from './geometry';
+import {InteractionHandler, InteractionEvent, Layer, StrokeData, StrokePoint, asLocalShape} from '@opengpex/editor/core/types';
+import {LayerFactory} from '@opengpex/editor/core/layer';
+import {fromHex, type ColorValue} from '@opengpex/editor/core/engine/color';
+import {PERF_MON} from '@opengpex/editor/core/helpers/config';
+import {InteractionTransaction} from '@opengpex/editor/stage/interaction/Transaction';
+import {CraftDrawerAPI} from '../../drawers/CraftDrawer/protocols';
+import {ColorOptionsAPI} from '../../options/ColorOptions/protocols';
+import {advanceRope, applyTaper, densifyTaperZones, taperZones, tightenStroke} from './geometry';
 import * as P from './protocols';
 
 const ACTIVE_CRAFT_KEY = CraftDrawerAPI.signals.activeCraft;
@@ -220,10 +213,9 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
     geom: { w: number; h: number; cx: number; cy: number },
   ): Layer => {
     const frame = e.activeFrame;
-    const layersArray = frame.layers.order.map((id) => frame.layers.byId[id]);
 
     return LayerFactory.createLayer('vector', {
-      name: LayerFactory.getNewLayerName(layersArray, 'Stroke'),
+      name: e.layers.factory.getNewLayerNameFor(frame, 'Stroke'),
       cx: geom.cx,
       cy: geom.cy,
       bounding: { w: geom.w, h: geom.h },
@@ -543,10 +535,10 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
         tx.update(
           {
             strokes: [{ ...strokeData, box: { x: 0, y: 0, w: tight.box.w, h: tight.box.h } }],
-            bounding: { w: tight.box.w, h: tight.box.h },
-            visibleShape: asLocalShape({ x: 0, y: 0, w: tight.box.w, h: tight.box.h }),
-            cx: tight.cx,
-            cy: tight.cy,
+            // Shared pose-preserving rebaser (factory); the tighten box is
+            // exactly the bounds rect its cx/cy describe (pixel-invariant,
+            // see geometry.ts).
+            ...e.layers.factory.rebaseToBounds({ x: tight.cx - tight.box.w / 2, y: tight.cy - tight.box.h / 2, w: tight.box.w, h: tight.box.h }),
           },
           'layer',
           layerId,

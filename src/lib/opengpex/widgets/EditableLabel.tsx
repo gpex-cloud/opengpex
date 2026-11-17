@@ -106,11 +106,11 @@ export default function EditableLabel({
 
   return (
     <div 
-      className={`${doubleClick ? 'cursor-pointer' : 'cursor-text'} hover:bg-white/5 transition-all px-1.5 py-0.5 rounded-md pointer-events-auto flex items-center gap-1 group/editable ${className}`}
+      className={`min-w-0 ${doubleClick ? 'cursor-pointer' : 'cursor-text'} hover:bg-white/5 transition-all pr-1.5 py-0.5 rounded-md pointer-events-auto flex items-center gap-1 group/editable ${className}`}
       {...triggerProps}
     >
       {prefix && <span className="opacity-40 text-[9px] font-black uppercase tracking-widest group-hover/editable:text-indigo-400 transition-colors">{prefix}</span>}
-      <span className="font-bold">{maxDisplayLength && value.length > maxDisplayLength ? value.slice(0, maxDisplayLength - 3) + '...' : value}</span>
+      <span className="min-w-0 truncate font-bold">{maxDisplayLength && value.length > maxDisplayLength ? value.slice(0, maxDisplayLength - 3) + '...' : value}</span>
       {suffix && <span className="opacity-40 text-[9px] font-black uppercase tracking-widest group-hover/editable:text-indigo-400 transition-colors">{suffix}</span>}
     </div>
   );

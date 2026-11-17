@@ -384,8 +384,12 @@ export function getLayerBoundingBox(l: Layer, w_matrix?: IMatrix3x3): WorldRect 
   const M = w_matrix instanceof Matrix3x3 ? w_matrix : (w_matrix ? new Matrix3x3(w_matrix.a, w_matrix.b, w_matrix.c, w_matrix.d, w_matrix.tx, w_matrix.ty) : getLayerWorldMatrix(l));
 
   const centerMatrix = M.translate(rect.x + rect.w / 2, rect.y + rect.h / 2);
-  const bbox = Matrix3x3.extractAABB({ w: rect.w, h: rect.h }, centerMatrix);
-  return asWorldRect(bbox);
+  // Always the EXACT continuous bounds. The document texel lattice's phase
+  // depends on the canvas dimension's parity (odd width ⇒ half-integer
+  // boundaries), so this pure geometry operator must not pick an integer
+  // snap: consumers that need a pixel window align it through the snap
+  // single source (snapWorldRectToLatticeExpanded), which knows the lattice phase.
+  return asWorldRect(Matrix3x3.extractAABBRaw({ w: rect.w, h: rect.h }, centerMatrix));
 }
 
 /**
@@ -522,10 +526,23 @@ export function getMultiRectUnion<T extends Rect>(rects: T[]): T | null {
 /**
  * Calculate absolute geometric center point of rectangle
  */
-export function getRectCenter(rect: Rect): Point2D {
+export function getLocalRectCenter(rect: Rect): Point2D {
   return {
     x: rect.x + rect.w / 2,
     y: rect.y + rect.h / 2
   };
+}
+
+/**
+ * getWorldRectCenter — center of a CANVAS-LOCAL rect, resolved to world
+ * coordinates in one step. The local/world pair makes the coordinate space
+ * explicit at the call site: `getLocalRectCenter` stays the pure local-space
+ * center; callers that need the layer-record anchor (cx/cy are world-space,
+ * canvas-center origin) go through this one instead of center + localToWorld
+ * by hand.
+ */
+export function getWorldRectCenter(rect: Rect, canvasDim: Dimensions): Point2D {
+  const c = getLocalRectCenter(rect);
+  return localToWorld(c.x, c.y, canvasDim);
 }
 

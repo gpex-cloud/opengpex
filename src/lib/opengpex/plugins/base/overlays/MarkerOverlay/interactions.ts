@@ -17,18 +17,18 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { Frame, GeometryService, InteractionEvent, InteractionHandler, Layer, LocalRect, asLocalShape } from '@opengpex/editor/core/types';
+import {Frame, GeometryService, InteractionEvent, InteractionHandler, Layer, LocalRect, asLocalRect} from '@opengpex/editor/core/types';
 import type { MarkerData } from './marker/types';
-import { resolveNextMarkerData } from './marker/pending';
+import {resolveNextMarkerData} from './marker/pending';
 
-import { LayerFactory } from '@opengpex/editor/core/layer';
-import { InteractionTransaction } from '@opengpex/editor/stage/interaction/Transaction';
-import { createTransformHandler, ResizeHandle } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
-import { ROTATE_CURSOR } from '@opengpex/editor/icons';
-import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
+import {LayerFactory} from '@opengpex/editor/core/layer';
+import {InteractionTransaction} from '@opengpex/editor/stage/interaction/Transaction';
+import {createTransformHandler, ResizeHandle} from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
+import {ROTATE_CURSOR} from '@opengpex/editor/icons';
+import {CraftDrawerAPI} from '../../drawers/CraftDrawer/protocols';
 import type { CraftDrawerConfig } from '../../drawers/CraftDrawer/protocols';
-import { MARKER_REGISTRY } from './marker/registry';
-import { _CMD_PLACE_UID, MarkerOverlayAPI, resolveMarkerToolState } from './protocols';
+import {MARKER_REGISTRY} from './marker/registry';
+import {_CMD_PLACE_UID, MarkerOverlayAPI, resolveMarkerToolState} from './protocols';
 
 /** Shared signal keys (cross-plugin constants) */
 const ACTIVE_CRAFT_KEY = CraftDrawerAPI.signals.activeCraft;
@@ -75,7 +75,7 @@ function setMarkerPreview(next: MarkerDrawPreview | null): void {
  * Accepts a canvas-local point and converts to world via the geometry service.
  */
 function findMarkerLayerAtPoint(geometry: GeometryService, frame: Frame, point: { x: number; y: number }): Layer | null {
-  const worldPoint = geometry.space.localToWorld(point.x, point.y, frame);
+  const worldPoint = geometry.space.localToWorld(point.x, point.y, frame.canvas);
   const hits = geometry.space.pickLayersAt(worldPoint, frame.layers);
   return hits.find((l: Layer) => l.type === 'vector' && !!l.markerData) || null;
 }
@@ -370,10 +370,9 @@ export const createMarkerResizeHandler = (): InteractionHandler => {
       }
 
       tx.update({
-        cx: newCx,
-        cy: newCy,
-        bounding: { w: finalW, h: finalH },
-        visibleShape: asLocalShape({ x: 0, y: 0, w: finalW, h: finalH }),
+        // Shared pose-preserving rebaser (factory): the quartet stays
+        // consistent by construction; this gesture keeps the layer pose.
+        ...e.layers.factory.rebaseToBounds({ x: newCx - finalW / 2, y: newCy - finalH / 2, w: finalW, h: finalH }),
         markerData: nextMarkerData,
       }, 'layer', resizeLayerId);
     },
@@ -613,25 +612,25 @@ export const createMarkerDrawHandler = (): InteractionHandler => {
         { shiftKey: e.keys.shift },
       );
 
-      // Pixel-align the bounding box directly in canvas-local space (centerLocal/bounding
-      // are already canvas-local, top-left-origin — routing them through
-      // snapRectToPixel's WorldRect contract mislabeled the coordinate system and left
-      // w/h as floats, which is why a drag-created marker's bounding differed from the
-      // same marker's bounding after a resize), then convert its center to world space.
-      const alignedRect = {
-        x: Math.round(centerLocal.x - bounding.w / 2),
-        y: Math.round(centerLocal.y - bounding.h / 2),
-        w: Math.round(bounding.w),
-        h: Math.round(bounding.h),
-      };
-      const alignedCenterLocal = e.geometry.space.getRectCenter(alignedRect);
-      const worldCenter = e.geometry.space.localToWorld(alignedCenterLocal.x, alignedCenterLocal.y, frame);
+      // Pixel-align the placement rect on the canvas-local lattice through the
+      // layer service's placement posture. snapDimension MUST stay on: the marker's
+      // bounding is re-derived from the same box after a later resize, so w/h
+      // must already be integers here or the two paths disagree.
+      const { rect: alignedRect, worldCenter } = e.layers.snap.snapLayerPlacement(
+        asLocalRect({
+          x: centerLocal.x - bounding.w / 2,
+          y: centerLocal.y - bounding.h / 2,
+          w: bounding.w,
+          h: bounding.h,
+        }),
+        frame.canvas,
+        { snapDimension: true },
+      );
 
       const finalData = { ...markerData, ...patch } as MarkerData;
 
-      const layersArray = frame.layers.order.map(id => frame.layers.byId[id]);
       const baseName = def.layerName ? def.layerName(finalData) : def.label;
-      const smartName = LayerFactory.getNewLayerName(layersArray, baseName);
+      const smartName = e.layers.factory.getNewLayerNameFor(frame, baseName);
 
       const markerLayer = LayerFactory.createLayer('vector', {
         name: smartName,

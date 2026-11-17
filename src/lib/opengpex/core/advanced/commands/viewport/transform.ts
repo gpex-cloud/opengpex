@@ -20,7 +20,6 @@
 'use client';
 
 import { EditorCommand, EditorContextValue, Frame } from '@opengpex/editor/core/types';
-import { transformFrame } from '@opengpex/editor/core/geometry/operators/transform';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 
 /**
@@ -37,13 +36,13 @@ export const ViewportTransformCommands = {
     name: 'Rotate Frame',
     undoable: true,
     execute: (ctx: EditorContextValue, payload: { direction: 'left' | 'right' }): void => {
-      const { activeFrame, actions } = ctx;
+      const { activeFrame, actions, geometry } = ctx;
       if (!activeFrame) return;
 
       actions.fast.reset();
 
       const operation = payload.direction === 'right' ? 'rotate_r' : 'rotate_l';
-      const nextFramePatch = transformFrame(activeFrame, operation);
+      const nextFramePatch = geometry.transform.transformFrame(activeFrame, operation);
 
       actions.updateFrame(activeFrame.id, {
         ...nextFramePatch,
@@ -80,13 +79,13 @@ export const ViewportTransformCommands = {
     name: 'Flip Frame',
     undoable: true,
     execute: (ctx: EditorContextValue, payload: { direction: 'horizontal' | 'vertical' }): void => {
-      const { activeFrame, actions } = ctx;
+      const { activeFrame, actions, geometry } = ctx;
       if (!activeFrame) return;
 
       actions.fast.reset();
 
       const operation = payload.direction === 'horizontal' ? 'flip_h' : 'flip_v';
-      const nextFramePatch = transformFrame(activeFrame, operation);
+      const nextFramePatch = geometry.transform.transformFrame(activeFrame, operation);
 
       actions.updateFrame(activeFrame.id, {
         ...nextFramePatch,
@@ -120,7 +119,7 @@ export const ViewportTransformCommands = {
     category: 'View',
     undoable: true,
     execute: (ctx: EditorContextValue): void => {
-      const { activeFrame, actions } = ctx;
+      const { activeFrame, actions, geometry } = ctx;
       if (!activeFrame) return;
 
       actions.fast.reset();
@@ -133,20 +132,20 @@ export const ViewportTransformCommands = {
       let nextFrame: Frame = activeFrame;
 
       if (currentRot === 90) {
-        nextFrame = { ...nextFrame, ...transformFrame(nextFrame, 'rotate_l') };
+        nextFrame = { ...nextFrame, ...geometry.transform.transformFrame(nextFrame, 'rotate_l') };
       } else if (currentRot === 180) {
-        nextFrame = { ...nextFrame, ...transformFrame(nextFrame, 'rotate_l') };
-        nextFrame = { ...nextFrame, ...transformFrame(nextFrame, 'rotate_l') };
+        nextFrame = { ...nextFrame, ...geometry.transform.transformFrame(nextFrame, 'rotate_l') };
+        nextFrame = { ...nextFrame, ...geometry.transform.transformFrame(nextFrame, 'rotate_l') };
       } else if (currentRot === 270) {
-        nextFrame = { ...nextFrame, ...transformFrame(nextFrame, 'rotate_r') };
+        nextFrame = { ...nextFrame, ...geometry.transform.transformFrame(nextFrame, 'rotate_r') };
       }
 
       const currentBase = nextFrame.layers.byId[nextFrame.layers.order[0]];
       if (currentBase.flip.h) {
-        nextFrame = { ...nextFrame, ...transformFrame(nextFrame, 'flip_h') };
+        nextFrame = { ...nextFrame, ...geometry.transform.transformFrame(nextFrame, 'flip_h') };
       }
       if (currentBase.flip.v) {
-        nextFrame = { ...nextFrame, ...transformFrame(nextFrame, 'flip_v') };
+        nextFrame = { ...nextFrame, ...geometry.transform.transformFrame(nextFrame, 'flip_v') };
       }
 
       actions.updateFrame(activeFrame.id, {

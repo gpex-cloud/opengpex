@@ -244,8 +244,10 @@ export function prepareVectorSources(
     // downstream sampling is bounded to [0, maxU]×[0, maxV].
     vectorPass.setViewport(0, 0, reqW, reqH, 0, 1);
     // Density = the transient's physical texels per logical px. Resolution-
-    // DEPENDENT strategies (text: glyph atlas rasterization band) read it;
-    // analytic ones (sdf/stroke) ignore it and stay sharp at any texel count.
+    // DEPENDENT strategies read it: the text glyph atlas rasterization band,
+    // and the SDF analytic rect solver (L1 — it integrates coverage over one
+    // PHYSICAL texel cell, so it must know the cell's logical size). The
+    // stroke ribbon and the remaining SDF shapes stay smoothstep/fwidth.
     renderer.render(vectorPass, vectorCtx, {
       params: source,
       density: Math.max(scale[0], scale[1]),

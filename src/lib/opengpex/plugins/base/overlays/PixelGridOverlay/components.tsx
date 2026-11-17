@@ -216,7 +216,7 @@ export function PixelGridOverlayContainer() {
       x: -f.canvas.w / 2, y: -f.canvas.h / 2,
       w: f.canvas.w, h: f.canvas.h
     });
-    const screenRect = geometry.space.worldToScreenRect(canvasWorldRect, f, cam);
+    const screenRect = geometry.space.worldToScreenRect(canvasWorldRect, f.canvas, cam);
 
     const { w: vw, h: vh } = viewportDimRef.current;
 

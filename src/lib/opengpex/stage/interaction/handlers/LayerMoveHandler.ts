@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { InteractionHandler, Layer, LayerMovePose } from '@opengpex/editor/core/types';
+import { InteractionHandler, Layer, LayerMovePose, asLocalRect } from '@opengpex/editor/core/types';
 import { InteractionMath, type SnapOpState } from '../Math';
 import { InteractionTransaction } from '../Transaction';
 
@@ -31,13 +31,17 @@ import { InteractionTransaction } from '../Transaction';
  *     pose.centerOffset for trivial reverse (no computeFragmentCenter needed).
  *   - onEnd uses worldToLocal + snapToPixel + localToWorld for pixel alignment.
  *
- * [Architecture Note] This handler is a candidate for migration to the LayerOverlay
- * plugin (`plugins/base/overlays/LayerOverlay/interactions/`), registered via the
- * plugin's `interactions` array — mirroring how ClipOverlay owns its move handler.
- * Rationale: LayerMoveHandler is a concrete business behavior (not a framework
- * factory like TransformHandler/AsyncHandler, nor a system fallback like
- * ViewportPanHandler), and its visual counterpart (outline + delta label) already
- * lives in LayerOverlay. Currently kept here for stability; relocate when ready.
+ * [Architecture Note] This handler is a SYSTEM-LEVEL component and stays in stage.
+ * The evidence: its test() is tool-agnostic (pan-mode bare drag or Cmd spring key,
+ * top layer under the pointer — it knows no tool); the Dispatcher hard-codes it as
+ * the spring-key global fallback ('layer-move', the framework guarantee "Cmd+drag
+ * moves the object under the pointer in any tool, without per-tool cooperation");
+ * tool-owned move handlers (marker/text/…) coordinate around it by outranking its
+ * priority 10. A framework guarantee cannot rest on an optional plugin, so the
+ * earlier idea of migrating it into LayerOverlay was inverted: the overlay owns the
+ * VISUALIZATION (outline + delta label) and reads state; it does not need to own
+ * the gesture. Layer-service access flows through the InteractionEvent injection
+ * (e.layers), so no plugin residency is required here either.
  */
 export const createLayerMoveHandler = (): InteractionHandler => {
   let startCanvasPoint = { x: 0, y: 0 };
@@ -140,9 +144,7 @@ export const createLayerMoveHandler = (): InteractionHandler => {
 
       // Convert to canvas local coordinates, build correct AABB rect
       const frame = e.activeFrame;
-      const localCenter = e.geometry.space.worldToLocal(
-        visibleCenterWorld.x, visibleCenterWorld.y, frame
-      );
+      const localCenter = e.geometry.space.worldToLocal(visibleCenterWorld.x, visibleCenterWorld.y, frame.canvas);
       const fragmentRect = {
         x: localCenter.x - pose.aabbSize.w / 2,  // ★ Use rotated AABB size
         y: localCenter.y - pose.aabbSize.h / 2,
@@ -160,9 +162,7 @@ export const createLayerMoveHandler = (): InteractionHandler => {
         x: snapped.x + pose.aabbSize.w / 2,
         y: snapped.y + pose.aabbSize.h / 2
       };
-      const snappedCenterWorld = e.geometry.space.localToWorld(
-        snappedCenterLocal.x, snappedCenterLocal.y, frame
-      );
+      const snappedCenterWorld = e.geometry.space.localToWorld(snappedCenterLocal.x, snappedCenterLocal.y, frame.canvas);
 
       // cx = visible center - centerOffset (subtract constant offset, no matrix inversion needed)
       const finalCx = snappedCenterWorld.x - pose.centerOffset.x;
@@ -175,34 +175,32 @@ export const createLayerMoveHandler = (): InteractionHandler => {
         if (targetLayer && pose) {
           const latest = e.actions.fast.latestLayer(e.activeFrame.id, targetLayer.id);
           if (latest) {
-            // ★ Pixel alignment: align visible AABB top-left edge to canvas pixel grid.
-            // We round the TOP-LEFT corner (not center) to preserve correct positioning
-            // for odd-dimension layers whose center is naturally at .5 (half-pixel).
-            // This matches the pre-refactoring snapRectToPixel approach that naturally
-            // handled odd/even canvas and layer dimensions.
+            // ★ Pixel alignment: align visible AABB top-left edge to canvas pixel grid,
+            // through the layer service's placement posture (round top-left, size
+            // preserved — an odd-sized layer keeps its natural half-integer center).
+            // SYSTEM COMPONENT: this handler stays in stage by design (tool-agnostic
+            // spring-key global fallback, dispatcher-guaranteed); the layer service
+            // reaches it through the InteractionEvent injection, no plugin residency
+            // required.
             const frame = e.activeFrame;
-            const currentVisibleCenter = {
-              x: latest.cx + pose.centerOffset.x,
-              y: latest.cy + pose.centerOffset.y
-            };
-            // World → Local (get center in canvas-local coords)
-            const local = e.geometry.space.worldToLocal(
-              currentVisibleCenter.x, currentVisibleCenter.y, frame
-            );
-            // Snap AABB top-left to pixel grid, then derive center
-            const halfW = pose.aabbSize.w / 2;
-            const halfH = pose.aabbSize.h / 2;
-            const topLeft = { x: local.x - halfW, y: local.y - halfH };
-            const alignedTopLeft = e.geometry.snapping.snapToPixel(topLeft);
-            const aligned = { x: alignedTopLeft.x + halfW, y: alignedTopLeft.y + halfH };
-            const alignedWorld = e.geometry.space.localToWorld(
-              aligned.x, aligned.y, frame
+            // World → Local (visible center in canvas-local coords), then the
+            // same marker-style posture: center-derived top-left rect in,
+            // aligned world anchor out — no manual half-extent reconstruction.
+            const localCenter = e.geometry.space.worldToLocal(latest.cx + pose.centerOffset.x, latest.cy + pose.centerOffset.y, frame.canvas);
+            const { worldCenter } = e.layers.snap.snapLayerPlacement(
+              asLocalRect({
+                x: localCenter.x - pose.aabbSize.w / 2,
+                y: localCenter.y - pose.aabbSize.h / 2,
+                w: pose.aabbSize.w,
+                h: pose.aabbSize.h,
+              }),
+              frame.canvas,
             );
 
             // cx = aligned visible center - fixed offset
             tx.update({
-              cx: alignedWorld.x - pose.centerOffset.x,
-              cy: alignedWorld.y - pose.centerOffset.y
+              cx: worldCenter.x - pose.centerOffset.x,
+              cy: worldCenter.y - pose.centerOffset.y
             }, 'layer', targetLayer.id);
           }
         }

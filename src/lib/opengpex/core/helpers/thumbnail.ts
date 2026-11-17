@@ -16,8 +16,9 @@
  * import, paste-to-new-frame slices, branch-from-selection) is produced
  * through one contract:
  *
- *   optional opaque-alpha crop → Worker resample to a 512px WebP →
- *   content-addressed asset registration → `{ src, assetId }`.
+ *   optional opaque-alpha crop → short-edge square padding →
+ *   Worker resample to a 512px WebP → content-addressed asset registration →
+ *   `{ src, assetId }`.
  *
  * The crop step exists because canvases routinely carry large transparent
  * margins (sprite sheets, GIF frames whose content sits in one corner). A
@@ -35,6 +36,14 @@
  * A rect spanning the whole source degenerates to case 3: identical output,
  * and the dominant path for opaque imports (JPEG) never enters the Worker's
  * crop branch at all.
+ *
+ * The resolved crop window is then squared: its short edges are expanded
+ * symmetrically around the content center until both edges match the longer
+ * one (clamped into the source bounds). Thumbnails render in square slots
+ * with cover-fit, so an uncorrected elongated bbox (a one-frame-wide GIF
+ * strip, a hairline brush stroke) would be scaled until its short edge
+ * fills the slot and the actual content cropped away; the padded square
+ * keeps the whole content visible with transparent margins.
  */
 
 import type { EditorContextValue, GamutId, LocalRect, Rect } from '../types';
@@ -125,7 +134,8 @@ export async function createFrameThumbnail(
 /**
  * Resolve the crop rect for a thumbnail request: explicit rect → scanned
  * bounds → none. A rect covering the whole source, or a failed scan, yields
- * `undefined` — the plain uncropped resample.
+ * `undefined` — the plain uncropped resample. A resolved rect is squared
+ * (short-edge compensation, see `expandShortEdgesToSquare`).
  */
 async function resolveCropRect(
   deps: FrameThumbnailDeps,
@@ -144,7 +154,45 @@ async function resolveCropRect(
     source.width != null && source.height != null &&
     rect.x <= 0 && rect.y <= 0 &&
     rect.w >= source.width && rect.h >= source.height;
-  return fullCanvas ? undefined : rect;
+  if (fullCanvas) return undefined;
+
+  // Without source dimensions the squared window cannot be clamped into the
+  // source (out-of-bounds windows get proportionally clipped by the Worker
+  // rather than padded, which would shift the content), so keep the
+  // uncorrected crop. All production callers pass width/height.
+  if (source.width == null || source.height == null) return rect;
+  return expandShortEdgesToSquare(rect, source.width, source.height);
+}
+
+/**
+ * Short-edge compensation: expand a crop rect symmetrically around the
+ * content center until both edges equal the longer one, so the resampled
+ * thumbnail is square and survives cover-fit display in square slots with
+ * its content intact. The expansion is clamped into the source bounds —
+ * the Worker's drawImage clips out-of-bounds source rects proportionally
+ * instead of padding them transparently, so an unclamped window would
+ * shift and rescale the content. When the source's own short edge is
+ * smaller than the content's long edge, the window stops at the source
+ * bound on that axis: the window never shrinks below the content bbox
+ * (w ≥ rect.w and h ≥ rect.h hold throughout), so content is never cut and
+ * the aspect ratio improves as far as the source allows. The returned
+ * window always contains `rect` entirely.
+ */
+function expandShortEdgesToSquare(rect: Rect, sourceW: number, sourceH: number): Rect {
+  const long = Math.max(rect.w, rect.h);
+  const w = Math.min(long, sourceW);
+  const h = Math.min(long, sourceH);
+  let x = Math.round(rect.x + rect.w / 2 - w / 2);
+  let y = Math.round(rect.y + rect.h / 2 - h / 2);
+  x = Math.max(0, Math.min(x, sourceW - w));
+  y = Math.max(0, Math.min(y, sourceH - h));
+  // Rounding can push the window up to half a pixel past a fractional
+  // content edge; pull it back so containment of `rect` is unconditional.
+  if (x > rect.x) x = Math.floor(rect.x);
+  if (x + w < rect.x + rect.w) x = Math.ceil(rect.x + rect.w) - w;
+  if (y > rect.y) y = Math.floor(rect.y);
+  if (y + h < rect.y + rect.h) y = Math.ceil(rect.y + rect.h) - h;
+  return { x, y, w, h };
 }
 
 /**

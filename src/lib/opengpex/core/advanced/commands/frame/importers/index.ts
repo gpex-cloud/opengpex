@@ -290,7 +290,6 @@ import { asLocalShape } from '@opengpex/editor/core/types';
 import { getDefaultCanvasClipBox } from '@opengpex/editor/core/helpers/selection';
 import { newFrameId } from '../_naming';
 import { LayerFactory } from '@opengpex/editor/core/layer';
-import { computeFragmentCenter } from '@opengpex/editor/core/geometry/operators/transform';
 import type { ImageMetadata } from '@opengpex/editor/core/files/types';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
 
@@ -385,7 +384,7 @@ export async function createFrameFromAsset(
   // CONTENT lands centered even when the crop window sits far from the
   // source asset's top-left (a slice from a big image carries a large
   // rect origin; zeroing cx/cy would render the slice off-canvas).
-  const pose = computeFragmentCenter(
+  const pose = geometry.transform.computeFragmentCenter(
     { x: 0, y: 0 },
     { x: visibleShape.x, y: visibleShape.y },
     0,

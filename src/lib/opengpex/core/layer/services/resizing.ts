@@ -67,7 +67,14 @@ export function createResampleOperations(
 
     // ── Non-uniform scale / uniform fallback: bake (flatten) then resample ──
     async function flattenResample(): Promise<{ newUrl: string; newAssetId: string; patch: Partial<Layer> }> {
-      const aabb = geometry.space.getLayerBoundingBox(layer);
+      // getLayerBoundingBox is exact-continuous (pure geometry, no lattice
+      // snap); the composite below publishes a lattice-snapped window, so the
+      // placement center must be derived from the SAME snap (single source)
+      // or the product shifts by up to half a texel against its bounds.
+      const aabb = geometry.snapping.snapWorldRectToLatticeExpanded(
+        geometry.space.getLayerBoundingBox(layer),
+        frame.canvas,
+      );
       const targetW = Math.max(1, Math.round(aabb.w * scaleX));
       const targetH = Math.max(1, Math.round(aabb.h * scaleY));
 

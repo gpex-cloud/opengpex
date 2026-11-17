@@ -122,8 +122,8 @@ export function useFastRectSync<T extends Element>(
     if (!box) return;
 
     let screenBox = space === 'local'
-      ? geometry.space.localToScreenRect(box as LocalRect, f, cam)
-      : geometry.space.worldToScreenRect(box as WorldRect, f, cam);
+      ? geometry.space.localToScreenRect(box as LocalRect, cam)
+      : geometry.space.worldToScreenRect(box as WorldRect, f.canvas, cam);
 
     if (pixelSnap) {
       screenBox = geometry.snapping.snapToPixel(screenBox);
@@ -176,8 +176,8 @@ export function useFastAnchorSync<T extends Element>(
     if (!point || !ref.current) return;
 
     const screenPt = space === 'local'
-      ? geometry.space.localToScreen(point.x, point.y, f, cam)
-      : geometry.space.worldToScreen(point.x, point.y, f, cam);
+      ? geometry.space.localToScreen(point.x, point.y, cam)
+      : geometry.space.worldToScreen(point.x, point.y, f.canvas, cam);
 
     const sx = Math.round(screenPt.x + (offset?.x ?? 0));
     const sy = Math.round(screenPt.y + (offset?.y ?? 0));
@@ -263,8 +263,8 @@ export function useFastSvgGroupSync(
 
     const k = geometry.getScale(f, cam);
     const { x, y } = space === 'local'
-      ? geometry.space.localToScreen(box.x, box.y, f, cam)
-      : geometry.space.worldToScreen(box.x, box.y, f, cam);
+      ? geometry.space.localToScreen(box.x, box.y, cam)
+      : geometry.space.worldToScreen(box.x, box.y, f.canvas, cam);
 
     ref.current.setAttribute('transform', `translate(${x}, ${y}) scale(${k})`);
   });

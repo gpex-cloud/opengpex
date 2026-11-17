@@ -109,7 +109,6 @@ export interface IMatrix3x3Constructor {
   flipV(): IMatrix3x3;
   zoomAt(anchor: Point2D, ratio: number): IMatrix3x3;
   transformRect(rect: Rect, container: Dimensions, op: GeometryOp): Rect;
-  extractAABB(size: Dimensions, matrix: IMatrix3x3): Rect;
 }
 
 /**

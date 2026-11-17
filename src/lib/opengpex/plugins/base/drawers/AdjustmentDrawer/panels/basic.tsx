@@ -251,7 +251,7 @@ function AdjustmentSliderRow({
   return (
     <div className="space-y-0.5 group">
       <span
-        className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-tight"
+        className="text-[9px] leading-none font-bold text-[var(--text-muted)] uppercase tracking-tight"
         title={spec.hint}
       >
         {spec.label}
@@ -507,7 +507,7 @@ export function BasicPanel() {
 
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
-      <div className="space-y-2">
+      <div className="space-y-1">
         {SLIDERS.map((spec) => (
           <React.Fragment key={spec.key}>
             <AdjustmentSliderRow

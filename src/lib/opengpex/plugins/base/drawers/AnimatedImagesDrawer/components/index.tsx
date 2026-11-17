@@ -20,6 +20,7 @@
 "use client";
 
 import { Clapperboard } from "lucide-react";
+import { DrawerHeader } from "@opengpex/editor/workspace/components/DrawerHeader";
 
 import { useAnimatedImagesPlayer, useAnimatedImagesExport } from "../hooks";
 import { PlayerBar } from "./PlayerBar";
@@ -40,19 +41,21 @@ export function AnimatedImagesComponent() {
    return (
       <div className="flex flex-col gap-2 px-2 pt-1 pb-1">
          {/* Header — always visible */}
-         <div className="flex justify-between items-center h-6 shrink-0">
-            <div className="flex items-center gap-2">
-               <Clapperboard size={12} className="text-indigo-600 dark:text-indigo-400" />
+         <DrawerHeader
+            icon={<Clapperboard size={12} className="text-indigo-600 dark:text-indigo-400" />}
+            title={
                <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)]">
                   Animated Images
                </span>
-               {sequence && (
+            }
+            leftExtras={
+               sequence ? (
                   <span className="ml-1 text-[8px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded shadow-sm border border-emerald-500/20 uppercase">
                      {sequence.type}
                   </span>
-               )}
-            </div>
-         </div>
+               ) : null
+            }
+         />
 
          {/* Content: sequence detected → playback + export; otherwise → placeholder */}
          {sequence ? (

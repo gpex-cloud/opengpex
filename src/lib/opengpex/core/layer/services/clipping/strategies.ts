@@ -213,7 +213,7 @@ export function createFragmentOperations(
         // fragment's — turning the fragment transparent.
         vectorMasks: [],
         bitmapMasks: [],
-        name: LayerFactory.getNewLayerName(frame.layers.order.map(id => frame.layers.byId[id])),
+        name: LayerFactory.getNewLayerNameFor(frame, `${layer.name} Copy`),
         hostId: undefined
       });
       tightVisible = { ...intersection.visibleShape };
@@ -245,7 +245,7 @@ export function createFragmentOperations(
       const { id: _id, hostId: _pid, role: _role, locked: _locked, interactive: _inter, ...layerData } = layer;
       newLayer = LayerFactory.createLayer(layer.type, {
         ...layerData,
-        name: LayerFactory.getNewLayerName(frame.layers.order.map(id => frame.layers.byId[id])),
+        name: LayerFactory.getNewLayerNameFor(frame, `${layer.name} Copy`),
         vectorMasks: [
           ...LayerFactory.cleanInheritedMasks(layerData.vectorMasks),
           LayerFactory.getNewVectorMask(localShape, { inverted: true }),
@@ -431,6 +431,11 @@ export function createFragmentOperations(
           layer,
           frame,
         ).rect;
+        // No intersection means the selection lies entirely outside the
+        // source layer's visible extent; fall back to the FULL selection so
+        // the downstream trim pass (bounded by this extent) still sees the
+        // feather band the selection may carry. The trim scan itself decides
+        // what content survives — this extent is a window, not a truth claim.
         srcExtent = geometry.space.getRectIntersection(selRect, vsFrameRect) ?? selRect;
       }
       const clampExtent = {
@@ -486,7 +491,7 @@ export function createFragmentOperations(
       assetId: assetId,
       vectorMasks: [],
       bitmapMasks: [],
-      name: LayerFactory.getNewLayerName(frame.layers.order.map(id => frame.layers.byId[id])),
+      name: LayerFactory.getNewLayerNameFor(frame, `${layer.name} Copy`),
       hostId: undefined,
       // visibleShape records the cut honestly per the nature split:
       // the plane is a trim box, and `featherPx`/`antiAliased` carry THIS

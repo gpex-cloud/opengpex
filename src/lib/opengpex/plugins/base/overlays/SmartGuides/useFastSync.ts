@@ -59,7 +59,7 @@ export function useSmartGuidesFastSync(
 
     // 1. Process vertical guide (X)
     if (typeof x === 'number') {
-      const screenX = geometry.space.worldToScreen(x, 0, f, cam).x;
+      const screenX = geometry.space.worldToScreen(x, 0, f.canvas, cam).x;
       const snappedX = geometry.snapping.snapPoint({ x: screenX, y: 0 }).x;
 
       Motion.set(xRef.current, {
@@ -77,7 +77,7 @@ export function useSmartGuidesFastSync(
 
     // 2. Process horizontal guide (Y)
     if (typeof y === 'number') {
-      const screenY = geometry.space.worldToScreen(0, y, f, cam).y;
+      const screenY = geometry.space.worldToScreen(0, y, f.canvas, cam).y;
       const snappedY = geometry.snapping.snapPoint({ x: 0, y: screenY }).y;
 
       Motion.set(yRef.current, {

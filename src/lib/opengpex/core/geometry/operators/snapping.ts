@@ -17,10 +17,10 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { Matrix3x3 } from '../matrix';
-import { CameraState, Dimensions, Frame, Layer, WorldPoint, Rect, asWorldPoint, Point2D, WorldRect, asLocalRect, asWorldRect, LocalRect } from '@opengpex/editor/core/types';
-import { getLayerWorldMatrix } from './transform';
-import { worldToLocalRect, localToWorldRect } from './space';
+import {Matrix3x3} from '../matrix';
+import {CameraState, Dimensions, Frame, Layer, WorldPoint, Rect, asWorldPoint, Point2D, WorldRect, asLocalRect, asWorldRect, LocalRect} from '@opengpex/editor/core/types';
+import {getLayerWorldMatrix} from './transform';
+import {} from './space';
 
 /**
  * Snap rectangle to physical pixel grid
@@ -712,28 +712,38 @@ function findNearestTarget(value: number, targets: number[], threshold: number):
 }
 
 /**
- * Snap a rectangle under the world coordinate system to the canvas local physical pixel grid (Snap world rectangle boundaries to canvas physical pixel grid)
+/**
+ * snapLocalRectToLatticeRounded — LAYER/ELEMENT PLACEMENT alignment on the canvas-local
+ * integer lattice: rounds the rect's TOP-LEFT corner (never the center — an
+ * odd-sized element keeps its natural half-integer center, matching how the
+ * renderer places texels), optionally rounding the SIZE as well.
+ *
+ * This is the PLACEMENT family, distinct from `snapLocalRectToLatticeExpanded`
+ * (the WINDOW family): a placement rounds to the NEAREST lattice point
+ * (interaction feel), a window expands outward (must never clip content).
+ * Input is CANVAS-LOCAL (top-left origin); the returned rect carries the
+ * `LocalRect` brand — coordinate-space provenance the sibling
+ * `snapWorldRectToLatticeExpanded` family also carries, so a lattice-aligned
+ * local rect can never be silently mixed with a world-basis one.
+ *
+ * `snapDimension` must be an EXPLICIT caller decision: tools whose bounding is
+ * re-derived after a resize (marker shapes) need integer w/h to stay
+ * consistent across gesture paths, while float-size elements (a rotated
+ * move's AABB, a text box measured from layout) keep their exact size.
+ * Branded input as well as output: passing a world-basis rect is a
+ * compile-time error — the exact mislabeling that killed snapRectToPixel.
  */
-export function snapRectToPixel(
-  targetRect: WorldRect,
-  canvasDim: Dimensions,
-  strategy: 'round' | 'floor' | 'ceil' = 'round'
-): WorldRect {
-  const fn = Math[strategy];
-
-  // 1. Project bounding box in world coordinates to canvas local relative coordinate space
-  const localRect = worldToLocalRect(targetRect, canvasDim);
-
-  // 2. Perform whole pixel alignment on the top-left boundary (x, y) in canvas local space
-  const localRectAligned = asLocalRect({
-    x: fn(localRect.x),
-    y: fn(localRect.y),
-    w: localRect.w,
-    h: localRect.h
+export function snapLocalRectToLatticeRounded(
+  rect: LocalRect,
+  opts?: { snapDimension?: boolean }
+): LocalRect {
+  const snapDimension = opts?.snapDimension ?? false;
+  return asLocalRect({
+    x: Math.round(rect.x),
+    y: Math.round(rect.y),
+    w: snapDimension ? Math.max(1, Math.round(rect.w)) : rect.w,
+    h: snapDimension ? Math.max(1, Math.round(rect.h)) : rect.h,
   });
-
-  // 3. Project the aligned local space rectangle back to the world coordinate system
-  return localToWorldRect(localRectAligned, canvasDim);
 }
 
 /**
@@ -751,7 +761,7 @@ export function snapRectToPixel(
  * outward snap is impossible — floor/ceil of a non-empty rect spans ≥ 1) are
  * guarded to a 1px minimum anyway.
  */
-export function snapLocalRectEdgesToPixel(rect: LocalRect): LocalRect {
+export function snapLocalRectToLatticeExpanded(rect: LocalRect): LocalRect {
   const x0 = Math.floor(rect.x);
   const y0 = Math.floor(rect.y);
   const x1 = Math.ceil(rect.x + rect.w);
@@ -760,27 +770,28 @@ export function snapLocalRectEdgesToPixel(rect: LocalRect): LocalRect {
 }
 
 /**
- * snapWorldRectEdgesToPixel — the WORLD-space sibling of
- * `snapLocalRectEdgesToPixel`: same outward pixel snap, expressed for the
+ * snapWorldRectToLatticeExpanded — the WORLD-space sibling of
+ * `snapLocalRectToLatticeExpanded`: same outward pixel snap, expressed for the
  * canvas-centered world basis the internal composite/bake paths use.
  *
  * The world origin sits at the canvas CENTER, so the document's texel
  * boundaries live at `x = -canvas.w / 2 + i` — the INTEGERS on an even
  * canvas, the HALF-integers on an odd one. A rect snapped in world integers
- * (what `extractAABB` produces) therefore sits OFF the document lattice
- * exactly when the canvas dimension is odd: a bitmap baked into such a ROI
+ * (what the retired `extractAABB` produced) therefore sits OFF the document
+ * lattice exactly when the canvas dimension is odd: a bitmap baked into such
+ * a ROI
  * has its texels straddle two document texels and displays bilinearly
  * averaged — soft and half-a-texel shifted (real-device A/B: the same
  * content merges pixel-crisp on a 1024×1024 canvas and blurs on 115×384).
  *
- * The snap itself is not new logic — it delegates to `snapLocalRectEdgesToPixel`
+ * The snap itself is not new logic — it delegates to `snapLocalRectToLatticeExpanded`
  * after translating into frame-local coordinates, where document texel
  * boundaries are integral whatever the parity. Edges only ever move OUTWARD;
  * for an even canvas the round-trip is bit-identical to the plain integer
  * snap.
  */
-export function snapWorldRectEdgesToPixel(rect: WorldRect, canvas: Dimensions): WorldRect {
-  const local = snapLocalRectEdgesToPixel(
+export function snapWorldRectToLatticeExpanded(rect: WorldRect, canvas: Dimensions): WorldRect {
+  const local = snapLocalRectToLatticeExpanded(
     asLocalRect({
       x: rect.x + canvas.w / 2,
       y: rect.y + canvas.h / 2,

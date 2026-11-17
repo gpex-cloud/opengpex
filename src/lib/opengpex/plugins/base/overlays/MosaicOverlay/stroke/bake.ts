@@ -27,8 +27,9 @@
  */
 
 import type { InteractionEvent, Layer } from '@opengpex/editor/core/types';
-import { asLocalShape } from '@opengpex/editor/core/types';
-import { _CMD_BAKE_UID } from '../protocols';
+
+import {} from '@opengpex/editor/core/types';
+import {_CMD_BAKE_UID} from '../protocols';
 import type { BakeRequest, PaintBakeRequest, BakeWorkerRequest, BakeWorkerResult } from './types';
 
 /** Command UID (from protocols, Single Source of Truth) */
@@ -151,14 +152,18 @@ async function executePaintBake(request: PaintBakeRequest, e: InteractionEvent):
   const cropCenterLocalX = result.cropX + result.cropW / 2;
   const cropCenterLocalY = result.cropY + result.cropH / 2;
 
+  // Bake product through the shared pose-preserving rebaser (factory):
+  // the crop rect is the product bounds, its center the world anchor.
   const completeLayer: Layer = {
     ...targetLayer,
     assetId: asset.assetId,
     src: asset.url,
-    bounding: { w: result.cropW, h: result.cropH },
-    visibleShape: asLocalShape({ x: 0, y: 0, w: result.cropW, h: result.cropH }),
-    cx: cropCenterLocalX - canvasSize.w / 2,
-    cy: cropCenterLocalY - canvasSize.h / 2,
+    ...e.layers.factory.rebaseToBounds({
+      x: cropCenterLocalX - result.cropW / 2 - canvasSize.w / 2,
+      y: cropCenterLocalY - result.cropH / 2 - canvasSize.h / 2,
+      w: result.cropW,
+      h: result.cropH,
+    }),
   };
 
   e.actions.executeCommand(CMD_BAKE_UID, {

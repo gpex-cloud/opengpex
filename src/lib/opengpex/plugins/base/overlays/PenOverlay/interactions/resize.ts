@@ -43,11 +43,12 @@
  */
 
 import type { InteractionEvent, InteractionHandler, Layer, LocalRect, PenPathData } from '@opengpex/editor/core/types';
-import { asLocalShape } from '@opengpex/editor/core/types';
-import { createTransformHandler, ResizeHandle } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
+
+import {} from '@opengpex/editor/core/types';
+import {createTransformHandler, ResizeHandle} from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
 
 const CORNER_HANDLES: ReadonlySet<string> = new Set(['nw', 'ne', 'sw', 'se']);
-import { ACTIVE_CRAFT_KEY } from './shared';
+import {ACTIVE_CRAFT_KEY} from './shared';
 
 /** Minimum bounding side (layer-local px) so a resize can never collapse. */
 const MIN_SIZE = 1;
@@ -188,12 +189,9 @@ export const createPenResizeHandler = (): InteractionHandler => {
       }
 
       tx.update({
-        cx: newCx,
-        cy: newCy,
-        bounding: { w: finalW, h: finalH },
-        // Track the factory-seeded visibleShape to the new extents: the
-        // scene assembler crops the GPU render by this rect (see module doc).
-        visibleShape: asLocalShape({ x: 0, y: 0, w: finalW, h: finalH }),
+        // Shared pose-preserving rebaser (factory); the scene assembler crops
+        // the GPU render by the full-bounds rect it derives (see module doc).
+        ...e.layers.factory.rebaseToBounds({ x: newCx - finalW / 2, y: newCy - finalH / 2, w: finalW, h: finalH }),
         penData: nextPenData,
       }, 'layer', resizeLayerId);
     },

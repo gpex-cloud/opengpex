@@ -66,10 +66,12 @@ export interface VectorRenderArgs {
   /**
    * Target PHYSICAL density (texels per logical px) of the transient the
    * strategy draws into — `max(exportScale)` on the spine's sizing path
-   * (1 on the interactive composite). Resolution-dependent strategies (the
-   * text glyph atlas quantizes it into a rasterization band) read this;
-   * analytic strategies (sdf/stroke) ignore it — their `fwidth`/geometry AA
-   * resolves at whatever texel density the transient happens to have.
+   * (1 on the interactive composite). Resolution-dependent strategies read
+   * this: the text glyph atlas quantizes it into a rasterization band, and
+   * the SDF analytic rect solver (L1) integrates coverage over one PHYSICAL
+   * texel cell (logical size 1/density). The stroke ribbon and the remaining
+   * SDF shapes stay smoothstep/fwidth — they resolve at whatever texel
+   * density the transient happens to have.
    */
   readonly density?: number;
   /**

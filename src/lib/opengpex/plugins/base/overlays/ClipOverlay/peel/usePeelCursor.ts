@@ -163,8 +163,8 @@ export function usePeelCursor() {
       const vx = x - domRect.left;
       const vy = y - domRect.top;
       const currentCam = actions.fast.latestCamera(frame.id);
-      const worldPt = geometry.space.screenToWorld(vx, vy, frame, currentCam);
-      const canvasPt = geometry.space.worldToLocal(worldPt.x, worldPt.y, frame);
+      const worldPt = geometry.space.screenToWorld(vx, vy, frame.canvas, currentCam);
+      const canvasPt = geometry.space.worldToLocal(worldPt.x, worldPt.y, frame.canvas);
 
       // Hit-test follows what was DRAWN (rect / true ellipse / polygon rings
       // — the same predicate the move handler dispatches on).

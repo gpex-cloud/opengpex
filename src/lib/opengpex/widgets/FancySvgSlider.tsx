@@ -252,7 +252,7 @@ export default function FancySvgSlider({
   const fillX = isBipolar ? Math.min(thumbX, zeroX) : 0;
   const fillW = isBipolar ? Math.abs(thumbX - zeroX) : thumbX;
 
-  const heightClass = slim ? 'h-4' : 'h-5';
+  const heightClass = slim ? 'h-3' : 'h-5';
 
   return (
     <div className={`flex items-center gap-1.5 ${className}`}>

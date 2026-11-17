@@ -96,7 +96,7 @@ export function createMosaicSession(e: InteractionEvent): StrokeSession | null {
 
   try {
     return new MosaicStrokeSession(
-      { brushDiameter, blockSize, canvasSize: { w: frame.canvas.w, h: frame.canvas.h }, sampleScale },
+      { brushDiameter, blockSize, canvasSize: { w: frame.canvas.w, h: frame.canvas.h }, sampleScale, layers: e.layers },
       compositePromise,
       forceNewLayer,
       // Gesture-start selection snapshot (factory runs at gesture start).

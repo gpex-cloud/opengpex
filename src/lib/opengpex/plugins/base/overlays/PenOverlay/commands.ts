@@ -19,32 +19,19 @@
 
 'use client';
 
-import { EditorCommand, EditorContextValue, type PenPathData } from '@opengpex/editor/core/types';
-import { writeFrameDraft } from '@opengpex/editor/core/state/drafts';
-import { LayerFactory } from '@opengpex/editor/core/layer/factory';
-import { asLocalRect, asLocalPolygon, asLocalShape, type LocalPolygon } from '@opengpex/editor/core/types';
-import { getClipBox } from '@opengpex/editor/core/helpers/selection';
-import { penBoundsPad, rebasePenDataToBounds } from './pen/transform';
-import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
+import {EditorCommand, EditorContextValue, type PenPathData} from '@opengpex/editor/core/types';
+import {writeFrameDraft} from '@opengpex/editor/core/state/drafts';
+import {LayerFactory} from '@opengpex/editor/core/layer/factory';
+import {asLocalRect, asLocalPolygon, type LocalPolygon} from '@opengpex/editor/core/types';
+import {getClipBox} from '@opengpex/editor/core/helpers/selection';
+import {penBoundsPad, rebasePenDataToBounds} from './pen/transform';
+import {CraftDrawerAPI} from '../../drawers/CraftDrawer/protocols';
 import type { ColorValue } from '@opengpex/editor/core/engine/color';
 import * as P from './protocols';
-import { committableSubpaths, draftToPenPathData } from './pen/penState';
-import { flattenSubPath, penDataToFrameSubPaths, ringsToPenSubPathsBudgeted } from './pen/geometry';
-import {
-  composePenToolState,
-  getPenCommittedSelection,
-  getPenDraft,
-  publishPenPhase,
-  replacePenDraft,
-  setPenCommittedSelection,
-  PEN_TOOL_ID,
-} from './interactions';
-import {
-  srgbHexToColorValue,
-  PEN_DEFAULT_FILL_HEX,
-  L0_OPS,
-  type PenShapeStylePayload,
-} from './contribution';
+import {committableSubpaths, draftToPenPathData} from './pen/penState';
+import {flattenSubPath, penDataToFrameSubPaths, ringsToPenSubPathsBudgeted} from './pen/geometry';
+import {composePenToolState, getPenCommittedSelection, getPenDraft, publishPenPhase, replacePenDraft, setPenCommittedSelection, PEN_TOOL_ID} from './interactions';
+import {srgbHexToColorValue, PEN_DEFAULT_FILL_HEX, L0_OPS, type PenShapeStylePayload} from './contribution';
 
 // ─── Shared helpers ────────────────────────────────────────────────────────────
 
@@ -405,10 +392,9 @@ const createShapeCommand: EditorCommand<PenShapeStylePayload | undefined, void> 
       })),
     };
 
-    const worldCenter = ctx.geometry.space.localToWorld(minX + w / 2, minY + h / 2, frame);
-    const layersArray = frame.layers.order.map((id) => frame.layers.byId[id]);
+    const worldCenter = ctx.geometry.space.localToWorld(minX + w / 2, minY + h / 2, frame.canvas);
     const layer = LayerFactory.createLayer('vector', {
-      name: LayerFactory.getNewLayerName(layersArray, 'Pen Shape'),
+      name: ctx.layers.factory.getNewLayerNameFor(frame, 'Pen Shape'),
       cx: worldCenter.x,
       cy: worldCenter.y,
       bounding: { w: w + pad * 2, h: h + pad * 2 },
@@ -524,13 +510,13 @@ const updatePenStyleCommand: EditorCommand<{
     const growY = (rebase.bounding.h - layer.bounding.h) / 2;
     const dx = rebase.shift.x + growX;
     const dy = rebase.shift.y + growY;
+    const newCx = layer.cx + M.a * dx + M.c * dy;
+    const newCy = layer.cy + M.b * dx + M.d * dy;
     ctx.actions.updateLayer(frame.id, layer.id, {
       penStyle: next,
       penData: rebase.penData,
-      bounding: rebase.bounding,
-      visibleShape: asLocalShape({ x: 0, y: 0, w: rebase.bounding.w, h: rebase.bounding.h }),
-      cx: layer.cx + M.a * dx + M.c * dy,
-      cy: layer.cy + M.b * dx + M.d * dy,
+      // Shared pose-preserving rebaser (factory).
+      ...ctx.layers.factory.rebaseToBounds({ x: newCx - rebase.bounding.w / 2, y: newCy - rebase.bounding.h / 2, w: rebase.bounding.w, h: rebase.bounding.h }),
     });
   },
 };

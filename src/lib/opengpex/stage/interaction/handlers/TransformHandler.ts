@@ -17,9 +17,9 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
+import type { GeometryService } from '@opengpex/editor/core/types/geometry';
 import { InteractionHandler, InteractionEvent, LocalRect, asWorldPoint, SpringChannel } from '@opengpex/editor/core/types';
 import { Matrix3x3 } from '@opengpex/editor/core/geometry/matrix';
-import { isRotatedPose } from '@opengpex/editor/core/geometry/operators/transform';
 import { InteractionMath, type SnapOpState } from '../Math';
 import { InteractionTransaction } from '../Transaction';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
@@ -305,9 +305,17 @@ function buildOrientationMatrix(o: LayerOrientation): Matrix3x3 {
  * marker/text resize handlers, which call the same helper in `getInitialState`)
  * can never disagree about which space the rect is in.
  */
-function needsOrientationPath(o: LayerOrientation | null | undefined): o is LayerOrientation {
+function needsOrientationPath(
+  o: LayerOrientation | null | undefined,
+  geometry: GeometryService | undefined,
+): o is LayerOrientation {
   if (!o) return false;
-  return isRotatedPose({ rotation: o.rotation, flip: o.flip });
+  // Facade route (feature layers must not import geometry operators directly).
+  // Same core predicate via the geometry service, so framework and consumers
+  // can never disagree about which space the rect is in.
+  const rotated = o.rotation !== 0 || o.flip.h || o.flip.v;
+  if (!geometry) return rotated;
+  return geometry.transform.isRotatedPose(o);
 }
 
 /**
@@ -411,7 +419,7 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
       // Resolve orientation once. Only a genuinely rotated/mirrored pose switches
       // to the local-axes path; rotation=0 keeps the original canvas-space math.
       const rawOrientation = config.getOrientation ? config.getOrientation(e, intent) : null;
-      if (needsOrientationPath(rawOrientation)) {
+      if (needsOrientationPath(rawOrientation, e.geometry)) {
         startOrientation = rawOrientation;
         startOrientInverse = buildOrientationMatrix(rawOrientation).inverse();
         // Capture the world pose so onMove can project the local rect back into
@@ -696,7 +704,7 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
         } else {
           // Unclamped bounding box scaling
           const worldPoint = e.point.world;
-          const worldAnchor = e.geometry.space.localToWorld(startAnchor.x, startAnchor.y, e.activeFrame);
+          const worldAnchor = e.geometry.space.localToWorld(startAnchor.x, startAnchor.y, e.activeFrame.canvas);
 
           nextRect = e.geometry.space.worldToLocalRect(e.geometry.space.calculateResizedRect(
             worldPoint,
@@ -704,7 +712,7 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
             effectiveAspect,
             resizeType,
             { w: startState.w, h: startState.h }
-          ), e.activeFrame);
+          ), e.activeFrame.canvas);
 
           // Edge snapping
           if (isSnapping && isResizeHandle) {

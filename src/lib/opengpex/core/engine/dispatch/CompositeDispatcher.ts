@@ -74,7 +74,7 @@ import type {
   LayerPoseOverride,
 } from '@opengpex/editor/core/types';
 import { asWorldShape } from '@opengpex/editor/core/types';
-import { snapWorldRectEdgesToPixel } from '@opengpex/editor/core/geometry/operators/snapping';
+import { snapWorldRectToLatticeExpanded } from '@opengpex/editor/core/geometry/operators/snapping';
 
 
 /**
@@ -213,19 +213,19 @@ export class CompositeDispatcher {
     await this.warmHighDepth(layers);
 
     // The ROI must sit ON the document pixel lattice (see
-    // snapWorldRectEdgesToPixel): a bitmap baked off-lattice displays
+    // snapWorldRectToLatticeExpanded): a bitmap baked off-lattice displays
     // half-a-texel shifted on odd-dimension canvases.
-    const roiRect = snapWorldRectEdgesToPixel(roi.rect, frame.canvas);
-    const roiW = Math.max(1, Math.ceil(roiRect.w));
-    const roiH = Math.max(1, Math.ceil(roiRect.h));
+    const roiRect = snapWorldRectToLatticeExpanded(roi.rect, frame.canvas);
+    // roiRect.w/h are INTEGERS by the Expanded contract (edges floored/ceiled
+    // onto the document lattice) — the synthetic frame consumes them directly.
 
     // ── 1. Synthetic subset frame (ROI box as canvas, layers shifted to origin) ──
     // Rigid shift: worldPoint (X,Y) → canvas (X - roiRect.x, Y - roiRect.y).
-    // getLayerLocalMatrix adds `+canvas.w/2` (= roiW/2); subtracting it here makes
-    // the two terms cancel, so the ceil() rounding of roiW/roiH never perturbs
-    // placement. See ONE-PIPELINE EQUIVALENCE note above.
-    const Dx = -roiRect.x - roiW / 2;
-    const Dy = -roiRect.y - roiH / 2;
+    // getLayerLocalMatrix adds `+canvas.w/2` (= roiRect.w/2); subtracting it
+    // here makes the two terms cancel exactly (synth canvas dims and this
+    // shift read the SAME roiRect.w/h). See ONE-PIPELINE EQUIVALENCE note above.
+    const Dx = -roiRect.x - roiRect.w / 2;
+    const Dy = -roiRect.y - roiRect.h / 2;
 
     const byId: Record<string, Layer> = {};
     const order: string[] = [];
@@ -254,7 +254,7 @@ export class CompositeDispatcher {
     const synthFrame = {
       id: '__composite_subset__',
       name: 'composite-subset',
-      canvas: { w: roiW, h: roiH },
+      canvas: { w: roiRect.w, h: roiRect.h },
       dpi: frame.dpi ?? 72, // inherit the real source frame's DPI
       camera: { x: 0, y: 0, k: 1 },
       layers: { byId, order },
@@ -266,7 +266,7 @@ export class CompositeDispatcher {
     const { scene, uploads, lutUploads } = SceneAssembler.buildScene({
       frame: synthFrame,
       camera: synthFrame.camera,
-      viewportDim: { w: roiW, h: roiH },
+      viewportDim: { w: roiRect.w, h: roiRect.h },
       // Fixed 1:1 — document-space bake, not a screen-DPR-scaled preview.
       dpr: 1,
       geometry: this.geometry,
@@ -296,7 +296,7 @@ export class CompositeDispatcher {
       docGamut,
       docBitDepth,
       roiRect,
-      coveredRect: { x: roiRect.x, y: roiRect.y, w: roiW, h: roiH } as Rect,
+      coveredRect: { x: roiRect.x, y: roiRect.y, w: roiRect.w, h: roiRect.h } as Rect,
     };
   }
 

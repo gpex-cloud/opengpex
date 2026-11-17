@@ -143,6 +143,12 @@ export const createClipBoxHandler = (): InteractionHandler => {
       // the gesture-end combine reproduces exactly via the null
       // lastCreateRect short-circuit).
       const antiAliased = currentShape?.antiAliased;
+      // Lattice alignment is NOT done here: the driving TransformHandler
+      // already runs every emitted rect through finalizeRectAlignment (its
+      // documented single exit point for the pixel-grid invariant — canvas
+      // rounding, or the active layer's physical grid via alignToLayerId).
+      // Re-snapping here would silently override that layer-grid alignment
+      // with the canvas lattice.
       const clippedRect = e.geometry.space.getRectIntersection(newRect, asLocalRect({ x: 0, y: 0, w: frame.canvas.w, h: frame.canvas.h }));
       const isCreate = _context.intent.category === 'create';
       if (isCreate) {
@@ -183,7 +189,7 @@ export const createClipBoxHandler = (): InteractionHandler => {
 
         if (exchangeLayer) {
           // Convert clip box center from frame-local to world coordinates
-          const worldCenter = e.geometry.space.localToWorld(clippedRect.x + clippedRect.w / 2, clippedRect.y + clippedRect.h / 2, frame);
+          const worldCenter = e.geometry.space.localToWorld(clippedRect.x + clippedRect.w / 2, clippedRect.y + clippedRect.h / 2, frame.canvas);
           // Account for layer orientation (rotation/flip) when computing anchor.
           const vr = exchangeLayer.visibleShape?.rect;
           const vox = vr?.x ?? 0;

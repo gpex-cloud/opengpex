@@ -21,10 +21,10 @@
 
 import React, { useState, useCallback } from "react";
 import { Layers, ChevronDown, Undo2 } from "lucide-react";
-import { motion } from "framer-motion";
 import { useEditorState, useEditorServices } from "@opengpex/editor/core/context";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
+import { DrawerHeader } from "@opengpex/editor/workspace/components/DrawerHeader";
 import { DISPLAY_CHANNEL_SIGNAL_KEY, CHANNEL_MASK_RGB } from "@opengpex/editor/core/engine";
 import { LayersPanel } from "./LayersPanel";
 import { ChannelsPanel } from "./ChannelsPanel";
@@ -54,9 +54,9 @@ export const LayersComponent = React.memo(function LayersComponent() {
   if (activeView === 'channels') {
     return (
       <div className="flex flex-col gap-2 px-2 pt-1 pb-1 overflow-hidden">
-        <motion.div layout="position" className="flex items-center justify-between h-6 shrink-0">
-          <div className="flex items-center gap-2">
-            <Layers size={12} className="text-indigo-600 dark:text-indigo-400" />
+        <DrawerHeader
+          icon={<Layers size={12} className="text-indigo-600 dark:text-indigo-400" />}
+          title={
             <ActionDropdown
               options={[
                 { value: 'layers', label: 'Layers' },
@@ -75,6 +75,8 @@ export const LayersComponent = React.memo(function LayersComponent() {
                 </div>
               )}
             />
+          }
+          leftExtras={
             <ActionButton
               onClick={(e) => {
                 e.stopPropagation();
@@ -86,8 +88,8 @@ export const LayersComponent = React.memo(function LayersComponent() {
               size="sm"
               className="text-[var(--text-muted)] hover:text-emerald-500"
             />
-          </div>
-        </motion.div>
+          }
+        />
         <ChannelsPanel />
       </div>
     );

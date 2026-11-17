@@ -334,16 +334,12 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
           const selCenterBefore = e.geometry.space.localToWorld(
             newRect.x - (polyDx - convergedDelta.x) + newRect.w / 2,
             newRect.y - (polyDy - convergedDelta.y) + newRect.h / 2,
-            frame
+            frame.canvas
           );
           const contentCenter = e.geometry.transform.fragmentContentCenter(
             e.geometry.transform.fragmentPoseFromLayer(exchangeLayer)
           );
-          const worldCenter = e.geometry.space.localToWorld(
-            newRect.x + newRect.w / 2,
-            newRect.y + newRect.h / 2,
-            frame
-          );
+          const worldCenter = e.geometry.space.localToWorld(newRect.x + newRect.w / 2, newRect.y + newRect.h / 2, frame.canvas);
           const pose = e.geometry.transform.computeFragmentCenter(
             { x: worldCenter.x + (contentCenter.x - selCenterBefore.x), y: worldCenter.y + (contentCenter.y - selCenterBefore.y) },
             { x: vox, y: voy },

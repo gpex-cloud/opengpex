@@ -244,6 +244,20 @@ export const LayerFactory = {
     return `${baseName} ${maxNumber + 1}`;
   },
 
+  /**
+   * getNewLayerNameFor: the smart layer name resolved against ALL layers of a
+   * frame — the single-call form of
+   * `getNewLayerName(frame.layers.order.map(id => frame.layers.byId[id]), base)`
+   * that every all-layers naming site used to hand-roll. Callers holding a
+   * FILTERED array (host layers etc.) keep building their own array and call
+   * `getNewLayerName` directly.
+   */
+  getNewLayerNameFor(frame: Pick<Frame, 'layers'>, baseName?: string): string {
+    return this.getNewLayerName(
+      frame.layers.order.map(id => frame.layers.byId[id]),
+      baseName,
+    );
+  },
 
   // =================================================================================
   // 2. Structural Orchestration
@@ -591,8 +605,8 @@ patchEdgeFeatherRepad(
   if (!vs) return null;
 
   const curFeather = vs.featherPx ?? 0;
-  const pad0 = curFeather > 0 ? Math.ceil(curFeather + AA_MARGIN) : 0;
-  const pad1 = radius > 0 ? Math.ceil(radius + AA_MARGIN) : 0;
+  const pad0 = curFeather > 0 ? featherPad(curFeather) : 0;
+  const pad1 = radius > 0 ? featherPad(radius) : 0;
   if (curFeather === radius && pad0 === pad1) return null;
 
   // Tight geometry = current rect inset by the current symmetric pad, then
@@ -633,7 +647,37 @@ patchEdgeFeatherRepad(
   };
 },
 
+  /**
+   * rebaseToBounds — the POSE-PRESERVING geometric-triplet rebaser: one bounds
+   * rect in, the consistent {cx, cy, bounding, visibleShape} quartet out, with
+   * the layer's own scale/rotation/flip deliberately LEFT OUT of the patch so
+   * the caller's pose survives untouched. This is the pose-keeping sibling of
+   * `bakedLayerPatch` (services/baking.ts), which is the pose-RESETTING
+   * variant — every "an existing layer now occupies this new box" write
+   * (tool resize gestures, tighten/rebase commits, bake products that keep
+   * their pose) must go through one of these two, never hand-roll the quartet.
+   * `bounds` is in WORLD coordinates (canvas-center origin, same convention as
+   * cx/cy). `snapHalf` half-pixel-aligns the derived center
+   * (`Math.round(v*2)/2`) for the bake products that share resizeCanvas's
+   * convention; absent = raw bounds center.
+   */
+  rebaseToBounds(
+    bounds: { x: number; y: number; w: number; h: number },
+    opts?: { snapHalf?: boolean },
+  ): { cx: number; cy: number; bounding: { w: number; h: number }; visibleShape: LocalShape } {
+    const snap = (v: number) => (opts?.snapHalf ? Math.round(v * 2) / 2 : v);
+    const cx = snap(bounds.x + bounds.w / 2);
+    const cy = snap(bounds.y + bounds.h / 2);
+    return {
+      cx,
+      cy,
+      bounding: { w: bounds.w, h: bounds.h },
+      visibleShape: asLocalShape({ x: 0, y: 0, w: bounds.w, h: bounds.h }),
+    };
+  },
+
 };
+
 
 // =================================================================================
 // Cut-Link Traversal Utilities
@@ -642,14 +686,17 @@ patchEdgeFeatherRepad(
 // Pure functions for traversing the Cut-Link lineage tree (upward and downward).
 // Co-located with LayerFactory since both deal with layer structure & metadata.
 
-
-
 /**
  * Anti-alias safety margin (px) added to the feather radius when expanding a
  * fragment's crop bbox. Guards the soft edge's outermost falloff row
  * from being clipped by the crop window.
+ *
+ * Single home: `core/geometry/margins` — this re-export keeps the historical
+ * import path alive for existing consumers.
  */
-export const AA_MARGIN = 1;
+export { AA_MARGIN, featherPad } from '../geometry/margins';
+
+import { featherPad } from '../geometry/margins';
 
 /**
  * computeFragmentFeathering — the CANONICAL feathered-fragment shape as a pure
@@ -675,7 +722,7 @@ export function computeFragmentFeathering(
     : shapeToPathData(tightShape);
   // Feather 0 = the historical hard fragment: NO pad at all (the tight form
   // restores bit-exactly — patchEdgeFeatherRepad's radius-0 contract).
-  const pad = feather > 0 ? Math.ceil(feather) + AA_MARGIN : 0;
+  const pad = feather > 0 ? featherPad(feather) : 0;
   const tight = tightShape.rect;
   return {
     visibleShape: {

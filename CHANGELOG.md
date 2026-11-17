@@ -2,15 +2,24 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.53
+
+- Workspace: drawer panels are reordered by dragging their header (press-drag to move, click the title to still open its switcher), and the dragged panel always stays on top of its neighbors
+- Workspace: each drawer panel has a single compact pill at its top corner with dock-to-other-side and collapse actions — it appears only while you hover that corner and no longer blocks the panel edge
+- Markers: marker shapes with straight edges (arrows, lines, stars, callouts, polygons) no longer leave stray lit pixels when an edge lands exactly on the pixel grid — edges are covered exactly, and the canvas and the exported image now rasterize identically
+- Layers: drawing shapes and text boxes snaps them to the pixel grid, and resizing a text box keeps its text pixel-sharp instead of softening it
+- Layers: layers land exactly on the pixel grid when a drag ends, consistent across every tool
+- Engine: bounding-box handling is unified — one placement-alignment service for layers, a single lattice-snap for pixel windows, and shared anti-aliasing margins; selection metadata and layer-record invariants gain regression guards; lint now enforces that feature code reaches geometry through the service layer
+
 ## 2.0.52
 
-- Layers: the layer menu gains Rasterize for layers that can be converted to pixels — a fragment's link to its source is cut (the source's hole stays as a permanent mask) and the baked result keeps its exact position, so Refocus and outline tools see the real pixels from then on
-- Image Formats: baked selections on odd-width canvases stay pixel-sharp — the bake no longer lands on a half-pixel grid that rendered noticeably blurrier and shifted by half a pixel compared to even-sized canvases
-- Playback: animated GIF playback moves onto a dedicated lightweight render pipeline — playback no longer recomposites the whole document on every frame, runs at the GIF's own frame timing, and gains a progress bar with click/drag seeking, pause/resume, and auto-selection of the current frame's layer in the layers panel; the playing frames are hidden from the static canvas so transparent GIFs don't show a double image
-- Image Formats: frame thumbnails are cropped to the image's actual content — sources whose pixels occupy only a small region of the canvas (such as an animation whose first frame is drawn in a corner) show that content instead of a mostly transparent thumbnail
-- Image Formats: choosing a frame limit when importing an animated GIF now samples the animation at even intervals, as the dialog describes — re-importing the same GIF with a frame limit no longer shows the first frames of an earlier import
-- Layers: re-cutting a feathered fragment from an older document with a hard selection no longer loses its soft edge — the cut bakes the rendered falloff instead of silently hardening the fragment and mismatching the source's soft hole (new documents could never reach this state; this is a compatibility fix for pre-2.0.49 documents)
-- Workspace: progress and status HUDs no longer paint on top of a question the editor is asking — while a blocking prompt (overwrite / frame-count / similar dialogs) is open, defer-enabled HUDs step aside and reappear on their own once it is answered, and stale feedback messages are cleared the moment the question is raised
+- Layers: the layer menu gains a Rasterize action — a layer is baked into pixels and its cut link to the source is severed
+- Image Formats: baked selections on odd-width canvases stay pixel-sharp (no more half-pixel blur or shift)
+- Playback: animated GIF playback runs on a dedicated lightweight pipeline, with a progress bar, seeking and pause/resume
+- Image Formats: frame thumbnails are cropped to the image's actual content
+- Image Formats: GIF frame-limit import samples the animation at even intervals (re-importing no longer shows stale frames)
+- Layers: re-cutting a legacy feathered fragment with a hard selection keeps its soft edge
+- Workspace: status HUDs step aside while a blocking prompt is open
 
 ## 2.0.51
 

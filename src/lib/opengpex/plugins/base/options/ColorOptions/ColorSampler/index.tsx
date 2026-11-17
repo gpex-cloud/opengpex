@@ -224,12 +224,7 @@ export function ColorSampler({
       const rect = rectRef.current;
       const cam = getCamera();
       if (!rect || !cam) return null;
-      return geometry.space.screenToWorld(
-        clientX - rect.left,
-        clientY - rect.top,
-        frame,
-        cam,
-      );
+      return geometry.space.screenToWorld(clientX - rect.left, clientY - rect.top, frame.canvas, cam);
     },
     [frame, geometry, getCamera],
   );

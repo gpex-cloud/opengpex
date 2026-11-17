@@ -155,6 +155,13 @@ export interface InteractionEvent {
     pointerType: 'mouse' | 'pen' | 'touch';
   };
   geometry: GeometryService;
+  /**
+   * Layer domain service. Feature code resolves layer-record questions
+   * (placement alignment, factory, bake) HERE — never by importing core
+   * geometry/layer operators directly; the snap business posture lives at
+   * `layers.snap.snapLayerPlacement`.
+   */
+  layers: import('../layer/types').LayerService;
   pixels: PixelService;
   assets: AssetService;
   actions: EditorActions;

@@ -246,11 +246,11 @@ export const LayerMenu = React.memo(
     if (options.length === 0) return null;
 
     return (
-      <div className="relative ml-0.5">
+      <div className="relative">
         <ActionDropdown
           trigger={(isOpen) => (
             <button
-              className={`w-6 h-6 flex items-center justify-center rounded-md transition-colors outline-none cursor-pointer focus:outline-none border border-transparent
+              className={`w-5 h-6 flex items-center justify-center rounded-md transition-colors outline-none cursor-pointer focus:outline-none border border-transparent
  ${isOpen ? "bg-[var(--bg-stage)] border-[var(--border-subtle)]" : "hover:bg-[var(--bg-stage)] hover:border-[var(--border-subtle)]"}
 `}
             >

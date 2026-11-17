@@ -66,7 +66,7 @@ export const CMD_EDIT_START_UID = _CMD_EDIT_START_UID;
  * Accepts canvas-local point and converts to world coordinates via geometry service.
  */
 export function findTextLayerAtPoint(geometry: GeometryService, frame: Frame, point: { x: number; y: number }): Layer | null {
-  const worldPoint = geometry.space.localToWorld(point.x, point.y, frame);
+  const worldPoint = geometry.space.localToWorld(point.x, point.y, frame.canvas);
   const hits = geometry.space.pickLayersAt(worldPoint, frame.layers);
   return hits.find((l: Layer) => l.type === 'text') || null;
 }

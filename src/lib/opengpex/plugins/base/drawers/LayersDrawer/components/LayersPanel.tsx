@@ -31,7 +31,7 @@ import {
   FolderPlus,
   Loader2,
 } from "lucide-react";
-import { Reorder, motion, useDragControls, type DragControls } from "framer-motion";
+import { Reorder, useDragControls, type DragControls } from "framer-motion";
 import {
   usePluginCommands,
   usePluginSignals,
@@ -39,6 +39,7 @@ import {
 import { Layer, Frame } from "@opengpex/editor/core/types";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
 import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
+import { DrawerHeader } from "@opengpex/editor/workspace/components/DrawerHeader";
 import { useLayerCommands, useMaskEditMonitor, useMergeSelected } from "../hooks";
 import { MergeDownIcon, MergeVisibleIcon } from "@opengpex/editor/icons";
 import { LayerItem } from "./layer/LayerItem";
@@ -300,12 +301,9 @@ export function LayersPanel({
 
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1 overflow-hidden">
-      <motion.div
-        layout="position"
-        className="flex items-center justify-between h-6 shrink-0"
-      >
-        <div className="flex items-center gap-2">
-          <Layers size={12} className="text-indigo-600 dark:text-indigo-400" />
+      <DrawerHeader
+        icon={<Layers size={12} className="text-indigo-600 dark:text-indigo-400" />}
+        title={
           <ActionDropdown
             options={[
               { value: "layers", label: "Layers" },
@@ -327,6 +325,8 @@ export function LayersPanel({
               </div>
             )}
           />
+        }
+        leftExtras={
           <div className="flex items-center gap-0.5">
             <ActionButton
               onClick={(e) => {
@@ -351,82 +351,84 @@ export function LayersPanel({
               className="text-[var(--text-muted)] hover:text-amber-500"
             />
           </div>
-        </div>
-        <div className="flex items-center">
-          <ActionButton
-            onClick={(e) => {
-              e.stopPropagation();
-              toggleAll.execute();
-            }}
-            icon={<Eye size={12} />}
-            tooltip="Toggle All"
-            variant="glass"
-            size="sm"
-            className="text-[var(--text-muted)] hover:text-[var(--text-main)] "
-          />
-          <ActionButton
-            onClick={(e) => {
-              e.stopPropagation();
-              isolateSelection();
-            }}
-            icon={<ScanEye size={12} />}
-            tooltip="Isolate Selection"
-            variant="glass"
-            size="sm"
-            className="text-[var(--text-muted)] hover:text-[var(--text-main)] "
-          />
-          <ActionButton
-            onClick={(e) => {
-              e.stopPropagation();
-              handleMergeSelected();
-            }}
-            icon={merging ? <Loader2 size={12} className="animate-spin" /> : <Merge size={12} className="rotate-180" />}
-            tooltip={
-              canMergeSelected
-                ? `Merge Selected (${mergeSelection.length})`
-                : "Merge Selected"
-            }
-            variant="glass"
-            size="sm"
-            disabled={!canMergeSelected || anyMergeInFlight}
-            className={
-              canMergeSelected
-                ? mergeStatus === "green"
-                  ? "text-emerald-400 hover:text-emerald-300"
-                  : "text-rose-400 hover:text-rose-300"
-                : "text-[var(--text-muted)] opacity-40 cursor-not-allowed"
-            }
-          />
-          <ActionButton
-            onClick={(e) => {
-              e.stopPropagation();
-              if (anyMergeInFlight) return;
-              setMergingDown(true);
-              void Promise.resolve(mergeDown.execute()).finally(() => setMergingDown(false));
-            }}
-            icon={mergingDown ? <Loader2 size={12} className="animate-spin" /> : <MergeDownIcon size={12} />}
-            tooltip="Merge Down"
-            variant="glass"
-            size="sm"
-            disabled={anyMergeInFlight}
-            className="text-[var(--text-muted)] hover:text-teal-500"
-          />
-          <ActionButton
-            onClick={(e) => {
-              e.stopPropagation();
-              if (anyMergeInFlight) return;
-              setMergingVisible(true);
-              void Promise.resolve(mergeVisible.execute()).finally(() => setMergingVisible(false));
-            }}
-            icon={mergingVisible ? <Loader2 size={12} className="animate-spin" /> : <MergeVisibleIcon size={12} />}
-            tooltip="Merge Visible"
-            variant="glass"
-            size="sm"
-            disabled={anyMergeInFlight}
-            className="text-[var(--text-muted)] hover:text-teal-500"
-          />
-        </div>
-      </motion.div>
+        }
+        actions={
+          <>
+            <ActionButton
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleAll.execute();
+              }}
+              icon={<Eye size={12} />}
+              tooltip="Toggle All"
+              variant="glass"
+              size="sm"
+              className="text-[var(--text-muted)] hover:text-[var(--text-main)] "
+            />
+            <ActionButton
+              onClick={(e) => {
+                e.stopPropagation();
+                isolateSelection();
+              }}
+              icon={<ScanEye size={12} />}
+              tooltip="Isolate Selection"
+              variant="glass"
+              size="sm"
+              className="text-[var(--text-muted)] hover:text-[var(--text-main)] "
+            />
+            <ActionButton
+              onClick={(e) => {
+                e.stopPropagation();
+                handleMergeSelected();
+              }}
+              icon={merging ? <Loader2 size={12} className="animate-spin" /> : <Merge size={12} className="rotate-180" />}
+              tooltip={
+                canMergeSelected
+                  ? `Merge Selected (${mergeSelection.length})`
+                  : "Merge Selected"
+              }
+              variant="glass"
+              size="sm"
+              disabled={!canMergeSelected || anyMergeInFlight}
+              className={
+                canMergeSelected
+                  ? mergeStatus === "green"
+                    ? "text-emerald-400 hover:text-emerald-300"
+                    : "text-rose-400 hover:text-rose-300"
+                  : "text-[var(--text-muted)] opacity-40 cursor-not-allowed"
+              }
+            />
+            <ActionButton
+              onClick={(e) => {
+                e.stopPropagation();
+                if (anyMergeInFlight) return;
+                setMergingDown(true);
+                void Promise.resolve(mergeDown.execute()).finally(() => setMergingDown(false));
+              }}
+              icon={mergingDown ? <Loader2 size={12} className="animate-spin" /> : <MergeDownIcon size={12} />}
+              tooltip="Merge Down"
+              variant="glass"
+              size="sm"
+              disabled={anyMergeInFlight}
+              className="text-[var(--text-muted)] hover:text-teal-500"
+            />
+            <ActionButton
+              onClick={(e) => {
+                e.stopPropagation();
+                if (anyMergeInFlight) return;
+                setMergingVisible(true);
+                void Promise.resolve(mergeVisible.execute()).finally(() => setMergingVisible(false));
+              }}
+              icon={mergingVisible ? <Loader2 size={12} className="animate-spin" /> : <MergeVisibleIcon size={12} />}
+              tooltip="Merge Visible"
+              variant="glass"
+              size="sm"
+              disabled={anyMergeInFlight}
+              className="text-[var(--text-muted)] hover:text-teal-500"
+            />
+          </>
+        }
+      />
 
       <div className="flex flex-col gap-0">
         <div

@@ -45,6 +45,7 @@
 
 import type { Rect, WorkingColorSpace, LayerBlendMode, GamutId } from '@opengpex/editor/core/types';
 import type { TextLayout } from '@opengpex/editor/core/engine/text/textLayout';
+import type { SdfSolverOutline } from './sdfPolygonSolver';
 
 // ────────────────────────────────────────────────────────────
 // Geometry
@@ -195,6 +196,15 @@ export interface SdfShapeParams {
    *                 body centre so the union hides it and only the wedge shows)
    */
   readonly shapeParams: readonly number[];
+  /**
+   * L2 analytic coverage outline (`sdfPolygonSolver.sdfSolverOutline`): flat
+   * [x, y, ...] vertex rings in layer-local logical pixels. When present the
+   * fragment shader solves coverage as the exact "outline ∩ texel cell" area
+   * integral (`outer − inner`), replacing the smoothstep+fwidth approximation
+   * for this shape — exact 0/1/fractional on grid-aligned edges, no fwidth
+   * density dependence. Absent (or an empty `outer`) keeps the legacy path.
+   */
+  readonly solverOutline?: SdfSolverOutline;
 }
 
 /**

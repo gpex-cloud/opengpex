@@ -31,7 +31,7 @@
  */
 
 import type { InteractionHandler } from '@opengpex/editor/core/types';
-import { asLocalShape } from '@opengpex/editor/core/types';
+
 import { InteractionTransaction } from '@opengpex/editor/stage/interaction/Transaction';
 import type { PenSelection } from '../pen/penState';
 import { dragCommittedAnchor, insertAnchorOnSegment } from '../pen/penState';
@@ -120,12 +120,12 @@ export const createPenEditHandler = (): InteractionHandler => {
         const growY = (rebase.bounding.h - layer.bounding.h) / 2;
         const dx = rebase.shift.x + growX;
         const dy = rebase.shift.y + growY;
+        const newCx = layer.cx + M.a * dx + M.c * dy;
+        const newCy = layer.cy + M.b * dx + M.d * dy;
         tx.update({
           penData: rebase.penData,
-          bounding: rebase.bounding,
-          visibleShape: asLocalShape({ x: 0, y: 0, w: rebase.bounding.w, h: rebase.bounding.h }),
-          cx: layer.cx + M.a * dx + M.c * dy,
-          cy: layer.cy + M.b * dx + M.d * dy,
+          // Shared pose-preserving rebaser (factory).
+          ...e.layers.factory.rebaseToBounds({ x: newCx - rebase.bounding.w / 2, y: newCy - rebase.bounding.h / 2, w: rebase.bounding.w, h: rebase.bounding.h }),
         }, 'layer', target.layerId);
       } else {
         tx.update({ penData: next }, 'layer', target.layerId);

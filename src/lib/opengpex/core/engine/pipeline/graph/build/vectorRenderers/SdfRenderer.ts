@@ -33,7 +33,9 @@
  */
 
 import type { SdfShapeParams, SdfPrimitive } from '../../../scene/Scene';
-import { SDF_UNIFORM_BUFFER_SIZE } from '@opengpex/editor/core/engine/gpu/shaders/sdf';
+import {
+  SDF_UNIFORM_BUFFER_SIZE, SDF_POLY_UNIFORM_VERTS, SDF_POLY_INNER_START,
+} from '@opengpex/editor/core/engine/gpu/shaders/sdf';
 import type { VectorRenderer, VectorRenderContext, VectorRenderArgs } from './VectorRenderer';
 
 /** shape_type wire values — must match `sdf.ts`. */
@@ -84,7 +86,10 @@ export class SdfRenderer implements VectorRenderer {
     uniformData[4] = m.strokeWidth;
     uniformData[5] = m.headScale;
     uniformUintView[6] = m.antiAliased ? 0 : 1; // shader `hard_edge` (0 = AA on)
-    uniformData[7] = 0;
+    // shader `density` — target texels per logical px. The analytic rect solver
+    // (L1) integrates coverage over one PHYSICAL texel cell, whose logical size
+    // is 1/density; the smoothstep path ignores it (fwidth resolves per target).
+    uniformData[7] = args.density ?? 1;
     // offset 32 (16B) stroke_color
     uniformData[8] = m.strokeColor[0];
     uniformData[9] = m.strokeColor[1];
@@ -98,6 +103,32 @@ export class SdfRenderer implements VectorRenderer {
     // offset 64 (32B) shape_params: up to 8 scalars, zero-padded
     for (let i = 0; i < 8; i++) {
       uniformData[16 + i] = m.shapeParams[i] ?? 0;
+    }
+    // offset 96 — L2 analytic polygon solver rings. Vertices pack TWO per
+    // vec4 slot (uniform address space requires 16-byte array strides):
+    // slot layout [x0, y0, x1, y1]. The outer ring starts at slot 0, the
+    // stroke-inset ring at SDF_POLY_INNER_START.
+    const outline = m.solverOutline;
+    if (outline && outline.outer.length >= 6) {
+      uniformUintView[24] = 1; // solver = analytic polygon
+      const outerN = Math.min(outline.outer.length / 2, SDF_POLY_UNIFORM_VERTS);
+      const innerN = Math.min(outline.inner.length / 2, SDF_POLY_UNIFORM_VERTS);
+      uniformUintView[25] = outerN;
+      uniformUintView[26] = innerN;
+      for (let i = 0; i < outerN; i++) {
+        const f = 28 + i * 2; // two f32 per vertex, two vertices per vec4 slot
+        uniformData[f] = outline.outer[2 * i];
+        uniformData[f + 1] = outline.outer[2 * i + 1];
+      }
+      for (let i = 0; i < innerN; i++) {
+        const f = 28 + (SDF_POLY_INNER_START + i) * 2;
+        uniformData[f] = outline.inner[2 * i];
+        uniformData[f + 1] = outline.inner[2 * i + 1];
+      }
+    } else {
+      uniformUintView[24] = 0;
+      uniformUintView[25] = 0;
+      uniformUintView[26] = 0;
     }
 
     const slot = bufferRing.writeSlot(uniformData);

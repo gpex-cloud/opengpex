@@ -46,6 +46,7 @@ import { darrowToSdf } from './marker/shapes/darrow/render';
 import { starToSdf } from './marker/shapes/star/render';
 import { polygonToSdf } from './marker/shapes/polygon/render';
 import { calloutToSdf } from './marker/shapes/callout/render';
+import { sdfSolverOutline } from '@opengpex/editor/core/engine/pipeline/scene/sdfPolygonSolver';
 
 /** Fill is considered present above this opacity (mirrors "0 = no fill"). */
 const FILL_EPSILON = 0.001;
@@ -131,6 +132,14 @@ function markerToVectorSource(
       // AA defaults ON: only an explicit `false` on the business data opts out.
       antiAliased: data.antiAliased !== false,
       shapeParams: geometry.shapeParams,
+      // L2 analytic coverage: expand the shape to its exact polygon outline
+      // (null for rect/ellipse/rounded corners — those stay on the L1/legacy
+      // shader paths; null also when the expansion degenerates or exceeds the
+      // vertex budget, which warns).
+      solverOutline: sdfSolverOutline(
+        geometry.prim, [w, h], data.stroke.width, geometry.shapeParams,
+        geometry.headScale ?? 0,
+      ) ?? undefined,
     },
   };
 }

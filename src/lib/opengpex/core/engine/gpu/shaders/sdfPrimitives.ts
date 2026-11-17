@@ -47,10 +47,22 @@ fn sdf_rounded_rect(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
 // Exact sign and zero-level (|p/r| == 1 ⇒ 0, < 1 inside, > 1 outside) and EXACT for
 // a circle (r.x == r.y); the magnitude is a first-order estimate whose error grows
 // with eccentricity — accepted after golden + visual review.
+//
+// The gradient form is ONLY used outside/near the outline (k0 >= 1). Inside it
+// degenerates twice: at p == 0 the product k0*(k0-1) underflows to -0, so the
+// centre evaluates as "exactly on the outline" and paints a phantom half-coverage
+// stroke dot in the middle of every stroked ellipse; and across the centre band
+// the 1e-4 clamp on k1 turns neighbouring texels' distances into a deep-negative
+// cliff, whose screen-space derivative (fwidth) explodes the analytic AA width
+// and smears spurious stroke coverage over the interior. Inside (k0 < 1) a
+// shape-true linear ramp is used instead: it reads -min(r) at the centre, crosses
+// 0 exactly at the outline, and stays monotone — the stroke/fill coverage math
+// only zero-crosses near k0 == 1, where the approximation is already accurate.
 fn sdf_ellipse(p: vec2<f32>, r: vec2<f32>) -> f32 {
   let k0 = length(p / r);
-  let k1 = length(p / (r * r));
-  return k0 * (k0 - 1.0) / max(k1, 1e-4);
+  let approx = k0 * (k0 - 1.0) / max(length(p / (r * r)), 1e-4);
+  let interior = (k0 - 1.0) * min(r.x, r.y);
+  return select(approx, interior, k0 < 1.0);
 }
 
 // Unsigned distance from p to segment a→b (capsule building block). A capsule of

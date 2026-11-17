@@ -22,10 +22,10 @@
 import React, { useState } from 'react';
 import { Settings, ChevronDown, Wifi, WifiOff, FileJson, RotateCcw, Sparkles, Clock, Image as ImageIcon, AlertTriangle } from 'lucide-react';
 import StatusBanner from '@opengpex/editor/widgets/StatusBanner';
-import { motion } from 'framer-motion';
 import FancyButton from '@opengpex/editor/widgets/FancyButton';
 import ActionButton from '@opengpex/editor/widgets/ActionButton';
 import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
+import { DrawerHeader } from '@opengpex/editor/workspace/components/DrawerHeader';
 import Tooltip from '@opengpex/editor/widgets/Tooltip';
 import { usePluginSelfBusy } from '@opengpex/editor/core/context';
 import { ComfyBridgeIcon } from '../icon';
@@ -145,10 +145,10 @@ export const ComfyBridgeDrawer = React.memo(function ComfyBridgeDrawer() {
   return (
     <div className="flex flex-col gap-2 px-2 pt-1 pb-1 overflow-hidden">
       {/* ─── Header ──────────────────────────────────────────────── */}
-      <motion.div layout="position" className="flex justify-between items-center h-6 shrink-0">
-        <div className="flex items-center gap-2">
-          <ComfyBridgeIcon className="text-emerald-600 dark:text-emerald-400" />
-          {environments.length <= 1 ? (
+      <DrawerHeader
+        icon={<ComfyBridgeIcon size={12} className="text-emerald-600 dark:text-emerald-400" />}
+        title={
+          environments.length <= 1 ? (
             <div className="flex items-center gap-1.5">
               <span className={`w-1.5 h-1.5 rounded-full ${
                 connectionStatus === 'healthy' ? 'bg-green-500' :
@@ -184,48 +184,51 @@ export const ComfyBridgeDrawer = React.memo(function ComfyBridgeDrawer() {
                 </div>
               )}
             />
-          )}
-        </div>
-        <div className="flex items-center gap-1.5">
-          {/* Reset Params (moved from button row to header) */}
-          <Tooltip content="Reset Params" position="bottom">
-            <button
-              onClick={handleResetParams}
-              disabled={!activeWorkflow || activeWorkflow.exposedParams.length === 0}
-              className="flex items-center justify-center w-6 h-6 rounded-lg text-[var(--text-muted)] hover:bg-[var(--border-subtle)] transition-colors focus:outline-none disabled:opacity-30"
-            >
-              <RotateCcw size={11} />
-            </button>
-          </Tooltip>
-          {/* Refresh (test connection + sync object_info) */}
-          <Tooltip content="Refresh" position="bottom">
-            <button
-              onClick={() => testConnection()}
-              disabled={isTesting}
-              className={`flex items-center justify-center w-6 h-6 rounded-lg transition-colors focus:outline-none ${
-                connectionStatus === 'healthy'
-                  ? 'text-green-500 hover:bg-green-500/10'
-                  : connectionStatus === 'unhealthy'
-                    ? 'text-red-500 hover:bg-red-500/10'
-                    : 'text-[var(--text-muted)] hover:bg-[var(--border-subtle)]'
-              } disabled:opacity-50`}
-            >
-              {connectionStatus === 'unhealthy'
-                ? <WifiOff size={12} className={isTesting ? 'animate-pulse-lite' : ''} />
-                : <Wifi size={12} className={isTesting ? 'animate-pulse-lite' : ''} />
-              }
-            </button>
-          </Tooltip>
-          {/* Settings */}
-          <ActionButton
-            onClick={() => openSettingsCmd?.execute()}
-            icon={<Settings size={12} />}
-            tooltip="ComfyUI Settings"
-            size="sm"
-            variant="glass"
-          />
-        </div>
-      </motion.div>
+          )
+        }
+        actions={
+          <>
+            {/* Reset Params (moved from button row to header) */}
+            <Tooltip content="Reset Params" position="bottom">
+              <button
+                onClick={handleResetParams}
+                disabled={!activeWorkflow || activeWorkflow.exposedParams.length === 0}
+                className="flex items-center justify-center w-6 h-6 rounded-lg text-[var(--text-muted)] hover:bg-[var(--border-subtle)] transition-colors focus:outline-none disabled:opacity-30"
+              >
+                <RotateCcw size={11} />
+              </button>
+            </Tooltip>
+            {/* Refresh (test connection + sync object_info) */}
+            <Tooltip content="Refresh" position="bottom">
+              <button
+                onClick={() => testConnection()}
+                disabled={isTesting}
+                className={`flex items-center justify-center w-6 h-6 rounded-lg transition-colors focus:outline-none ${
+                  connectionStatus === 'healthy'
+                    ? 'text-green-500 hover:bg-green-500/10'
+                    : connectionStatus === 'unhealthy'
+                      ? 'text-red-500 hover:bg-red-500/10'
+                      : 'text-[var(--text-muted)] hover:bg-[var(--border-subtle)]'
+                } disabled:opacity-50`}
+              >
+                {connectionStatus === 'unhealthy'
+                  ? <WifiOff size={12} className={isTesting ? 'animate-pulse-lite' : ''} />
+                  : <Wifi size={12} className={isTesting ? 'animate-pulse-lite' : ''} />
+                }
+              </button>
+            </Tooltip>
+            {/* Settings */}
+            <ActionButton
+              onClick={() => openSettingsCmd?.execute()}
+              icon={<Settings size={12} />}
+              tooltip="ComfyUI Settings"
+              size="sm"
+              variant="glass"
+            />
+          </>
+        }
+        actionsClassName="gap-1.5"
+      />
 
       {/* ─── Connection Status Banner ────────────────────────────── */}
       {connectionStatus === 'unhealthy' && (

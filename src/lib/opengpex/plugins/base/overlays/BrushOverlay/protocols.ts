@@ -77,13 +77,6 @@ export const MIN_SAMPLE_DISTANCE_PX = 2;
  */
 export const MAX_STROKE_POINTS = 40_000;
 
-/**
- * Padding added around the trajectory's raw bounding box when tightening the
- * layer box at commit: half the tip diameter reaches beyond the centre-line,
- * plus 1px for the analytic edge feather.
- */
-export const STROKE_BOX_PADDING_EXTRA_PX = 1;
-
 // ─── Input-dynamics tunables ────────────────────────────────────────────────────
 
 /**

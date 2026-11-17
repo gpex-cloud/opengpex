@@ -67,7 +67,7 @@ function buildScreenPathD(
   const segs: string[] = [];
   for (let i = 0; i < trail.length; i++) {
     const p = trail[i];
-    const sp = e.geometry.space.localToScreen(p.x, p.y, e.activeFrame);
+    const sp = e.geometry.space.localToScreen(p.x, p.y, e.activeFrame.camera);
     segs.push(`${i === 0 ? 'M' : 'L'} ${sp.x} ${sp.y}`);
   }
   return segs.join(' ');
@@ -167,7 +167,7 @@ export const createLassoHandler = (): InteractionHandler => {
       clampedY = snappedStart.y;
       trail = [asLocalPoint({ x: clampedX, y: clampedY })];
       if (lassoPreviewPathRef.current) {
-        const sp = e.geometry.space.localToScreen(clampedX, clampedY, e.activeFrame);
+        const sp = e.geometry.space.localToScreen(clampedX, clampedY, e.activeFrame.camera);
         lassoPreviewPathRef.current.setAttribute('d', `M ${sp.x} ${sp.y}`);
       }
       lassoTrace('onStart', 'trail=', trail.length, 'previewRef=', !!lassoPreviewPathRef.current, 'aa=', gestureAA);
@@ -190,8 +190,8 @@ export const createLassoHandler = (): InteractionHandler => {
       //   dynamicThreshold = screenThreshold / cameraScale
       const start = trail[0];
       if (trail.length >= 8 && start) {
-        const startScreen = e.geometry.space.localToScreen(start.x, start.y, e.activeFrame);
-        const curScreen = e.geometry.space.localToScreen(pointX, pointY, e.activeFrame);
+        const startScreen = e.geometry.space.localToScreen(start.x, start.y, e.activeFrame.camera);
+        const curScreen = e.geometry.space.localToScreen(pointX, pointY, e.activeFrame.camera);
         const screenDist = Math.hypot(curScreen.x - startScreen.x, curScreen.y - startScreen.y);
 
         if (screenDist < SNAP_TO_START_SCREEN_PX) {

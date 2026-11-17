@@ -45,6 +45,7 @@
 
 import type { Layer, Frame, InteractionEvent, LocalPolygon } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
+import type { LayerService } from '@opengpex/editor/core/layer/types';
 import type { Point2D, StrokeSession, PaintBakeRequest, BakeRequest } from './types';
 
 // ─── Configuration ─────────────────────────────────────────────────────────────
@@ -53,6 +54,8 @@ export interface MosaicStrokeConfig {
   brushDiameter: number;
   blockSize: number;
   canvasSize: { w: number; h: number };
+  /** Layer service access — new mosaic canvases are named through the smart naming service, not static factory calls. */
+  layers: LayerService;
   /**
    * Downsample factor for the composited source ImageData.
    *
@@ -269,8 +272,7 @@ export class MosaicStrokeSession implements StrokeSession {
     }
 
     // Create new Paint Layer
-    const layersArray = frame.layers.order.map(id => frame.layers.byId[id]);
-    const smartName = LayerFactory.getNewLayerName(layersArray, 'Mosaic');
+    const smartName = this.config.layers.factory.getNewLayerNameFor(frame, 'Mosaic');
     const newLayer = LayerFactory.createLayer('blank', {
       name: smartName,
       cx: 0,

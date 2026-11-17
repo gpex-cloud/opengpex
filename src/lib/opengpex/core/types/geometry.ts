@@ -201,16 +201,16 @@ export interface GeometryService {
 
   /** Coordinate system and space transformations */
   space: {
-    /** Viewport physical coordinates -> World absolute coordinates */
-    screenToWorld: (vx: number, vy: number, frame: Frame, camera?: CameraState) => WorldPoint;
+    /** Viewport physical coordinates -> World absolute coordinates. Pure conversion: consumes the camera and the canvas extent, not a Frame. */
+    screenToWorld: (vx: number, vy: number, canvasDim: Dimensions, camera: CameraState) => WorldPoint;
     /** World absolute coordinates -> Viewport physical coordinates */
-    worldToScreen: (wx: number, wy: number, frame: Frame, camera?: CameraState) => ViewportPoint;
+    worldToScreen: (wx: number, wy: number, canvasDim: Dimensions, camera: CameraState) => ViewportPoint;
     /** World absolute coordinates -> Local relative coordinates */
-    worldToLocal: (wx: number, wy: number, frame: Frame) => LocalPoint;
+    worldToLocal: (wx: number, wy: number, canvasDim: Dimensions) => LocalPoint;
     /** Local relative coordinates -> World absolute coordinates */
-    localToWorld: (px: number, py: number, frame: Frame) => WorldPoint;
+    localToWorld: (px: number, py: number, canvasDim: Dimensions) => WorldPoint;
     /** Local relative rect -> World absolute rect */
-    localToWorldRect: (rect: Rect, frame: Frame) => WorldRect;
+    localToWorldRect: (rect: Rect, canvasDim: Dimensions) => WorldRect;
     /**
      * Object-LOCAL-axes rect centre -> World centre (cx, cy).
      * Inverse of the pose half of `computeWorldMatrix`, for the orientation-aware
@@ -223,15 +223,15 @@ export interface GeometryService {
       orientation: { rotation: number, flip?: { h: boolean, v: boolean } }
     ) => Point2D;
     /** World absolute rect -> Local relative rect */
-    worldToLocalRect: (rect: WorldRect, frame: Frame) => LocalRect;
-    /** Viewport physical coordinates -> Local relative coordinates */
-    screenToLocal: (vx: number, vy: number, frame: Frame, camera?: CameraState) => LocalPoint;
+    worldToLocalRect: (rect: WorldRect, canvasDim: Dimensions) => LocalRect;
+    /** Viewport physical coordinates -> Local relative coordinates. Pure camera conversion — no canvas extent involved. */
+    screenToLocal: (vx: number, vy: number, camera: CameraState) => LocalPoint;
     /** Local relative coordinates -> Viewport physical coordinates */
-    localToScreen: (px: number, py: number, frame: Frame, camera?: CameraState) => ViewportPoint;
+    localToScreen: (px: number, py: number, camera: CameraState) => ViewportPoint;
     /** Local rect -> Viewport physical rect */
-    localToScreenRect: (rect: Rect, frame: Frame, camera?: CameraState) => ViewportRect;
+    localToScreenRect: (rect: Rect, camera: CameraState) => ViewportRect;
     /** World rect -> Viewport physical rect */
-    worldToScreenRect: (rect: WorldRect, frame: Frame, camera?: CameraState) => ViewportRect;
+    worldToScreenRect: (rect: WorldRect, canvasDim: Dimensions, camera: CameraState) => ViewportRect;
 
     /** Calculates the projection AABB of selection in layer local space */
     getLayerLocalAABB: (layer: Layer, worldRect: WorldRect, extraOverride?: LayerPoseOverride) => LocalRect;
@@ -246,7 +246,10 @@ export interface GeometryService {
     /** Gets layer world bounding box */
     getLayerBoundingBox: (l: Layer, extraOverride?: IMatrix3x3) => WorldRect;
     /** Calculates center point of a rect */
-    getRectCenter: (rect: Rect) => Point2D;
+    /** Center of a canvas-local rect (pure local-space arithmetic). */
+    getLocalRectCenter: (rect: Rect) => Point2D;
+    /** Center of a canvas-local rect resolved to world coordinates (the cx/cy anchor space). */
+    getWorldRectCenter: (rect: Rect, canvasDim: Dimensions) => Point2D;
     /** Calculates intersection of two rects */
     getRectIntersection: <T extends Rect>(r1: T, r2: T, minSize?: number) => T | null;
     /** Calculates union of two rects */
@@ -455,12 +458,14 @@ export interface GeometryService {
     snapToPixel: <T extends Rect | Point2D>(r: T, strategy?: 'round' | 'floor' | 'ceil') => T;
     /** Grid snapping */
     snapPoint: (pos: Point2D) => Point2D;
-    /** Aligns a rect in world space to canvas local physical pixel grid */
-    snapRectToPixel: (
-      targetRect: WorldRect,
-      canvasDim: Dimensions,
-      strategy?: 'round' | 'floor' | 'ceil'
-    ) => WorldRect;
+    /** Lattice placement operator (pure math): LocalRect in/out; the WHEN-to-align decision lives at layers.snap */
+    snapLocalRectToLatticeRounded: (rect: LocalRect, opts?: { snapDimension?: boolean }) => LocalRect;
+    /** World-basis lattice snap (the pixel-window single source): edges expand outward onto the document texel lattice (phase depends on canvas parity). Engine and layer services consume this — never the operator module. */
+    snapWorldRectToLatticeExpanded: (rect: WorldRect, canvasDim: Dimensions) => WorldRect;
+    // snapRectToPixel retired: layer/element PLACEMENT alignment lives on
+    // LayerService.snap (layers.snap.snapLayerPlacement), the business home
+    // of the "when does a box align to the lattice" decision. Engine pixel
+    // windows use snapWorldRectToLatticeExpanded internally.
   };
 
 
@@ -695,3 +700,7 @@ export interface GeometryService {
     svgDToPenPath: (d: string) => PenPathData;
   };
 }
+
+// Service-domain re-export: stage/feature layers need the snap filter shape
+// without importing geometry operators directly (lint-bound).
+export type { SnapFilterOptions } from '../geometry/operators/snapping';

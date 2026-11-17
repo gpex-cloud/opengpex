@@ -17,12 +17,13 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { InteractionHandler, LocalRect, asLocalShape } from '@opengpex/editor/core/types';
+import {InteractionHandler, LocalRect, asLocalRect} from '@opengpex/editor/core/types';
+
 import type { TextLayerData } from '@opengpex/editor/core/types/models';
-import { normalizeBoxMode } from '@opengpex/editor/core/types/models';
-import { createTransformHandler, ResizeHandle } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
-import { ACTIVE_CRAFT_KEY, resolveGizmoTargetLayer } from './shared';
-import { TEXT_DEFAULT_LINE_HEIGHT } from '../hooks/styling';
+import {normalizeBoxMode} from '@opengpex/editor/core/types/models';
+import {createTransformHandler, ResizeHandle} from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
+import {ACTIVE_CRAFT_KEY, resolveGizmoTargetLayer} from './shared';
+import {TEXT_DEFAULT_LINE_HEIGHT} from '../hooks/styling';
 
 // ─── Gesture classification & box semantics ───────────────────────────────────
 
@@ -215,7 +216,6 @@ export const createTextResizeHandler = (): InteractionHandler => {
     onUpdate: (e, newRect, tx, context) => {
       if (!targetLayerId || !gestureStart || !gestureHandle) return;
       const frame = e.activeFrame;
-      const canvas = frame.canvas;
       const layer = frame.layers.byId[targetLayerId];
       if (!layer || !layer.textData) return;
 
@@ -249,16 +249,29 @@ export const createTextResizeHandler = (): InteractionHandler => {
         newCx = worldCenter.x;
         newCy = worldCenter.y;
       } else {
-        // Axis-aligned path: canvas-local rect → world cx/cy.
-        newCx = newRect.x + patch.w / 2 - canvas.w / 2;
-        newCy = newRect.y + patch.h / 2 - canvas.h / 2;
+        // Axis-aligned path: the new box lands on the canvas-local lattice
+        // through the placement posture BEFORE deriving the world anchor.
+        // Text renders from the box origin via pre-rasterized glyph bitmaps
+        // (glyph atlas + bilinear sampling): a fractional origin softens
+        // every glyph at 1:1. Create (click/drag) and move paths already
+        // snap — this was the one unsnapped text path. Size stays float:
+        // it drives line wrapping (sub-pixel threshold, ±0.5px does not
+        // change real line breaks) — same posture as the create paths.
+        // The orientation-aware path above stays pose-exact on purpose: a
+        // rotated layer's glyph sampling is sub-pixel arbitrary regardless
+        // (rotation dominates), so lattice-snapping cannot recover
+        // crispness there — the same tolerance every rotated layer carries.
+        const { worldCenter } = e.layers.snap.snapLayerPlacement(
+          asLocalRect({ x: newRect.x, y: newRect.y, w: patch.w, h: patch.h }),
+          frame.canvas,
+        );
+        newCx = worldCenter.x;
+        newCy = worldCenter.y;
       }
 
       tx.update({
-        cx: newCx,
-        cy: newCy,
-        bounding: { w: patch.w, h: patch.h },
-        visibleShape: asLocalShape({ x: 0, y: 0, w: patch.w, h: patch.h }),
+        // Shared pose-preserving rebaser (factory).
+        ...e.layers.factory.rebaseToBounds({ x: newCx - patch.w / 2, y: newCy - patch.h / 2, w: patch.w, h: patch.h }),
         textData: patch.textData,
       }, 'layer', targetLayerId);
     },

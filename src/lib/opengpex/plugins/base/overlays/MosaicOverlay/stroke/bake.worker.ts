@@ -30,6 +30,7 @@
  */
 
 import { calculateContentBoundsFromImageData } from '@opengpex/editor/core/engine/utils/pixel-utils';
+import { AA_MARGIN } from '@opengpex/editor/core/geometry/margins';
 import { calculateContentHash } from '@opengpex/editor/core/helpers/hash';
 import type { BakeWorkerRequest, BakeWorkerResult } from './types';
 
@@ -57,10 +58,12 @@ self.onmessage = async (e: MessageEvent<BakeWorkerRequest>) => {
 
   if (isNewLayer && strokeDirtyRect) {
     // Fast path: new layer has ONLY stroke content → stroke dirty rect IS content bounds
-    cropX = Math.max(0, strokeDirtyRect.x - 1);
-    cropY = Math.max(0, strokeDirtyRect.y - 1);
-    const cropR = Math.min(canvasSize.w, strokeDirtyRect.x + strokeDirtyRect.w + 1);
-    const cropB = Math.min(canvasSize.h, strokeDirtyRect.y + strokeDirtyRect.h + 1);
+    // Pad the crop by the shared AA margin: the composite rasterization bleeds
+    // ~half a pixel of coverage beyond analytic geometry (geometry/margins).
+    cropX = Math.max(0, strokeDirtyRect.x - AA_MARGIN);
+    cropY = Math.max(0, strokeDirtyRect.y - AA_MARGIN);
+    const cropR = Math.min(canvasSize.w, strokeDirtyRect.x + strokeDirtyRect.w + AA_MARGIN);
+    const cropB = Math.min(canvasSize.h, strokeDirtyRect.y + strokeDirtyRect.h + AA_MARGIN);
     cropW = cropR - cropX;
     cropH = cropB - cropY;
   } else if (strokeDirtyRect && !isNewLayer && existingLayerBounding && existingLayerRect) {
@@ -73,10 +76,10 @@ self.onmessage = async (e: MessageEvent<BakeWorkerRequest>) => {
     const strokeB = strokeDirtyRect.y + strokeDirtyRect.h;
 
     // Union of existing layer rect + stroke dirty rect (clamped to canvas)
-    const scanX = Math.max(0, Math.floor(Math.min(drawX, strokeDirtyRect.x)) - 1);
-    const scanY = Math.max(0, Math.floor(Math.min(drawY, strokeDirtyRect.y)) - 1);
-    const scanR = Math.min(canvasSize.w, Math.ceil(Math.max(existR, strokeR)) + 1);
-    const scanB = Math.min(canvasSize.h, Math.ceil(Math.max(existB, strokeB)) + 1);
+    const scanX = Math.max(0, Math.floor(Math.min(drawX, strokeDirtyRect.x)) - AA_MARGIN);
+    const scanY = Math.max(0, Math.floor(Math.min(drawY, strokeDirtyRect.y)) - AA_MARGIN);
+    const scanR = Math.min(canvasSize.w, Math.ceil(Math.max(existR, strokeR)) + AA_MARGIN);
+    const scanB = Math.min(canvasSize.h, Math.ceil(Math.max(existB, strokeB)) + AA_MARGIN);
     const scanW = scanR - scanX;
     const scanH = scanB - scanY;
 
@@ -84,21 +87,21 @@ self.onmessage = async (e: MessageEvent<BakeWorkerRequest>) => {
     const regionImageData = compositeCtx.getImageData(scanX, scanY, scanW, scanH);
     const contentBounds = calculateContentBoundsFromImageData(regionImageData, scanW, scanH);
 
-    // Offset back to canvas coordinates + 1px padding
-    cropX = Math.max(0, scanX + contentBounds.x - 1);
-    cropY = Math.max(0, scanY + contentBounds.y - 1);
-    const cropR = Math.min(canvasSize.w, scanX + contentBounds.x + contentBounds.w + 1);
-    const cropB = Math.min(canvasSize.h, scanY + contentBounds.y + contentBounds.h + 1);
+    // Offset back to canvas coordinates + the shared AA margin (geometry/margins)
+    cropX = Math.max(0, scanX + contentBounds.x - AA_MARGIN);
+    cropY = Math.max(0, scanY + contentBounds.y - AA_MARGIN);
+    const cropR = Math.min(canvasSize.w, scanX + contentBounds.x + contentBounds.w + AA_MARGIN);
+    const cropB = Math.min(canvasSize.h, scanY + contentBounds.y + contentBounds.h + AA_MARGIN);
     cropW = cropR - cropX;
     cropH = cropB - cropY;
   } else {
     // Fallback: no dirty rect available — full canvas scan
     const compositeImageData = compositeCtx.getImageData(0, 0, canvasSize.w, canvasSize.h);
     const contentBounds = calculateContentBoundsFromImageData(compositeImageData, canvasSize.w, canvasSize.h);
-    cropX = Math.max(0, contentBounds.x - 1);
-    cropY = Math.max(0, contentBounds.y - 1);
-    const cropR = Math.min(canvasSize.w, contentBounds.x + contentBounds.w + 1);
-    const cropB = Math.min(canvasSize.h, contentBounds.y + contentBounds.h + 1);
+    cropX = Math.max(0, contentBounds.x - AA_MARGIN);
+    cropY = Math.max(0, contentBounds.y - AA_MARGIN);
+    const cropR = Math.min(canvasSize.w, contentBounds.x + contentBounds.w + AA_MARGIN);
+    const cropB = Math.min(canvasSize.h, contentBounds.y + contentBounds.h + AA_MARGIN);
     cropW = cropR - cropX;
     cropH = cropB - cropY;
   }

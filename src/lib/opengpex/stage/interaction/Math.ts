@@ -18,7 +18,7 @@
  */
 
 import { InteractionEvent, LocalRect, asWorldPoint } from '@opengpex/editor/core/types';
-import type { SnapFilterOptions } from '@opengpex/editor/core/geometry/operators/snapping';
+import type { SnapFilterOptions } from '@opengpex/editor/core/types/geometry';
 import { presets } from '@opengpex/editor/core/helpers/preferences';
 
 /** Resolved at call time from PresetsFactory (allows runtime override via Settings UI). */

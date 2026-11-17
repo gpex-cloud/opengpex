@@ -30,9 +30,11 @@
  */
 
 import { EditorContextValue, EditorCommand, asLocalShape, asWorldRect, type Frame, type Layer, type LocalShape, type TransformParams, type FragmentPose, type Point2D } from '@opengpex/editor/core/types';
-import { computeConfinementFromLayer, getClipBox } from '@opengpex/editor/core/helpers/selection';
+import { getClipBox } from '@opengpex/editor/core/helpers/selection';
+import { LayerUtils } from '@opengpex/editor/core/layer/utils';
 
 import { unionRingsMulti } from '@opengpex/editor/core/geometry/poly-clip';
+import { featherPad } from '@opengpex/editor/core/geometry/margins';
 import { LayerFactory } from '@opengpex/editor/core/layer/factory';
 import {
   CMD_PEEL_EXCHANGE,
@@ -318,7 +320,7 @@ export const PEEL_COMMANDS = {
         // converged spindle here would shrink every Esc→re-peel cycle by the
         // soft-alpha fringe beyond the 50% contour (the fringe rides the
         // fragment's crop window, and a spindle-shaped re-cut excludes it).
-        const converged = computeConfinementFromLayer(activeFrame, landed);
+        const converged = LayerUtils.computeConfinementFromLayer(activeFrame, landed);
         if (converged) {
           ctx.actions.updateFrame(activeFrame.id, { confinement: converged });
           markSelectionConverged();
@@ -603,7 +605,7 @@ export const PEEL_COMMANDS = {
           }
 
           const newLayer = LayerFactory.createLayer('image', {
-            name: LayerFactory.getNewLayerName(hostLayers),
+            name: ctx.layers.factory.getNewLayerName(hostLayers),
             src: assetUrl,
             assetId,
             // Product-record conventions from the shared bake primitive
@@ -774,9 +776,11 @@ export const PEEL_COMMANDS = {
         : null;
       // The ROI must contain the selection's feather band: the soft coverage
       // reaches zero only at distance f beyond the contour, so the pad is
-      // ceil(f) + the AA margin. Under-padding clips the fragment's soft edge.
-      const featherPad = nextConfinement?.feather ? Math.ceil(nextConfinement.feather) : 0;
-      const AA_MARGIN_PX = 1 + featherPad;
+      // ceil(f) + the AA margin (the shared featherPad posture from
+      // geometry/margins). Under-padding clips the fragment's soft edge.
+      const AA_MARGIN_PX = nextConfinement?.feather
+        ? featherPad(nextConfinement.feather)
+        : featherPad(0);
       const roiLocal: LocalShape = nextConfinement && nextConfinement.rect.w > 0 && nextConfinement.rect.h > 0
         ? asLocalShape({
             x: nextConfinement.rect.x - AA_MARGIN_PX,
@@ -786,7 +790,7 @@ export const PEEL_COMMANDS = {
           })
         // No selection (degenerate session): fall back to the pose-derived
         // content-box ROI so the bake never loses its reference.
-        : asLocalShape(geometry.space.worldToLocalRect(asWorldRect(geometry.transform.fragmentBakeRoi(params, 1)), activeFrame));
+        : asLocalShape(geometry.space.worldToLocalRect(asWorldRect(geometry.transform.fragmentBakeRoi(params, 1)), activeFrame.canvas));
 
       // ── Cut-contour migration ──
       // The recorded cut contour (`exchange.contour`) lives in the exchange's
@@ -1122,7 +1126,7 @@ export const PEEL_COMMANDS = {
                 ? ctx.actions.fast.latestLayer(freshFrame.id, freshFrame.activeLayerId)
                 : undefined;
               const converged = promoted
-                ? computeConfinementFromLayer(freshFrame, promoted)
+                ? LayerUtils.computeConfinementFromLayer(freshFrame, promoted)
                 : null;
               if (converged) {
                 ctx.actions.updateFrame(frame.id, { confinement: converged });

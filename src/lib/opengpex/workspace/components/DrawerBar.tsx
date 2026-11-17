@@ -31,7 +31,12 @@ import {
   EditorActions,
 } from "@opengpex/editor/core/types";
 import { getWorkspaceStyles, WorkspaceStyleItem } from "../Workspace.styles";
-import { Sparkles, ChevronLeft, ChevronRight, Minus } from "lucide-react";
+import {
+  Sparkles,
+  ChevronsLeft,
+  ChevronsRight,
+  CircleMinus,
+} from "lucide-react";
 import {
   AnimatePresence,
   motion,
@@ -39,6 +44,7 @@ import {
   useDragControls,
 } from "framer-motion";
 import Tooltip from "@opengpex/editor/widgets/Tooltip";
+import { DrawerDragProvider } from "./DrawerHeader";
 import PluginSlot from "./PluginSlot";
 
 import { useLayout } from "../LayoutContext";
@@ -282,7 +288,6 @@ export default function DrawerBar({
               actions={actions}
               styles={styles}
               handleCombinedClick={handleCombinedClick}
-              handleIsolate={handleIsolate}
               isDraggingRef={isDraggingRef}
               side={side}
               markUserEngaged={markUserEngaged}
@@ -308,7 +313,6 @@ function SidebarItem({
   actions,
   styles,
   handleCombinedClick,
-  handleIsolate,
   isDraggingRef,
   side,
   markUserEngaged,
@@ -318,7 +322,6 @@ function SidebarItem({
   actions: EditorActions;
   styles: Record<string, WorkspaceStyleItem>;
   handleCombinedClick: (id: string, e: React.MouseEvent) => void;
-  handleIsolate: (id: string) => void;
   isDraggingRef: React.RefObject<boolean>;
   side: "left" | "right";
   markUserEngaged: (uid: string) => void;
@@ -334,6 +337,23 @@ function SidebarItem({
   const [isOpening, setIsOpening] = React.useState(false);
   const [prevActive, setPrevActive] = React.useState(isActive);
   const [isDragging, setIsDragging] = React.useState(false);
+  const [cornerHot, setCornerHot] = React.useState(false);
+  const cornerHideTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Corner pill reveal: shown while the pointer is over the bottom-outer
+  // corner hotspot or the pill itself. The 150ms hide delay bridges the gap
+  // between hotspot and pill so the pill does not flicker in transit.
+  const showCorner = React.useCallback(() => {
+    if (cornerHideTimer.current) {
+      clearTimeout(cornerHideTimer.current);
+      cornerHideTimer.current = null;
+    }
+    setCornerHot(true);
+  }, []);
+  const scheduleHideCorner = React.useCallback(() => {
+    if (cornerHideTimer.current) clearTimeout(cornerHideTimer.current);
+    cornerHideTimer.current = setTimeout(() => setCornerHot(false), 150);
+  }, []);
 
   if (isActive !== prevActive) {
     setPrevActive(isActive);
@@ -390,6 +410,25 @@ function SidebarItem({
     });
   };
 
+  // Collapse button, placed on the outer edge of the pill by the conditional
+  // ordering below (left-docked panel → leftmost, right-docked → rightmost).
+  const collapseButton = (
+    <div
+      onClick={(e) => {
+        e.stopPropagation();
+        const currentIds = ui.activeSidebarIds || [];
+        actions.updateUI({
+          activeSidebarIds: currentIds.filter((id) => id !== plugin.uid),
+        });
+      }}
+      onPointerDown={(e) => e.stopPropagation()}
+      className="w-6 h-6 rounded-full flex items-center justify-center text-[var(--text-muted)] hover:text-indigo-500 dark:hover:text-indigo-400 hover:bg-[var(--bg-stage)] cursor-pointer transition-colors"
+      title="Collapse panel"
+    >
+      <CircleMinus size={13} strokeWidth={2.5} />
+    </div>
+  );
+
   return (
     <Reorder.Item
       key={plugin.uid}
@@ -403,17 +442,34 @@ function SidebarItem({
       onDragEnd={() => {
         setTimeout(() => {
           setIsDragging(false);
-        }, 300); // Maintain z-index during snap-back layout animation
+        }, 300); // Keep zIndex raised through the snap-back layout animation
         setTimeout(() => {
           if (isDraggingRef.current !== undefined)
             isDraggingRef.current = false;
         }, 100);
       }}
-      className="w-full flex shrink-0 relative pointer-events-none"
-      style={{
-        overflow: "visible",
-        zIndex: isDragging ? 1000 : "auto",
-      }}
+      // Container-local stacking, relative to sibling Reorder.Items inside the
+      // DrawerBar container (spec: local values registered in the zIndex guard
+      // whitelist). framer-motion's Reorder.Item injects its own zIndex
+      // MotionValue AFTER spreading user style ({...style, x, y, zIndex}) and
+      // that MotionValue is derived read-only via useTransform, so no style /
+      // animate / whileDrag channel can raise it: it is pinned to 1 while the
+      // item is offset during drag, "unset" when idle. Strategy is therefore
+      // the inverse: `isolate` turns every item into its own stacking context
+      // so an open panel's local zIndex (900) cannot escape its item, and the
+      // dragged item's built-in 1 wins over sibling items. Items with an open
+      // panel keep 900 (important class beats the injected inline value) so
+      // the panel still covers neighbor icons during expand/collapse
+      // animations; the dragged item takes 1000, held for the 300ms snap-back
+      // window in onDragEnd.
+      className={`w-full flex shrink-0 relative pointer-events-none isolate ${
+        isDragging
+          ? "z-[1000]!"
+          : isActive
+            ? "z-[900]!"
+            : ""
+      }`}
+      style={{ overflow: "visible" }}
     >
       <motion.div
         animate={{ height: isActive ? "auto" : 34 }}
@@ -502,78 +558,74 @@ function SidebarItem({
                 <div
                   className={`${styles.sidebarInner.className} relative`}
                   style={{
-                    paddingLeft: side === "left" ? "2px" : "8px",
-                    paddingRight: side === "left" ? "8px" : "2px",
+                    paddingLeft: "2px",
+                    paddingRight: "2px",
                   }}
                 >
-                  <PluginSlot
-                    name="SIDE_BAR"
-                    filter={plugin.uid}
-                    fallback={<SidebarSkeleton />}
-                  />
+                  <DrawerDragProvider
+                    capabilities={{
+                      startDrag: (e) => dragControls.start(e),
+                      isDragActive: () => isDraggingRef.current === true,
+                    }}
+                  >
+                    <PluginSlot
+                      name="SIDE_BAR"
+                      filter={plugin.uid}
+                      fallback={<SidebarSkeleton />}
+                    />
+                  </DrawerDragProvider>
                 </div>
 
-                {/* 3. Side touch handle */}
+                {/* Corner pill: Switch Side + Collapse, shown when the pointer
+                    hovers the top-outer corner hotspot or the pill itself.
+                    The pill straddles the panel edge (half outside). */}
                 <div
-                  className={`absolute top-0 bottom-0 w-4 cursor-grab active:cursor-grabbing z-[910] hover/5 group pointer-events-auto flex items-center justify-center ${side === "left" ? "right-0" : "left-0"}`}
-                  onPointerDown={(e) => dragControls.start(e)}
-                  onDoubleClick={(e) => {
-                    e.stopPropagation();
-                    handleIsolate(plugin.uid);
-                  }}
-                  title="Double click to isolate | Drag to reorder"
+                  className={`absolute top-0 w-5 h-5 pointer-events-auto ${
+                    side === "left" ? "right-0" : "left-0"
+                  }`}
+                  onMouseEnter={showCorner}
+                  onMouseLeave={scheduleHideCorner}
+                />
+                <div
+                  onMouseEnter={showCorner}
+                  onMouseLeave={scheduleHideCorner}
+                  className={`absolute top-0 flex items-center rounded-full bg-[var(--bg-panel)] border border-[var(--border-subtle)] shadow-md transition-opacity duration-200 ${
+                    cornerHot
+                      ? "opacity-100"
+                      : "opacity-0 pointer-events-none"
+                  } ${
+                    side === "left"
+                      ? "right-0 translate-x-1/2 -translate-y-1/2"
+                      : "left-0 -translate-x-1/2 -translate-y-1/2"
+                  }`}
                 >
-                  {/* Switch Side Button */}
+                  {/* Buttons are ordered so Collapse always sits on the outer
+                      edge: left-docked panel → collapse leftmost, right-docked
+                      → rightmost. */}
+                  {/* Collapse panel */}
+                  {side === "left" && collapseButton}
+                  {side === "left" && (
+                    <div className="w-px h-3.5 bg-[var(--border-subtle)]" />
+                  )}
+
+                  {/* Switch Side (Dock to the other edge) */}
                   <div
                     onClick={switchSide}
                     onPointerDown={(e) => e.stopPropagation()}
-                    className={`absolute top-12 w-[22px] h-[22px] rounded-full flex items-center justify-center bg-[var(--bg-panel)] border border-[var(--border-subtle)] shadow-md hover:bg-[var(--bg-stage)] hover:border-[var(--border-light)] transition-all duration-200 opacity-0 group-hover:opacity-100 pointer-events-auto cursor-pointer hover:scale-110 active:scale-95 ${
-                      side === "left"
-                        ? "right-0 translate-x-1/2"
-                        : "left-0 -translate-x-1/2"
-                    }`}
+                    className="w-6 h-6 rounded-full flex items-center justify-center text-[var(--text-muted)] hover:text-indigo-500 dark:hover:text-indigo-400 hover:bg-[var(--bg-stage)] cursor-pointer transition-colors"
                     title={`Dock to ${side === "left" ? "Right" : "Left"}`}
                   >
                     {side === "left" ? (
-                      <ChevronRight
-                        size={14}
-                        strokeWidth={2.5}
-                        className="text-[var(--text-main)] hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
-                      />
+                      <ChevronsRight size={13} strokeWidth={2.5} />
                     ) : (
-                      <ChevronLeft
-                        size={14}
-                        strokeWidth={2.5}
-                        className="text-[var(--text-main)] hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
-                      />
+                      <ChevronsLeft size={13} strokeWidth={2.5} />
                     )}
                   </div>
 
-                  {/* Collapse Button */}
-                  <div
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      const currentIds = ui.activeSidebarIds || [];
-                      actions.updateUI({
-                        activeSidebarIds: currentIds.filter((id) => id !== plugin.uid),
-                      });
-                    }}
-                    onPointerDown={(e) => e.stopPropagation()}
-                    className={`absolute top-5 w-[22px] h-[22px] rounded-full flex items-center justify-center bg-[var(--bg-panel)] border border-[var(--border-subtle)] shadow-md hover:bg-[var(--bg-stage)] hover:border-[var(--border-light)] transition-all duration-200 opacity-0 group-hover:opacity-100 pointer-events-auto cursor-pointer hover:scale-110 active:scale-95 ${
-                      side === "left"
-                        ? "right-0 translate-x-1/2"
-                        : "left-0 -translate-x-1/2"
-                    }`}
-                    title="Collapse panel"
-                  >
-                    <Minus
-                      size={14}
-                      strokeWidth={2.5}
-                      className="text-[var(--text-main)] hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors"
-                    />
-                  </div>
-
-                  <div className="w-[3px] h-8 bg-[var(--text-muted)] opacity-30 rounded-full transition-all group-hover:h-12 group-hover:opacity-60 group-hover:bg-[var(--text-main)]" />
+                  {side === "right" && (
+                    <div className="w-px h-3.5 bg-[var(--border-subtle)]" />
+                  )}
+                  {side === "right" && collapseButton}
                 </div>
               </motion.div>
             </motion.div>
