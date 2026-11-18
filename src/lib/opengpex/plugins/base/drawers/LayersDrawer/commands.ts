@@ -17,12 +17,25 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { Layer, EditorContextValue, EditorCommand, asLocalShape, LayerBlendMode } from '@opengpex/editor/core/types';
+import { Layer, Frame, EditorContextValue, EditorCommand, asLocalShape, LayerBlendMode } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 
 import { commitRefocusToOverlay, RefocusTarget } from './utils';
 
 import * as P from './protocols';
+
+/**
+ * Resolve the clip tool a Refocus re-arms with: the fragment's recorded
+ * `metadata.clipTool` first (re-arming the SAME tool is what makes Refocus
+ * round-trip); a fragment with no record (legacy products, some merge
+ * outputs) falls back to the frame's LAST-USED clip tool (pure UI memory —
+ * whatever the user was drawing with), and a frame with no usable memory
+ * defaults to 'rect'. Both sources are written only by in-app code, so the
+ * values are always in the documented tool space — no validation needed.
+ */
+function resolveRefocusClipTool(layer: Layer, frame: Frame): string {
+  return (layer.metadata?.clipTool as string | undefined) || frame.latestClipTool || 'rect';
+}
 
 /**
  * LAYER_COMMANDS: Declarative command configurations.
@@ -160,7 +173,7 @@ export const LAYERS_COMMANDS = {
                 );
                 const framePoly = ctx.geometry.polygon.layerLocalToFrameLocal(localPoly, latestLayer, frame);
                 // The cut's tool rides `metadata.clipTool` (pre-existing).
-                const clipToolId = (layer.metadata?.clipTool as string) || 'lasso';
+                const clipToolId = resolveRefocusClipTool(layer, frame);
                 const target: RefocusTarget = { regular: false, clipToolId, polygon: framePoly };
                 commitRefocusToOverlay(ctx, frame, target);
                 return;
@@ -187,11 +200,13 @@ export const LAYERS_COMMANDS = {
                 });
                 const framePoly = ctx.geometry.polygon.layerLocalToFrameLocal(localPoly, layer, frame);
 
-                // Use the recorded source clip tool if available, otherwise default to 'lasso'.
-                // Pass through verbatim: peel commits and cmdj cuts record
+                // Use the recorded source clip tool if available. Pass
+                // through verbatim: peel commits and cmdj cuts record
                 // `metadata.clipTool`, and re-arming the SAME tool (not a
-                // lasso downgrade) is what makes Refocus round-trip.
-                const clipToolId = (layer.metadata?.clipTool as string) || 'lasso';
+                // downgrade) is what makes Refocus round-trip. Fragments
+                // with no record fall back to the frame's last-used tool
+                // (see resolveRefocusClipTool).
+                const clipToolId = resolveRefocusClipTool(layer, frame);
 
                 target = { regular: false, clipToolId, polygon: framePoly };
             } else {
@@ -320,7 +335,7 @@ export const LAYERS_COMMANDS = {
 
                 // Read source clip tool from parent layer metadata — pass
                 // through verbatim (see syncToOverlay above).
-                const clipToolId = (layer.metadata?.clipTool as string) || 'lasso';
+                const clipToolId = resolveRefocusClipTool(layer, frame);
 
                 target = { regular: false, clipToolId, polygon: framePoly };
             } else {

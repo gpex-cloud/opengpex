@@ -22,6 +22,8 @@
 import { EditorCommand, EditorContextValue, LocalShape, asLocalShape } from '@opengpex/editor/core/types';
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { fromHex, convertColorGamut, WORKING_GAMUT, type ColorValue } from '@opengpex/editor/core/engine/color';
+import { computeFragmentFeathering } from '@opengpex/editor/core/layer/factory';
+import { ClipOverlayAPI } from '@opengpex/editor/plugins/base/overlays/ClipOverlay/protocols';
 
 import * as P from './protocols';
 
@@ -145,23 +147,14 @@ export const COLOR_OPTIONS_COMMANDS = {
           // Serialize the polygon to a LocalShape for the layer model.
           // polygonToShape uses absolute coordinates (suitable for Path2D),
           // recognizes rect/circle shapes, and preserves the antiAliased flag
-          // as the GPU pipeline's hard-edge signal. A feathered selection
-          // stamps its radius onto the fill layer's shape so the fill's edge
-          // carries the same soft band the selection constrains by.
+          // as the GPU pipeline's hard-edge signal.
           // The resulting shape's rect is in frame-local space (absolute coords),
           // but the layer is positioned at (cx, cy) relative to canvas center,
           // so we must offset the shape rect to layer-local space (origin at 0,0).
           const frameShape = ctx.geometry.polygon.polygonToShape(box);
-          if (box.feather && box.feather > 0) {
-            frameShape.featherPx = box.feather;
-          }
-          if (frameShape.type === 'rect') {
-            visibleShape = {
-              ...frameShape,
-              rect: { x: 0, y: 0, w, h },
-            } as LocalShape;
-          } else if (frameShape.type === 'circle') {
-            visibleShape = {
+          let tightShape: LocalShape;
+          if (frameShape.type === 'rect' || frameShape.type === 'circle') {
+            tightShape = {
               ...frameShape,
               rect: { x: 0, y: 0, w, h },
             } as LocalShape;
@@ -175,11 +168,33 @@ export const COLOR_OPTIONS_COMMANDS = {
               (_m: string, cmd: string, x: string, y: string) =>
                 `${cmd} ${parseFloat(x) - ox} ${parseFloat(y) - oy}`
             );
-            visibleShape = {
+            tightShape = {
               ...frameShape,
               rect: { x: 0, y: 0, w, h },
               pathData: offsetPathData,
             } as LocalShape;
+          }
+
+          // A feathered selection goes through the CANONICAL feathered-fragment
+          // form (the same pure transform feathered peel fragments take): the
+          // tight geometry serialized to pathData, inset inside a symmetrically
+          // padded rect (pad = ceil(f) + AA_MARGIN) that carries featherPx.
+          // The feather band extends OUTWARD from the cut contour, so an
+          // unpadded plane clips the fade on all four sides and the fill reads
+          // as hard-cut — the pad gives the soft band pixels to render over.
+          // Serializing to path also keeps the tier-2 contour degradation
+          // (`resolveFragmentOutline` → `shapeToPoint2D`) returning the TIGHT
+          // 50% rings: a 'circle' shape derives its ring from its rect, so a
+          // padded circle would read back as a fattened outline. Feather 0
+          // keeps the historical tight form untouched (no pad, no re-type).
+          const feather = box.feather ?? 0;
+          if (feather > 0) {
+            const { visibleShape: featheredShape, padded } = computeFragmentFeathering(tightShape, feather);
+            visibleShape = featheredShape;
+            w = padded.w;
+            h = padded.h;
+          } else {
+            visibleShape = tightShape;
           }
         }
       } else {
@@ -190,8 +205,24 @@ export const COLOR_OPTIONS_COMMANDS = {
         visibleShape = asLocalShape({ x: 0, y: 0, w, h }, 'rect', true);
       }
 
-      const cx = box_cx - activeFrame.canvas.w / 2;
-      const cy = box_cy - activeFrame.canvas.h / 2;
+      // Pose contract: cx/cy anchor the world position of the BOUNDING rect
+      // center (local_to_world = T(cx,cy) · … · T(−bounding/2)). With the
+      // canonical padded form the shape's rect origin moved to (−pad, −pad),
+      // so the pose must be re-derived through `computeFragmentCenter` — the
+      // same re-derivation `patchEdgeFeatherRepad` performs — otherwise the
+      // content lands exactly one pad up-left of the selection. A fill is
+      // born unrotated/unflipped (identity orientation), and the padded rect
+      // dims equal the bounding dims, which is what makes
+      // `desiredCenter − rectOrigin` the exact pose.
+      const center = { x: box_cx - activeFrame.canvas.w / 2, y: box_cy - activeFrame.canvas.h / 2 };
+      const pose = ctx.geometry.transform.computeFragmentCenter(
+        center,
+        { x: visibleShape.rect.x, y: visibleShape.rect.y },
+        0,
+        { h: false, v: false },
+      );
+      const cx = pose.x;
+      const cy = pose.y;
 
       const newLayer = layers.factory.createLayer('color', {
         name: 'Fill Layer',
@@ -209,20 +240,30 @@ export const COLOR_OPTIONS_COMMANDS = {
       layers.factory.addLayer(activeFrame.id, newLayer);
       actions.setActiveLayer(activeFrame.id, newLayer.id);
 
-      // A fill consumes the selection: clear it in the same undo step as the
-      // fill itself (both writes sit under this command's checkpoint), so ⌘Z
-      // restores the pre-fill state with the selection intact. This holds
-      // regardless of which mode the fill was invoked from — the selection is
-      // a document-level entity and fill is a completed, selection-consuming
-      // action.
-      actions.updateFrame(activeFrame.id, { confinement: null });
+      // Selection lifecycle on landing, honoring the clip plugin's policy
+      // (`ClipOverlayConfig.keepClipBoxAfter`, default false = dissolve).
+      // Default: a fill consumes the selection — cleared in the same undo
+      // step as the fill itself (both writes sit under this command's
+      // checkpoint), so ⌘Z restores the pre-fill state with the selection
+      // intact. With the preference on, the ants persist for follow-up work
+      // (e.g. re-filling the same region with another colour), mirroring the
+      // Cut lifecycle. This plugin command reads the config directly — the
+      // same ownership split as the peel exit (core clip.ts / cmdj.ts never
+      // read plugin config; their wrappers resolve the preference and pass
+      // it as payload).
+      const keepClipBoxAfter =
+        ((state.pluginConfig as Record<string, { keepClipBoxAfter?: boolean } | undefined> | undefined)?.[ClipOverlayAPI.configKey]?.keepClipBoxAfter === true);
+      if (!keepClipBoxAfter) {
+        actions.updateFrame(activeFrame.id, { confinement: null });
+      }
 
       // A fill is a completed action: leave whichever transient mode was live
-      // (the clip tool or the colour sampler) instead of stranding the user in
-      // it. A selection that merely PERSISTS while another tool is active is
-      // not a mode — it stays in place for further operations, matching how
-      // every other confinement consumer treats it.
-      if (state.interaction.interactionMode === 'clip' || state.interaction.interactionMode === 'sample') {
+      // (the colour sampler) instead of stranding the user in it. The clip
+      // tool exits only when the selection was consumed — a KEPT selection
+      // stays meaningful inside the clip tool (ants visible, immediate
+      // re-fill), matching how the copy path keeps the tool alive.
+      if (state.interaction.interactionMode === 'sample'
+        || (state.interaction.interactionMode === 'clip' && !keepClipBoxAfter)) {
         actions.setInteraction({ interactionMode: 'pan' });
       }
       if (state.interaction.interactionMode === 'sample') {

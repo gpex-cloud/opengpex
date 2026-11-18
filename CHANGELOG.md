@@ -2,6 +2,11 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.54
+
+- Fills: a selection fills as its exact shape — ellipse, lasso and wand included — with a complete soft edge when feathered, and the keep-selection preference now applies to fill
+- Layers: Refocus on a fragment with no recorded tool now re-arms your last-used selection tool (rectangle as the fallback) instead of always the lasso
+
 ## 2.0.53
 
 - Workspace: drawer panels are reordered by dragging their header (press-drag to move, click the title to still open its switcher), and the dragged panel always stays on top of its neighbors

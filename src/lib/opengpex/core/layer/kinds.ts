@@ -287,7 +287,19 @@ export const LAYER_KINDS: Readonly<Record<Layer['type'], LayerKind>> = {
     clippable: 'logical',
     ui: () => null, // pure fills infer no craft panel
     icon: () => 'gradient',
-    normalize: normalizePatch,
+    // A fill layer is BORN logical: its content is a mathematical description
+    // (pixels exist nowhere), and it is the only layer kind that can carry a
+    // non-rect visibleShape without ever passing through a clip strategy —
+    // the polygon serialization of an ellipse/lasso/wand selection. The
+    // renderer's implicit shape mask (the vmask that turns that non-rect
+    // shape into actual coverage) gates on `nature === 'logical'`, because a
+    // physical layer's contour is already baked into its pixels. Without this
+    // stamp the fill layer's nature is undefined, the gate classifies it as
+    // physical, and every non-rect selection fills as its bounding rect.
+    // This is the one deliberate exception to "nature is assigned only by
+    // clip strategies": the fill's birth is the equivalent of a clip product
+    // that never had a source bitmap to begin with.
+    normalize: (patch) => ({ ...normalizePatch(patch), nature: 'logical' }),
   },
   group: {
     type: 'group',
