@@ -21,10 +21,11 @@ import { Matrix3x3 } from '../matrix';
 import {
   CameraState, Dimensions, WorldPoint, ViewportPoint, LocalPoint,
   LocalRect, WorldRect, Rect, asWorldPoint, asViewportPoint,
-  asLocalPoint, asLocalRect, asWorldRect, Layer, IMatrix3x3, Point2D, Shape, NormalizedState
+  asLocalPoint, asLocalRect, asWorldRect, Layer, IMatrix3x3, Point2D, Shape,
 } from '@opengpex/editor/core/types';
 import { getCameraMatrix } from './camera';
 import { getLayerWorldMatrix, getOrientationMatrix } from './transform';
+import { ringsForShape, isPointInPathRings } from './point2d';
 
 /**
  * Viewport physical coordinates -> World absolute coordinates (offset from center)
@@ -437,54 +438,38 @@ export function isPointInShape(p: Point2D, shape: Shape): boolean {
     if (rx === 0 || ry === 0) return false;
     return Math.pow(p.x - cx, 2) / Math.pow(rx, 2) + Math.pow(p.y - cy, 2) / Math.pow(ry, 2) <= 1;
   }
+  if (shape.type === 'path' && shape.pathData) {
+    // Bounding-box fast screen first: the rect is declared as the shape's
+    // bounding box, so a point outside it can never be inside the path. Only
+    // surviving points pay the ring test (with its WeakMap-memoized parsing).
+    if (!isPointInRect(p, shape.rect)) return false;
+    return isPointInPathRings(p, ringsForShape(shape));
+  }
   // Default to rectangle (type === 'rect')
   return isPointInRect(p, shape.rect);
 }
 
 /**
- * testLayerHit: Determines if a world coordinate point hits a specified layer
+ * layerHitLocal: Pure geometric layer test. Maps a world coordinate point
+ * into the layer's local space and tests it against the layer's declared
+ * visible shape. Returns the layer-local point when the geometry hits
+ * (callers may then run content probes on it), `null` when it does not.
+ * Purely geometric: visibility/interactivity gating and any painted-content
+ * probing live with the callers (the layer service owns the hit policy).
  */
-export function testLayerHit(w_pos: WorldPoint, layer: Layer): boolean {
-  if (!layer.visible || layer.interactive === false) return false;
+export function layerHitLocal(w_pos: WorldPoint, layer: Layer): Point2D | null {
+  if (!layer.visible || layer.interactive === false) return null;
 
   const w_matrix = getLayerWorldMatrix(layer);
   const invM = w_matrix.inverse();
   const localP = invM.apply(w_pos) as LocalPoint;
 
-  if (layer.visibleShape) {
-    return isPointInShape(localP, layer.visibleShape);
-  }
+  const geometricHit = layer.visibleShape
+    ? isPointInShape(localP, layer.visibleShape)
+    // Defensive fallback: if the layer does not define visibleShape (e.g., newly created or special layer), default to its full bounding rectangle
+    : isPointInRect(localP, { x: 0, y: 0, w: layer.bounding.w, h: layer.bounding.h });
 
-  // Defensive fallback: if the layer does not define visibleShape (e.g., newly created or special layer), default to its full bounding rectangle
-  const defaultRect = { x: 0, y: 0, w: layer.bounding.w, h: layer.bounding.h };
-  return isPointInRect(localP, defaultRect);
-}
-
-/**
- * pickLayersAt: Gets all layers under the specified position (from top to bottom)
- */
-export function pickLayersAt(w_pos: WorldPoint, layers: NormalizedState<Layer>): Layer[] {
-  const hits: Layer[] = [];
-  for (let i = layers.order.length - 1; i >= 0; i--) {
-    const layer = layers.byId[layers.order[i]];
-    if (layer && testLayerHit(w_pos, layer)) {
-      hits.push(layer);
-    }
-  }
-  return hits;
-}
-
-/**
- * pickTopLayer: Gets the topmost layer under the specified position
- */
-export function pickTopLayer(w_pos: WorldPoint, layers: NormalizedState<Layer>): Layer | null {
-  for (let i = layers.order.length - 1; i >= 0; i--) {
-    const layer = layers.byId[layers.order[i]];
-    if (layer && testLayerHit(w_pos, layer)) {
-      return layer;
-    }
-  }
-  return null;
+  return geometricHit ? (localP as Point2D) : null;
 }
 
 /**

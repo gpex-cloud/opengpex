@@ -51,7 +51,9 @@ const BOX_DRAG_THRESHOLD = 8;
  * Same resolution logic as wand: top-most hit → activeLayer fallback.
  */
 function pickSamTargetLayer(e: InteractionEvent): Layer | null {
-  const top = e.geometry.space.pickTopLayer(e.point.world, e.activeFrame.layers);
+  // Whole-layer reach: clip target selection needs the layer as a whole, not
+  // the pixels visible at the point — testAlpha off, no piercing.
+  const top = e.layers.factory.getTopLayerAt(e.point.world, e.activeFrame.layers, { testAlpha: false });
   if (top) return top;
   const activeId = e.activeFrame.activeLayerId;
   if (activeId) {

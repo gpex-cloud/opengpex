@@ -57,7 +57,10 @@ export const plugin: EditorPlugin = {
   component: MarkerOverlayMain,
 
   // Scene-assembly exposure: the marker → `renderer:'sdf'` translator. Wired
-  // into the engine's vector-source registry by core/plugin/registry.ts.
+  // into the engine's vector-source registry by core/plugin/registry.ts. The
+  // SAME source doubles as the hit-test truth: the engine's void probe derives
+  // coverage rings from its analytic `solverOutline`, so hit and render read
+  // one artifact on every pick path.
   contributions: {
     engine: { vectorSource: markerContributor },
   },

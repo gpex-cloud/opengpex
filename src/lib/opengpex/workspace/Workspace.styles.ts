@@ -102,7 +102,7 @@ export const getWorkspaceStyles = (
 
         // The actual Pill bar content container
         topBarInner: {
-            className: `flex items-center transition-all duration-700 h-[34px] animate-in fade-in slide-in-from-top-4`
+            className: `flex items-center pointer-events-auto transition-all duration-700 h-[34px] animate-in fade-in slide-in-from-top-4`
         },
 
         // Stage Area Container

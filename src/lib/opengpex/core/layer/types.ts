@@ -19,6 +19,7 @@
 
 import { Frame, Layer, VectorMask, BitmapMask } from '@opengpex/editor/core/types/models';
 import { LocalShape, LocalPolygon, LocalRect, WorldRect, Dimensions, Point2D } from '@opengpex/editor/core/types/primitives';
+import type { WorldPoint, NormalizedState } from '@opengpex/editor/core/types';
 import type { BakeToAssetOptions, BakeToAssetResult, BuildPhysicalPatchOptions } from './services/baking';
 import type { ClipMode, ClipFragmentResult } from './services/clipping/route';
 import type { MergeStrategyOp, MergeOptions } from './services/merging';
@@ -67,6 +68,14 @@ export interface LayerFactoryNamespace {
   cleanInheritedMasks: <T extends VectorMask | BitmapMask>(masks?: T[]) => T[];
   getInsertIndexAbove: (frame: Frame, targetLayerId?: string | null) => number | undefined;
   resolveActiveHostLayer: (frame: Frame) => Layer | null;
+  /**
+   * Layer picking under a world point, with the layer-domain content policy
+   * baked in (engine content resolver by default). Topmost-first hits array,
+   * or the single topmost layer with `onlyTop`. See `LayerFactory.getLayersAt`.
+   */
+  getLayersAt: (pos: WorldPoint, layers: NormalizedState<Layer>, options?: { testAlpha?: boolean }) => Layer[];
+  /** Topmost hit only (`null` when nothing hits); same content policy as getLayersAt. */
+  getTopLayerAt: (pos: WorldPoint, layers: NormalizedState<Layer>, options?: { testAlpha?: boolean }) => Layer | null;
 }
 
 /**

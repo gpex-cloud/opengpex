@@ -23,14 +23,14 @@ import {
   localToWorldRect, worldToLocalRect, localToWorldCenter, getLayerLocalAABB,
   calculateResizedRect, clampRectWithAspect, clampPointToRect, balanceVectorByAspect,
   clampRectWithOverlap, getLayerBoundingBox, getRectIntersection, getSurroundingRects,
-  isPointInRect, isPointInShape, testLayerHit, pickLayersAt, pickTopLayer,
+  isPointInRect, isPointInShape,
   getRectUnion, getMultiRectUnion, getLocalRectCenter, getWorldRectCenter
 } from './operators/space';
 import {
   asWorldRect, asLocalRect, asWorldPoint, asViewportRect,
   GeometryService, Frame, Layer, WorldRect, IMatrix3x3, LayerPoseOverride,
   CameraState, Rect, Point2D, Dimensions, WorldPoint, PolygonFlags,
-  ViewportPoint, CameraCenterOptions, WorldShape, LocalShape, LocalRect, Shape, NormalizedState,
+  ViewportPoint, CameraCenterOptions, WorldShape, LocalShape, LocalRect, Shape,
   LocalPolygon, WorldPolygon, CubicSegment, PenPathData
 } from '@opengpex/editor/core/types';
 import {
@@ -47,7 +47,7 @@ import {
 import {
   shapeToPoint2D, point2dToLocalShape, point2dToLocalPolygon,
   invertRings, isBoundingRing, computePolygonBounds as computePolygonBoundsP2D,
-  rectToLocalPolygon, ellipseToLocalPolygon
+  rectToLocalPolygon, ellipseToLocalPolygon, isPointInPathRings
 } from './operators/point2d';
 import { snapRect, snapEdge, snapEdgeRotated, snapToPixel, snapLocalRectToLatticeRounded, snapWorldRectToLatticeExpanded } from './operators/snapping';
 import {
@@ -135,9 +135,7 @@ export function createGeometryService(): GeometryService {
       // Point Hit Tests
       isPointInRect: (p: Point2D, r: Rect) => isPointInRect(p, r),
       isPointInShape: (p: Point2D, s: Shape) => isPointInShape(p, s),
-      testLayerHit: (pos: WorldPoint, layer: Layer) => testLayerHit(pos, layer),
-      pickLayersAt: (pos: WorldPoint, layers: NormalizedState<Layer>) => pickLayersAt(pos, layers),
-      pickTopLayer: (pos: WorldPoint, layers: NormalizedState<Layer>) => pickTopLayer(pos, layers),
+      isPointInPathRings: (p: Point2D, rings: Point2D[][]) => isPointInPathRings(p, rings),
     },
     transform: {
       isRotatedPose: (l: Pick<Layer, 'rotation' | 'flip'>) => isRotatedPose(l),

@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import {Frame, GeometryService, InteractionEvent, InteractionHandler, Layer, LocalRect, asLocalRect} from '@opengpex/editor/core/types';
+import {Frame, GeometryService, InteractionEvent, InteractionHandler, Layer, LayerService, LocalRect, asLocalRect} from '@opengpex/editor/core/types';
 import type { MarkerData } from './marker/types';
 import {resolveNextMarkerData} from './marker/pending';
 
@@ -73,10 +73,16 @@ function setMarkerPreview(next: MarkerDrawPreview | null): void {
 /**
  * Finds the topmost hit layer that is a marker (`type:'vector' + markerData`).
  * Accepts a canvas-local point and converts to world via the geometry service.
+ *
+ * The marker's void verdict needs NO injection here anymore: the plugin's
+ * vector-source contribution produces the declarative SDF source whose
+ * analytic outline the engine's default probe derives coverage from, so the
+ * service's default pick already pierces marker hollows — on this path and on
+ * every other pick path (hover, spring-move fallback) alike.
  */
-function findMarkerLayerAtPoint(geometry: GeometryService, frame: Frame, point: { x: number; y: number }): Layer | null {
+function findMarkerLayerAtPoint(layers: LayerService, geometry: GeometryService, frame: Frame, point: { x: number; y: number }): Layer | null {
   const worldPoint = geometry.space.localToWorld(point.x, point.y, frame.canvas);
-  const hits = geometry.space.pickLayersAt(worldPoint, frame.layers);
+  const hits = layers.factory.getLayersAt(worldPoint, frame.layers);
   return hits.find((l: Layer) => l.type === 'vector' && !!l.markerData) || null;
 }
 
@@ -150,7 +156,7 @@ export const createMarkerMoveHandler = (): InteractionHandler => {
       const target = e.nativeEvent.target as HTMLElement;
       if (target.closest('button, a, input, [data-role="ui"], [data-handle], [data-marker-gizmo] [data-gizmo-handle], [data-marker-gizmo] [data-gizmo-rotate], [data-marker-tail-handle]')) return false;
 
-      const hitLayer = findMarkerLayerAtPoint(e.geometry, e.activeFrame, e.point.canvas);
+      const hitLayer = findMarkerLayerAtPoint(e.layers, e.geometry, e.activeFrame, e.point.canvas);
       if (hitLayer) {
         targetLayerId = hitLayer.id;
         return true;
@@ -691,7 +697,7 @@ export const createMarkerDblClickActivateHandler = (): InteractionHandler => {
 
   const findActivatableMarker = (e: InteractionEvent): Layer | null => {
     if (!e.activeFrame) return null;
-    const hit = findMarkerLayerAtPoint(e.geometry, e.activeFrame, e.point.canvas);
+    const hit = findMarkerLayerAtPoint(e.layers, e.geometry, e.activeFrame, e.point.canvas);
     return hit && hit.visible && !hit.locked ? hit : null;
   };
 

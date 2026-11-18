@@ -64,7 +64,7 @@ export function OptionBar({ isVisible }: OptionBarProps) {
       className={styles.topBarOuter.className}
       style={styles.topBarOuter.style}
     >
-      <div className="flex items-center h-full pointer-events-auto w-full justify-center">
+      <div className="flex items-center h-full justify-center">
         <div className={styles.topBarInner.className}>
           <PluginSlot
             name="OPTION_BAR"

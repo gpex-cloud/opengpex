@@ -19,11 +19,14 @@
 
 import { shapeToPathData } from '@opengpex/editor/core/geometry/operators/shape';
 import { computeFragmentCenter, getOrientationMatrix } from '@opengpex/editor/core/geometry/operators/transform';
+import { layerHitLocal } from '@opengpex/editor/core/geometry/operators/space';
+import { hitVoidOfLayerAtPoint } from '@opengpex/editor/core/engine/utils/sample-utils';
 import { assertPayload, getLayerKind, TRANSPARENT_PIXEL } from './kinds';
 import { LAYER_ROLE_CONFIGS, HOST_LAYER_ORDER } from '@opengpex/editor/core/helpers/config';
 import {
   Layer, Frame, VectorMask, BitmapMask, LayerRole,
-  LocalShape, LocalRect, asLocalShape, asLocalRect
+  LocalShape, LocalRect, asLocalShape, asLocalRect,
+  WorldPoint, NormalizedState
 } from '@opengpex/editor/core/types';
 
 /** Type-safe role configuration index helper */
@@ -35,6 +38,37 @@ const roleConfigMap = LAYER_ROLE_CONFIGS as Record<string, { label: string; orde
  * LayerFactory: Core business domain logic
  * Responsible for layer production, structural completion, sorting, cascading updates, and rendering pipeline definition.
  */
+/** Shared scan: top-down hit test over the layer stack. Layer hit policy lives
+ *  HERE, not in the geometry operators: `layerHitLocal` answers the pure
+ *  geometric question (point vs visible shape, layer-local), then the content
+ *  void probe — the engine's own families (image alpha / brush strokes / pen
+ *  paths) plus declarative SDF coverage derived from plugin-contributed render
+ *  sources (markers) — rejects hits over blank content. `undefined` probe
+ *  verdicts keep the geometric hit (degrade, never reject). */
+function scanLayersAt(
+  pos: WorldPoint,
+  layers: NormalizedState<Layer>,
+  options?: {
+    /** Look at actual content (bitmap alpha, brush/pen coverage) and pierce the empty parts? Defaults to true; false = whole-layer bounding-box reach. */
+    testAlpha?: boolean;
+    /** Internal: stop at the first hit (getTopLayerAt's single-winner scan). */
+    stopAtFirst?: boolean;
+  },
+): Layer[] {
+  const probe = (options?.testAlpha ?? true) ? hitVoidOfLayerAtPoint : undefined;
+  const hits: Layer[] = [];
+  for (let i = layers.order.length - 1; i >= 0; i--) {
+    const layer = layers.byId[layers.order[i]];
+    const localP = layer ? layerHitLocal(pos, layer) : null;
+    if (localP && probe?.(layer!, localP) === true) continue;
+    if (localP) {
+      hits.push(layer!);
+      if (options?.stopAtFirst) break;
+    }
+  }
+  return hits;
+}
+
 export const LayerFactory = {
   TRANSPARENT_PIXEL,
 
@@ -458,6 +492,26 @@ export const LayerFactory = {
       insertAt++;
     }
     return insertAt;
+  },
+
+
+
+  /**
+   * getLayersAt: ALL layers whose visible content sits under the world point,
+   * topmost first. Content pass-through is on by default (`testAlpha`); the
+   * engine's void probe covers image/brush/pen AND every plugin-registered
+   * content family (declarative SDF coverage from its render source).
+   */
+  getLayersAt(pos: WorldPoint, layers: NormalizedState<Layer>, options?: { testAlpha?: boolean }): Layer[] {
+    return scanLayersAt(pos, layers, options);
+  },
+
+  /**
+   * getTopLayerAt: The TOPMOST layer whose visible content sits under the world
+   * point, or null when nothing hits. Same content policy as `getLayersAt`.
+   */
+  getTopLayerAt(pos: WorldPoint, layers: NormalizedState<Layer>, options?: { testAlpha?: boolean }): Layer | null {
+    return scanLayersAt(pos, layers, { ...options, stopAtFirst: true })[0] ?? null;
   },
 
   /**

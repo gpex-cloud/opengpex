@@ -2,6 +2,11 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.55
+
+- Selection: clicks and hover now follow a layer's true outline — cut and peel products, and fragments with non-rectangular shapes, respond only inside their visible shape instead of their whole bounding box
+- Selection: clicking through the empty gaps of sparse content (scattered brush strokes, hollow shape fills, images with transparent areas) now reaches the layers underneath instead of grabbing the top layer's bounding box — vector brush strokes, pen shapes and markers are included, and clip target picking still selects a layer as a whole
+
 ## 2.0.54
 
 - Fills: a selection fills as its exact shape — ellipse, lasso and wand included — with a complete soft edge when feathered, and the keep-selection preference now applies to fill

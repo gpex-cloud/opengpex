@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { Layer, Frame, CameraState, NormalizedState, CubicSegment, PenAnchor, PenPathData } from './models';
+import { Layer, Frame, CameraState, CubicSegment, PenAnchor, PenPathData } from './models';
 export * from './primitives';
 import {
   Point2D, Dimensions, Rect, IMatrix3x3, IMatrix3x3Constructor,
@@ -265,12 +265,8 @@ export interface GeometryService {
     isPointInRect: (p: Point2D, r: Rect) => boolean;
     /** Determines if shape contains point */
     isPointInShape: (p: Point2D, shape: Shape) => boolean;
-    /** Hit test: determines if a world coordinate point hits the specified layer */
-    testLayerHit: (pos: WorldPoint, layer: Layer) => boolean;
-    /** Deep pick: gets all layers under the specified position (from top to bottom) */
-    pickLayersAt: (pos: WorldPoint, layers: NormalizedState<Layer>) => Layer[];
-    /** Top-level pick: gets the topmost layer under the specified position */
-    pickTopLayer: (pos: WorldPoint, layers: NormalizedState<Layer>) => Layer | null;
+    /** Even-odd containment over raw rings (outer rings + holes, winding-independent); on-edge points hit */
+    isPointInPathRings: (p: Point2D, rings: Point2D[][]) => boolean;
   };
 
   /** Gets the current zoom scale (k) */

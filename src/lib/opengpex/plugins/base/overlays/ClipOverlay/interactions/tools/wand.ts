@@ -62,7 +62,9 @@ const WAND_SIMPLIFY_FLOOR = 1.0;
  *   3. Otherwise null → caller surfaces an error HUD message.
  */
 function pickWandTargetLayer(e: InteractionEvent): Layer | null {
-  const top = e.geometry.space.pickTopLayer(e.point.world, e.activeFrame.layers);
+  // Whole-layer reach: clip target selection needs the layer as a whole, not
+  // the pixels visible at the point — testAlpha off, no piercing.
+  const top = e.layers.factory.getTopLayerAt(e.point.world, e.activeFrame.layers, { testAlpha: false });
   if (top) return top;
   const activeId = e.activeFrame.activeLayerId;
   if (activeId) {

@@ -221,7 +221,7 @@ export const createTextPlaceHandler = (): InteractionHandler => {
       // text layer press is claimed above by text-move (bare press = enter
       // editing, spring press = move), so this branch selects what the move
       // handler deliberately passes over and never creates on top of text.
-      const hitTextLayer = findTextLayerAtPoint(e.geometry, frame, e.point.canvas);
+      const hitTextLayer = findTextLayerAtPoint(e.layers, e.geometry, frame, e.point.canvas);
       if (hitTextLayer) {
         e.actions.setActiveLayer(frame.id, hitTextLayer.id);
         return;

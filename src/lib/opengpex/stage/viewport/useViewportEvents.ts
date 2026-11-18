@@ -142,14 +142,16 @@ export function useViewportEvents(
       dispatcher.handleMove(event);
     } else {
       // Basic hover determination logic (temporarily kept in Viewport layer, can be moved to plugins in the future)
-      const layersAtPoint = geometry.space.pickLayersAt(event.point.world, frame.layers);
+      // Content pass-through: hover pierces transparent bitmap interiors and
+      // the empty gaps of brush/pen layers (testAlpha defaults to on).
+      const layersAtPoint = services.layers.factory.getLayersAt(event.point.world, frame.layers);
       const hoveredId = layersAtPoint[0]?.id || null;
       const isHoveringActive = activeLayer ? layersAtPoint.some((l: Layer) => l.id === activeLayer.id) : false;
 
       // Write to VIS (fast-track, no React re-render)
       services.actions.fast.setHover(hoveredId, isHoveringActive);
     }
-  }, [buildInteractionEvent, dispatcher, geometry, frame.layers, activeLayer, services.actions]);
+  }, [buildInteractionEvent, dispatcher, services.layers, frame.layers, activeLayer, services.actions]);
 
   // --- Pointer Up: End dispatch and reset fast-track ---
   const handlePointerUp = useCallback((e: React.PointerEvent) => {

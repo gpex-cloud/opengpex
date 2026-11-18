@@ -144,7 +144,11 @@ function markerToVectorSource(
   };
 }
 
-/** The marker plugin's entire exposure to the engine's vector-source registry. */
+/** The marker plugin's entire exposure to the engine's vector-source registry.
+ *  The produced source doubles as the hit-test truth: its analytic
+ *  `solverOutline` is what the engine's void probe derives coverage rings
+ *  from (engine-side `sdfCoverageRings`: filled → outer ring only, stroke-only
+ *  → outer+inner even-odd band), so hit and render share one artifact. */
 export const markerContributor: VectorSourceContributor = {
   toolId: 'marker',
   translate: markerToVectorSource,

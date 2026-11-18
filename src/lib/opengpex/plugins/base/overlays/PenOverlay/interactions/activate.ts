@@ -67,11 +67,11 @@ export const createPenDblClickActivateHandler = (): InteractionHandler => {
       if (!isDoubleClick) return false;
       // Activatable = a visible, unlocked HOST pen layer under the press
       // (the host-only + locked/visible filter lives in the shared pick).
-      return findPenLayerBoxAt(e.geometry, e.activeFrame, e.point.canvas) !== null;
+      return findPenLayerBoxAt(e.layers, e.geometry, e.activeFrame, e.point.canvas) !== null;
     },
 
     onStart: (e) => {
-      const layerId = findPenLayerBoxAt(e.geometry, e.activeFrame, e.point.canvas);
+      const layerId = findPenLayerBoxAt(e.layers, e.geometry, e.activeFrame, e.point.canvas);
       if (!layerId) return;
       // Pan-mode gate above guarantees the pen craft is not active, so the
       // toggle semantics of activateCraft cannot deactivate it here.

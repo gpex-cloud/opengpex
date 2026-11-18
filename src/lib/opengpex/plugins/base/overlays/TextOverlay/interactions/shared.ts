@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { GeometryService, Frame, Layer, InteractionEvent } from '@opengpex/editor/core/types';
+import { GeometryService, Frame, Layer, LayerService, InteractionEvent } from '@opengpex/editor/core/types';
 import { CraftDrawerAPI } from '../../../drawers/CraftDrawer/protocols';
 import { TEXT_OVERLAY_SIGNAL_EDITING_TEXT_LAYER_ID, _CMD_PLACE_UID, _CMD_EDIT_START_UID } from '../protocols';
 
@@ -65,9 +65,14 @@ export const CMD_EDIT_START_UID = _CMD_EDIT_START_UID;
  * Uses pickLayersAt (supports visibleShape, rotation, interactive flag) filtered to text layers.
  * Accepts canvas-local point and converts to world coordinates via geometry service.
  */
-export function findTextLayerAtPoint(geometry: GeometryService, frame: Frame, point: { x: number; y: number }): Layer | null {
+export function findTextLayerAtPoint(
+  layers: LayerService,
+  geometry: GeometryService,
+  frame: Frame,
+  point: { x: number; y: number },
+): Layer | null {
   const worldPoint = geometry.space.localToWorld(point.x, point.y, frame.canvas);
-  const hits = geometry.space.pickLayersAt(worldPoint, frame.layers);
+  const hits = layers.factory.getLayersAt(worldPoint, frame.layers);
   return hits.find((l: Layer) => l.type === 'text') || null;
 }
 
@@ -75,7 +80,7 @@ export function findTextLayerAtPoint(geometry: GeometryService, frame: Frame, po
  * unlocked, real text content. Press-to-edit and press-to-move must never
  * fire on a locked or hidden text layer. */
 export function findEditableTextLayerAtPoint(e: InteractionEvent): Layer | null {
-  const hits = e.geometry.space.pickLayersAt(e.point.world, e.activeFrame.layers);
+  const hits = e.layers.factory.getLayersAt(e.point.world, e.activeFrame.layers);
   return hits.find((l: Layer) => l.type === 'text' && l.visible && !l.locked && !!l.textData) || null;
 }
 

@@ -71,7 +71,10 @@ export const createLayerMoveHandler = (): InteractionHandler => {
       });
       if (isOutsideCanvas) return false;
 
-      const topLayer = e.geometry.space.pickTopLayer(e.point.world, e.activeFrame.layers);
+      // Content pass-through: Cmd+drag picks through transparent bitmap
+      // interiors and the empty gaps of brush/pen layers (testAlpha defaults
+      // to on); only the topmost hit matters here.
+      const topLayer = e.layers.factory.getTopLayerAt(e.point.world, e.activeFrame.layers);
 
       // If there is a clicked layer, and that layer can be moved
       if (topLayer && !topLayer.locked && topLayer.visible) {

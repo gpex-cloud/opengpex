@@ -32,7 +32,7 @@
 
 import {
   Point2D, Rect, LocalPoint, LocalRect,
-  LocalShape, LocalPolygon,
+  Shape, LocalShape, LocalPolygon,
   asLocalRect, asLocalShape, asLocalPolygon,
   PolygonFlags,
 } from '@opengpex/editor/core/types';
@@ -105,6 +105,40 @@ export function parsePathDataToRings(pathData: string): Point2D[][] {
     rings.push(currentRing);
   }
 
+  return rings;
+}
+
+/**
+ * Shape-identity cache for parsed path rings.
+ *
+ * SVG path string parsing (`parsePathDataToRings`) costs ~0.1-0.3ms for a
+ * typical outline, which is prohibitive when hit-testing resolves rings on
+ * every pointer move. Committed path shapes (`visibleShape` and folded mask
+ * shapes) are immutable after submission, so object reference equality implies
+ * content equality — a WeakMap keyed on the shape object is a safe memo with
+ * no business semantics, and entries are reclaimed with their shapes.
+ *
+ * Placing the cache at the parsing layer (not at individual call sites) lets
+ * every consumer share it: hit-testing in `space.ts` and the renderer's
+ * `prepareVmaskSources` path resolution both benefit.
+ */
+const shapeRingsCache = new WeakMap<Shape, Point2D[][]>();
+
+/**
+ * ringsForShape: Resolve a shape's `pathData` into Point2D rings, memoized by
+ * shape object identity. Returns an empty ring set for shapes without
+ * `pathData` (rect/circle shapes have no ring payload here).
+ *
+ * The returned rings are in the pathData's absolute coordinate system — callers
+ * must NOT re-normalize against `shape.rect`: the rect only carries the bounding
+ * box (fast screen + render crop), while pathData coordinates are absolute and
+ * independent of the rect origin.
+ */
+export function ringsForShape(shape: Shape): Point2D[][] {
+  const cached = shapeRingsCache.get(shape);
+  if (cached) return cached;
+  const rings = shape.pathData ? parsePathDataToRings(shape.pathData) : [];
+  shapeRingsCache.set(shape, rings);
   return rings;
 }
 
@@ -321,3 +355,73 @@ export function ellipseToLocalPolygon(rect: LocalRect, flags?: PolygonFlags): Lo
   return asLocalPolygon([ring], asLocalRect({ x, y, w, h }), flags);
 }
 
+/**
+ * Epsilon for point-on-edge tests in `isPointInPathRings`. Scaled by edge
+ * magnitude so the tolerance is uniform across large and tiny outlines.
+ */
+const PATH_EDGE_EPS = 1e-9;
+
+/**
+ * True when `p` lies on the closed segment a→b (within tolerance). Degenerate
+ * zero-length edges behave as the single vertex a.
+ */
+function pointOnSegment(p: Point2D, a: Point2D, b: Point2D): boolean {
+  const ex = b.x - a.x;
+  const ey = b.y - a.y;
+  const scale = Math.max(1, Math.abs(ex) + Math.abs(ey));
+  const cross = ex * (p.y - a.y) - ey * (p.x - a.x);
+  if (Math.abs(cross) > PATH_EDGE_EPS * scale) return false;
+  const dot = (p.x - a.x) * ex + (p.y - a.y) * ey;
+  if (dot < -PATH_EDGE_EPS) return false;
+  const lenSq = ex * ex + ey * ey;
+  if (lenSq < PATH_EDGE_EPS) {
+    // Degenerate zero-length edge (e.g. a duplicated ring-closing point): a
+    // hit only when the point coincides with the vertex itself — returning
+    // true unconditionally would make every point of the plane "on" it.
+    const dx = p.x - a.x;
+    const dy = p.y - a.y;
+    const scale = Math.max(1, Math.abs(p.x) + Math.abs(p.y));
+    return dx * dx + dy * dy <= PATH_EDGE_EPS * PATH_EDGE_EPS * scale * scale;
+  }
+  return dot <= lenSq + PATH_EDGE_EPS;
+}
+
+/**
+ * isPointInPathRings: Even-odd rule point-in-polygon test over a set of rings
+ * (outer rings + holes). Matches the SVG fill-rule the renderer applies to
+ * path shapes (`fillRule="evenodd"` semantics): cast a ray to +x and toggle
+ * parity on every crossing, across all rings jointly — so a point inside a
+ * hole ring crossed once more than the outer ring lands on an even count and
+ * is correctly excluded.
+ *
+ * Ring winding direction is irrelevant under the even-odd rule, which matches
+ * how `traceAlphaRings` products serialize (outer and hole rings may carry
+ * arbitrary winding).
+ *
+ * Boundary semantics: a point lying exactly on any edge counts as a hit
+ * (generous hit target, consistent with the rect branch's inclusive `<=`).
+ *
+ * Coordinate contract: the rings and `p` must already share one coordinate
+ * system. For layer hit-testing that is the `getLayerWorldMatrix` local frame:
+ * pathData coordinates are absolute (independent of `shape.rect` origin) and
+ * must never be re-normalized against the rect — the renderer subtracts the
+ * rect origin into crop-local GPU space while this test stays in
+ * matrix-local space, and the two mappings are complementary by construction.
+ */
+export function isPointInPathRings(p: Point2D, rings: readonly (readonly Point2D[])[]): boolean {
+  let inside = false;
+  for (const ring of rings) {
+    const n = ring.length;
+    if (n < 2) continue;
+    for (let i = 0; i < n; i++) {
+      const a = ring[i];
+      const b = ring[(i + 1) % n];
+      if (pointOnSegment(p, a, b)) return true;
+      if ((a.y > p.y) !== (b.y > p.y)) {
+        const xInt = a.x + ((p.y - a.y) * (b.x - a.x)) / (b.y - a.y);
+        if (xInt > p.x) inside = !inside;
+      }
+    }
+  }
+  return inside;
+}

@@ -76,7 +76,7 @@ export const createPenMoveHandler = (): InteractionHandler => {
       // A geometry hit moves the layer instead of editing the anchor /
       // splitting the segment; a box hit (off-geometry, inside the visible
       // shape) moves too.
-      targetLayerId = geometryLayerId ?? findPenLayerBoxAt(e.geometry, e.activeFrame, e.point.canvas);
+      targetLayerId = geometryLayerId ?? findPenLayerBoxAt(e.layers, e.geometry, e.activeFrame, e.point.canvas);
       return targetLayerId !== null;
     },
 

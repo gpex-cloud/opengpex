@@ -54,6 +54,7 @@ import {
   type InteractionEvent,
   type InteractionSignalValue,
   type Layer,
+  type LayerService,
 } from '@opengpex/editor/core/types';
 import { cloneFrameDraft, readFrameDraft } from '@opengpex/editor/core/state/drafts';
 import { ADV_FRAME_SET_DRAFT } from '@opengpex/editor/core/advanced/protocols';
@@ -529,12 +530,15 @@ export function findCommittedPenLayerAt(
  * (frag/exchange) are engine clones and never hit.
  */
 export function findPenLayerBoxAt(
+  layers: LayerService,
   geometry: InteractionEvent['geometry'],
   frame: Frame,
   ptCanvas: { x: number; y: number },
 ): string | null {
   const worldPoint = geometry.space.localToWorld(ptCanvas.x, ptCanvas.y, frame.canvas);
-  const hits = geometry.space.pickLayersAt(worldPoint, frame.layers);
+  // Pen-precise pick: pierce the unpainted interior of fill-less pen layers
+  // and stroke-only bands (painted content mode is the service default).
+  const hits = layers.factory.getLayersAt(worldPoint, frame.layers);
   const hit = hits.find((l: Layer) =>
     l.type === 'vector' && !!l.penData && l.visible && !l.locked && (!l.role || l.role === 'host'),
   );
