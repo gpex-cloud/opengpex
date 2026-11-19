@@ -83,23 +83,30 @@ export interface RectMarkerData extends MarkerDataBase {
 }
 
 /**
- * Arrow marker data.
- *
- * Geometry defined by two endpoints in layer-local coordinates.
- * `Layer.bounding` is the axis-aligned bounding box of these two points
- * (expanded by strokeWidth / 2 + arrowhead size).
- *
+ * Segment-family marker data: the two layer-local endpoints ALL segment kinds
+ * share (line / arrow / darrow). `Layer.bounding` is the TIGHT painted AABB —
+ * round caps, head triangles and a 1px AA margin — computed by
+ * `segmentTightBounding`; the endpoints are relative to the bounding top-left.
  * `Layer.cx/cy` is the world-space center of the bounding box.
- * Endpoints are relative to the bounding box top-left (local space).
  */
-export interface ArrowMarkerData extends MarkerDataBase {
-  kind: 'arrow';
-  /** Start point in layer-local coordinates (relative to bounding top-left) */
-  tail: { x: number; y: number };
-  /** End point (arrowhead) in layer-local coordinates */
-  head: { x: number; y: number };
+export interface SegmentEndpoints {
+  /** First endpoint in layer-local coordinates (relative to bounding top-left). */
+  a: { x: number; y: number };
+  /** Second endpoint in layer-local coordinates. */
+  b: { x: number; y: number };
+}
+
+/** Head length factor shared by the headed segment kinds (arrow / darrow). */
+export interface SegmentHeadScale {
   /** Arrowhead size multiplier (relative to strokeWidth). Default 3. */
   headScale: number;
+}
+
+/**
+ * Arrow marker data: head at `b` only.
+ */
+export interface ArrowMarkerData extends MarkerDataBase, SegmentEndpoints, SegmentHeadScale {
+  kind: 'arrow';
 }
 
 /**
@@ -114,56 +121,66 @@ export interface EllipseMarkerData extends MarkerDataBase {
 }
 
 /**
- * Line marker data: a plain stroke between two layer-local endpoints, same
- * endpoint/bounding model as the arrow minus the head.
+ * Line marker data: a plain stroke between two layer-local endpoints, the
+ * segment family minus the heads.
  */
-export interface LineMarkerData extends MarkerDataBase {
+export interface LineMarkerData extends MarkerDataBase, SegmentEndpoints {
   kind: 'line';
-  /** First endpoint in layer-local coordinates (relative to bounding top-left) */
-  a: { x: number; y: number };
-  /** Second endpoint in layer-local coordinates */
-  b: { x: number; y: number };
 }
 
 /**
- * Double-arrow marker data: an arrow with a head at BOTH ends. Same endpoint,
- * bounding and headScale model as the single arrow.
+ * Double-arrow marker data: heads at BOTH ends. Same endpoint, tight-bounding
+ * and headScale model as the single arrow.
  */
-export interface DarrowMarkerData extends MarkerDataBase {
+export interface DarrowMarkerData extends MarkerDataBase, SegmentEndpoints, SegmentHeadScale {
   kind: 'darrow';
-  a: { x: number; y: number };
-  b: { x: number; y: number };
-  /** Arrowhead size multiplier (relative to strokeWidth). Default 3. */
-  headScale: number;
 }
 
 /**
- * Star marker data: a regular star inscribed in `Layer.bounding` (like the
- * ellipse). `points` is the number of spikes; `sharpness` in [2, points]
- * controls how thin the spikes are (2 = regular polygon, points = spikes
- * thinning to the centre).
+ * Star marker data: a regular star with EXACTLY n tips. `points` is the
+ * number of spikes; the spike shape is not a free parameter — new draws are
+ * the TRUE star polygon (chords between alternate tips, straight edges, the
+ * inner hole's edges parallel to them), rendered through the engine's radial
+ * primitive at the derived sharpness `2n/(n−2)`.
+ *
+ * `sharpness` is LEGACY-ONLY: old documents carry the old valley-radius
+ * parameter (its default 3.2 produced a slightly fat, bent-edged near-star);
+ * it is honoured verbatim so old pixels never change, and new draws omit it.
+ *
+ * Bounding semantics (`bounding`): absent/false = LEGACY — the bounding is
+ * the inscribed-ellipse circumscribed box and the painted star does not fill
+ * it. true = the bounding IS the painted content's AABB: the shape is solved
+ * in a content-filling ellipse (`contentFillEllipse`, multipliers riding on
+ * the star primitive's shapeParams), so the drawn box hugs the ink. New
+ * draws stamp true at birth; legacy records keep the old box unchanged.
  */
 export interface StarMarkerData extends MarkerDataBase {
   kind: 'star';
   points: number;
-  sharpness: number;
+  /** LEGACY-ONLY valley parameter; new draws omit it and derive the true star. */
+  sharpness?: number;
+  bounding?: boolean;
 }
 
 /**
- * Regular polygon marker data: `sides` ≥ 3, inscribed in `Layer.bounding` like
- * the ellipse. Rendered through the star primitive at sharpness 2 (its regular
- * n-gon end), so no extra engine primitive exists for it.
+ * Regular polygon marker data: `sides` ≥ 3. Rendered through the star
+ * primitive at sharpness 2 (its regular n-gon end), so no extra engine
+ * primitive exists for it. Bounding semantics (`bounding`) mirror the star
+ * kind: absent/false = legacy inscribed-ellipse circumscribed box; true =
+ * content-filling ellipse, the bounding IS the painted n-gon's AABB.
  */
 export interface PolygonMarkerData extends MarkerDataBase {
   kind: 'polygon';
   sides: number;
+  bounding?: boolean;
 }
 
 /**
  * Callout (speech bubble) marker data: a rounded-rect body plus a tail
  * triangle whose apex is `tip`. All coordinates are layer-local; `Layer.bounding`
- * is the AABB of body ∪ tip (padded by the stroke), so the body does NOT fill
- * the bounding box — it is stored explicitly.
+ * is the tight ink AABB of body ∪ tip plus the fixed AA margin (the stroke
+ * grows inward and never widens the box), so the body does NOT fill the
+ * bounding box — it is stored explicitly.
  */
 export interface CalloutMarkerData extends MarkerDataBase {
   kind: 'callout';
@@ -211,6 +228,9 @@ export type MarkerData =
   | StarMarkerData
   | PolygonMarkerData
   | CalloutMarkerData;
+
+/** The straight-line family (line / arrow / darrow): one shared geometry model. */
+export type SegmentMarkerData = ArrowMarkerData | LineMarkerData | DarrowMarkerData;
 
 // Attach the payload to the core Layer model by declaration merging. The field
 // NAME is the persistence contract; the TYPE is plugin property.

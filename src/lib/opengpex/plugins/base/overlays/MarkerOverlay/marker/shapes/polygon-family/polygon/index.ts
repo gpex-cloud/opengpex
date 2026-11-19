@@ -21,12 +21,20 @@
 
 import React from 'react';
 import { Triangle } from 'lucide-react';
-import type { PolygonMarkerData } from '../../types';
 import { fromHex } from '@opengpex/editor/core/engine/color';
-import type { MarkerDefinition } from '../../registry';
+import type { PolygonMarkerData } from '../../../types';
+import { defineRadialKind } from '../definition';
 
 /** Default side count (triangle). */
 export const POLYGON_DEFAULT_SIDES = 3;
+
+/**
+ * The ONLY side counts the product offers — a fixed preset set, no free
+ * numeric range (mirrors STAR_POINTS_PRESETS). Legacy documents may still hold
+ * off-preset counts: they render exactly as stored and the panel simply shows
+ * no active preset for them.
+ */
+export const POLYGON_SIDES_PRESETS: readonly number[] = [3, 5, 6, 8, 10];
 
 /** Conventional names for regular polygons by side count (4 is a diamond: first vertex points up). */
 const POLYGON_NAMES: Record<number, string> = {
@@ -48,17 +56,16 @@ export function polygonLayerName(sides: number): string {
 }
 
 /**
- * PolygonDefinition: regular polygon inscribed in the layer bounding (same drag
- * model as the ellipse; Shift constrains to a square so the polygon is
- * undistorted). Rendered through the engine's star primitive at the polygon
- * end of its sharpness range — a regular n-gon IS the degenerate n-point star.
+ * PolygonDefinition: regular polygon inscribed in the layer bounding. A family
+ * preset — the shared inscribed-box drag model comes from `defineRadialKind`;
+ * the sharpness spectrum is pinned at 2, the exact regular n-gon end (a
+ * regular n-gon IS the n-point star at sharpness 2), so no extra engine
+ * primitive exists for it.
  */
-export const PolygonDefinition: MarkerDefinition<PolygonMarkerData> = {
+export const PolygonDefinition = defineRadialKind<PolygonMarkerData>({
   kind: 'polygon',
   label: 'Polygon',
   icon: React.createElement(Triangle, { size: 16 }),
-  hasFill: true,
-  hasCornerRadius: false,
   layerName: (data) => polygonLayerName(data.sides),
 
   defaults: (): PolygonMarkerData => ({
@@ -66,27 +73,8 @@ export const PolygonDefinition: MarkerDefinition<PolygonMarkerData> = {
     stroke: { color: fromHex('#FF3B30'), width: 3 },
     fill: { color: fromHex('#FF3B30'), opacity: 0 },
     sides: POLYGON_DEFAULT_SIDES,
+    // Content-bounding semantics from birth (the same convention as rect /
+    // line-segment / star): the dragged box IS the painted n-gon's AABB.
+    bounding: true,
   }),
-
-  computeFromDrag: (drag, _data, options) => {
-    let dx = drag.endX - drag.startX;
-    let dy = drag.endY - drag.startY;
-
-    if (options.shiftKey) {
-      const size = Math.max(Math.abs(dx), Math.abs(dy));
-      dx = Math.sign(dx || 1) * size;
-      dy = Math.sign(dy || 1) * size;
-    }
-
-    const w = Math.abs(dx);
-    const h = Math.abs(dy);
-    const x = Math.min(drag.startX, drag.startX + dx);
-    const y = Math.min(drag.startY, drag.startY + dy);
-
-    return {
-      bounding: { w, h },
-      centerLocal: { x: x + w / 2, y: y + h / 2 },
-      patch: {},
-    };
-  },
-};
+});

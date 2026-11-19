@@ -89,7 +89,7 @@ export const createCalloutTailHandler = (): InteractionHandler => {
     onMove: (e) => {
       if (!layerId || !startData || !startWorld || !startInverse || !tx) return;
       const tipInStartFrame = startInverse.apply({ x: e.point.world.x, y: e.point.world.y });
-      const layout = layoutCallout(startData.body, tipInStartFrame, startData.stroke.width);
+      const layout = layoutCallout(startData.body, tipInStartFrame);
       const worldCenter = startWorld.apply(layout.center);
 
       tx.update({

@@ -243,11 +243,17 @@ export function calculateResizedRect(
     nh = dh;
   }
 
-  // 4. Universal coordinate formula: top-left is always min, size is always abs
-  // This ensures the rectangle is always stable no matter how the mouse moves
+  // 4. Anchor-side placement: the rectangle grows AWAY from the fixed anchor
+  //    on both axes. In free mode (nw=|Δx|, nh=|Δy|) this is byte-identical
+  //    to the previous per-axis min() formula. In aspect mode the projected
+  //    dimension decouples from the pointer's off-axis offset (nh = dw/aspect
+  //    ≠ |Δy| in general), so min(anchor, cur) would let the anchored corner
+  //    drift — the whole rect slides as the pointer crosses the anchor's axis.
+  //    Placing the rect on the anchor's far side keeps the anchor corner
+  //    pinned for every mode and every pointer position, including crossings.
   return asWorldRect({
-    x: Math.min(anchor.x, curPoint.x),
-    y: Math.min(anchor.y, curPoint.y),
+    x: curPoint.x >= anchor.x ? anchor.x : anchor.x - nw,
+    y: curPoint.y >= anchor.y ? anchor.y : anchor.y - nh,
     w: nw,
     h: nh
   });

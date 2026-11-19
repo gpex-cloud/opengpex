@@ -203,12 +203,16 @@ export const createTextResizeHandler = (): InteractionHandler => {
     // Corner handles are always a proportional scale transform, so they run
     // aspect-locked at the gesture-start ratio (Shift is then a no-op). Edge
     // handles stay free on their single axis — that freedom IS the explicit
-    // "fix this axis" declaration the edge branch records.
+    // "fix this axis" declaration the edge branch records, and it must hold
+    // even under Shift: a surprise two-axis proportional scale from a
+    // single-axis handle would betray the fix-this-axis contract, so the
+    // framework's universal Shift-adds-aspect rule is opted out here.
     getConstraints: () => {
       const isCorner = gestureHandle !== null && CORNER_HANDLES.has(gestureHandle);
       const ratio = gestureStart && gestureStart.h > 0 ? gestureStart.w / gestureStart.h : undefined;
       return {
         aspect: isCorner ? ratio : undefined,
+        shiftLocksAspect: false,
         clamp: false,
       };
     },

@@ -43,26 +43,76 @@ fn sdf_rounded_rect(p: vec2<f32>, b: vec2<f32>, r: f32) -> f32 {
   return length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0) - r;
 }
 
-// Ellipse (approximate analytic SDF, IQ's gradient form): p centred, semi-axes r.
-// Exact sign and zero-level (|p/r| == 1 ⇒ 0, < 1 inside, > 1 outside) and EXACT for
-// a circle (r.x == r.y); the magnitude is a first-order estimate whose error grows
-// with eccentricity — accepted after golden + visual review.
+// Ellipse: EXACT Euclidean signed distance. p centred, semi-axes r (either
+// order; normalized so a = the major semi-axis). The closest point on the
+// outline is solved in closed form on the coordinate axes and with an
+// unconditionally convergent bisection in the general quadrant; the sign comes
+// from the exact ellipse inequality.
 //
-// The gradient form is ONLY used outside/near the outline (k0 >= 1). Inside it
-// degenerates twice: at p == 0 the product k0*(k0-1) underflows to -0, so the
-// centre evaluates as "exactly on the outline" and paints a phantom half-coverage
-// stroke dot in the middle of every stroked ellipse; and across the centre band
-// the 1e-4 clamp on k1 turns neighbouring texels' distances into a deep-negative
-// cliff, whose screen-space derivative (fwidth) explodes the analytic AA width
-// and smears spurious stroke coverage over the interior. Inside (k0 < 1) a
-// shape-true linear ramp is used instead: it reads -min(r) at the centre, crosses
-// 0 exactly at the outline, and stays monotone — the stroke/fill coverage math
-// only zero-crosses near k0 == 1, where the approximation is already accurate.
+// Why exact: the stroke band is {d ≤ 0} − {d ≤ −sw}, so the band's inner
+// contour is the −sw iso-surface. The previous first-order gradient form had an
+// exact zero level but approximate magnitude — its interior iso-surfaces were
+// uniformly SCALED ellipses, so a wide ellipse's band fattened over its flat
+// ends by sw·(rx/ry − 1) and the inner contour visibly diverged from the
+// outline's shape. The exact field makes every iso-surface a true
+// constant-width offset of the outline at any stroke width and eccentricity,
+// keeps |∇d| = 1 for the analytic AA, and removes the centre degeneration the
+// gradient form needed a shape-true interior ramp for.
 fn sdf_ellipse(p: vec2<f32>, r: vec2<f32>) -> f32 {
-  let k0 = length(p / r);
-  let approx = k0 * (k0 - 1.0) / max(length(p / (r * r)), 1e-4);
-  let interior = (k0 - 1.0) * min(r.x, r.y);
-  return select(approx, interior, k0 < 1.0);
+  let a = max(r.x, r.y);
+  let b = min(r.x, r.y);
+  let q = abs(p);
+  // Degenerate: a collapsed semi-axis is a segment (the capsule distance).
+  if (b < 1e-6) {
+    return sdf_segment(q, vec2<f32>(0.0, 0.0), vec2<f32>(a, 0.0));
+  }
+  // Centre column (qx == 0): the closest point is the minor vertex.
+  if (q.x < 1e-9) {
+    return select(-(b - q.y), q.y - b, q.y >= b);
+  }
+  // Centre row (qy == 0): inside the evolute (|qx| ≤ (a²−b²)/a) the closest
+  // point is the perpendicular foot with cos t = a·qx/(a²−b²) — the axis
+  // endpoints sit on the field's medial-axis ridge there, and a wrong magnitude
+  // on this row poisons the neighbouring texels' fwidth AA width (a
+  // translucent stripe along the centre row); outside the evolute the major
+  // vertex is the closest point.
+  if (q.y < 1e-9) {
+    let evolute = (a * a - b * b) / a;
+    if (q.x >= evolute) {
+      return select(-(a - q.x), q.x - a, q.x >= a);
+    }
+    let ct = (a * q.x) / (a * a - b * b);
+    let footX = a * ct;
+    let footY = b * sqrt(1.0 - ct * ct);
+    return -length(vec2<f32>(q.x - footX, footY));
+  }
+  // General quadrant: the Lagrange multiplier λ of the closest-point problem
+  // solves  F(λ) = a²·qx²/(a²+λ)² + b²·qy²/(b²+λ)² − 1  — strictly decreasing
+  // on (−b², ∞), so the root is unique and bisection is unconditionally
+  // convergent (no Newton branch flips). The closest point is
+  // (a²·qx/(a²+λ), b²·qy/(b²+λ)); F < 0 inside gives the sign.
+  let qx2 = q.x * q.x;
+  let qy2 = q.y * q.y;
+  var lo = -b * b;
+  var hi = 2.0 * a * a + 1.0;
+  var v1 = 0.0;
+  var v2 = 0.0;
+  for (var i = 0; i < 24; i++) {
+    let lam = (lo + hi) * 0.5;
+    v1 = a * a / (a * a + lam);
+    v2 = b * b / (b * b + lam);
+    let f = (v1 * v1 * qx2) / (a * a) + (v2 * v2 * qy2) / (b * b) - 1.0;
+    if (f > 0.0) {
+      lo = lam;
+    } else {
+      hi = lam;
+    }
+  }
+  let closest = vec2<f32>(v1 * q.x, v2 * q.y);
+  let dist = length(q - closest);
+  // Exact zero set: |p/r| == 1 is the outline, < 1 inside.
+  let inside = (q.x / a) * (q.x / a) + (q.y / b) * (q.y / b) < 1.0;
+  return select(dist, -dist, inside);
 }
 
 // Unsigned distance from p to segment a→b (capsule building block). A capsule of

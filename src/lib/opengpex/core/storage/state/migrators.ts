@@ -260,3 +260,26 @@ export function migrateLegacyLayerGrade(result: Record<string, unknown>): void {
     result.adjustMasks = [mask];
   }
 }
+
+// ─── Arrow marker: tail/head endpoints → a/b ─────────────────────────────────
+/**
+ * Documents saved before the marker plugin unified its straight-line family
+ * (line / arrow / darrow) onto ONE endpoint model stored the arrow's endpoints
+ * as `tail`/`head`. This migrator renames them to the family-standard `a`/`b`
+ * so every reader downstream (tight bounds, containment, rescale, SDF
+ * translation) sees the single shared shape. Gates on the markerData
+ * discriminator and the legacy field names — a no-op on modern records; runs
+ * on every object the hydration recursion meets (undo-history snapshots
+ * migrate identically to live frames).
+ */
+export function migrateLegacyArrowEndpoints(result: Record<string, unknown>): void {
+  const md = result['markerData'];
+  if (!isPlainObject(md) || md['kind'] !== 'arrow') return;
+  const tail = md['tail'];
+  const head = md['head'];
+  if (!isPlainObject(tail) || !isPlainObject(head)) return;
+  md['a'] = { x: Number(tail['x']) || 0, y: Number(tail['y']) || 0 };
+  md['b'] = { x: Number(head['x']) || 0, y: Number(head['y']) || 0 };
+  delete md['tail'];
+  delete md['head'];
+}

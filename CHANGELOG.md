@@ -2,6 +2,14 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.56
+
+- Markers: every marker shape is rebuilt around one rule — what you draw is what you get. The selection box hugs the drawn ink tightly instead of leaving an empty band, the drag preview appears from the first pixel and always matches the final render, clicks pass through empty interiors to the layers underneath, and thick outlines stay one continuous band without gaps, bumps or clipped edges. Stars and polygons fill the drag box as their true shape with fixed point/side sets, arrows, lines and double arrows share one rebuilt line shape, and callout tails can be dragged anywhere; shapes drawn in older documents open unchanged
+- Shapes: a wide ellipse's outline now has the same thickness all the way around instead of fattening over its flat ends, and rounded rectangles keep an even outline at any corner radius
+- Markers: with anti-aliasing on, the fill and the outline of a filled marker no longer show a faint background seam between them
+- Markers: holding Shift while resizing a marker scales it proportionally, and releasing Shift mid-drag returns to free scaling; a drag started while Shift was already held now responds correctly instead of doing nothing
+- Markers: double-click a marker's corner handle — or press the Regular button in the marker panel — to snap its box back to the shape's regular proportions
+
 ## 2.0.55
 
 - Selection: clicks and hover now follow a layer's true outline — cut and peel products, and fragments with non-rectangular shapes, respond only inside their visible shape instead of their whole bounding box

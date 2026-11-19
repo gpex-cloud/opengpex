@@ -29,12 +29,12 @@
 
 import { MARKER_REGISTRY } from './registry';
 import { RectDefinition } from './shapes/rect';
-import { ArrowDefinition } from './shapes/arrow';
+import { ArrowDefinition } from './shapes/line-segment/arrow';
 import { EllipseDefinition } from './shapes/ellipse';
-import { LineDefinition } from './shapes/line';
-import { DarrowDefinition } from './shapes/darrow';
-import { StarDefinition } from './shapes/star';
-import { PolygonDefinition } from './shapes/polygon';
+import { LineDefinition } from './shapes/line-segment/line';
+import { DarrowDefinition } from './shapes/line-segment/darrow';
+import { StarDefinition } from './shapes/polygon-family/star';
+import { PolygonDefinition } from './shapes/polygon-family/polygon';
 import { CalloutDefinition } from './shapes/callout';
 
 MARKER_REGISTRY.register(RectDefinition);

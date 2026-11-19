@@ -21,22 +21,21 @@
 
 import React from 'react';
 import { MoveDiagonal2 } from 'lucide-react';
-import type { DarrowMarkerData } from '../../types';
 import { fromHex } from '@opengpex/editor/core/engine/color';
-import type { MarkerDefinition } from '../../registry';
-import { snapDirection45, segmentBounding } from '../shared';
+import type { DarrowMarkerData } from '../../../types';
+import { defineLineSegmentKind } from '../definition';
 
 /**
- * DarrowDefinition: straight arrow with a head at both ends (dimension /
- * relation marker). Bounding is padded by the head length on every side so
- * both heads stay inside the layer.
+ * DarrowDefinition: straight arrow with a head at BOTH ends (dimension /
+ * relation marker). A family preset — the shared drag→tight-bounding model
+ * comes from `defineLineSegmentKind`, both head flags on.
  */
-export const DarrowDefinition: MarkerDefinition<DarrowMarkerData> = {
+export const DarrowDefinition = defineLineSegmentKind<DarrowMarkerData>({
   kind: 'darrow',
   label: 'Double Arrow',
   icon: React.createElement(MoveDiagonal2, { size: 16 }),
-  hasFill: false,
-  hasCornerRadius: false,
+  headA: true,
+  headB: true,
 
   defaults: (): DarrowMarkerData => ({
     kind: 'darrow',
@@ -46,19 +45,4 @@ export const DarrowDefinition: MarkerDefinition<DarrowMarkerData> = {
     b: { x: 0, y: 0 },
     headScale: 3,
   }),
-
-  computeFromDrag: (drag, data, options) => {
-    const end = options.shiftKey
-      ? snapDirection45(drag.startX, drag.startY, drag.endX, drag.endY)
-      : { x: drag.endX, y: drag.endY };
-    const sw = Math.max(0, data.stroke.width);
-    const headScale = data.headScale || 3;
-    const pad = sw * headScale + sw / 2 + 1;
-    const { bounding, centerLocal, a, b } = segmentBounding(
-      { x: drag.startX, y: drag.startY },
-      end,
-      pad,
-    );
-    return { bounding, centerLocal, patch: { a, b } as Partial<DarrowMarkerData> };
-  },
-};
+});

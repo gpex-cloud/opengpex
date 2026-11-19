@@ -44,6 +44,9 @@ export const CMD_PLACE = 'cmd.place';
 /** Updates the markerData of an existing marker layer (undoable — panel edits). */
 export const CMD_UPDATE_MARKER = 'cmd.update_marker';
 
+/** Snaps the selected marker's bounding box to a square (undoable — panel button). */
+export const CMD_SQUAREIZE_MARKER = 'cmd.squareize_marker';
+
 // ─── Internal UID Constants ──────────────────────────────────────────────────────
 
 /** Internal command UID: place a new marker layer */
@@ -51,6 +54,9 @@ export const _CMD_PLACE_UID = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_PLACE}`;
 
 /** Cross-plugin command UID: update marker properties (called by MarkerPanel) */
 export const MARKER_OVERLAY_CMD_UPDATE_MARKER = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_UPDATE_MARKER}`;
+
+/** Cross-plugin command UID: squareize the selected marker's bounding box */
+export const MARKER_OVERLAY_CMD_SQUAREIZE_MARKER = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_SQUAREIZE_MARKER}`;
 
 // ─── Cross-Plugin Typed Facade ──────────────────────────────────────────────────
 
@@ -68,6 +74,11 @@ export const MarkerOverlayAPI = {
     updateMarker: { uid: MARKER_OVERLAY_CMD_UPDATE_MARKER } as {
       uid: string;
       _payload: { frameId: string; layerId: string; patch: unknown };
+    },
+    /** Snap the selected marker's bounding box to a square (centre-anchored) */
+    squareizeMarker: { uid: MARKER_OVERLAY_CMD_SQUAREIZE_MARKER } as {
+      uid: string;
+      _payload: { frameId: string; layerId: string };
     },
   },
   /** pluginConfig storage key */

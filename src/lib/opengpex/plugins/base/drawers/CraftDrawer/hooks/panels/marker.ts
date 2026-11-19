@@ -139,6 +139,20 @@ export function useMarkerPanel() {
   // Slider ceiling follows the canvas size (see getDynamicMarkerStrokeMax).
   const strokeWidthMax = getDynamicMarkerStrokeMax(activeFrame?.canvas.w, activeFrame?.canvas.h);
 
+  /**
+   * Snap the SELECTED marker layer's bounding box to a square (side = min(w, h),
+   * centre-anchored) via MarkerOverlay's undoable command. Only meaningful when
+   * a marker layer is actually selected — the panel's preset modes have no
+   * bounding to reset.
+   */
+  const squareizeSelected = useCallback(() => {
+    if (!isActive || !targetLayer || !activeFrame) return;
+    actions.executeCommand(MarkerOverlayAPI.commands.squareizeMarker.uid, {
+      frameId: activeFrame.id,
+      layerId: targetLayer.id,
+    });
+  }, [isActive, targetLayer, activeFrame, actions]);
+
   return useMemo(() => ({
     kinds,
     definitions,
@@ -151,5 +165,7 @@ export function useMarkerPanel() {
     selectedKind: toolState.selectedKind,
     selectKind,
     updateMarkerData,
-  }), [kinds, definitions, activeMarkerKind, activeDef, markerData, strokeWidthMax, targetLayer, selectKind, updateMarkerData, isActive, toolState.selectedKind]);
+    squareizeSelected,
+    canSquareize: isActive && !!targetLayer && !!layerMarkerData,
+  }), [kinds, definitions, activeMarkerKind, activeDef, markerData, strokeWidthMax, targetLayer, selectKind, updateMarkerData, isActive, toolState.selectedKind, squareizeSelected, layerMarkerData]);
 }

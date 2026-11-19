@@ -40,11 +40,8 @@ import type {
 } from '@opengpex/editor/core/engine/pipeline/scene/translators';
 import { rectToSdf } from './marker/shapes/rect/render';
 import { ellipseToSdf } from './marker/shapes/ellipse/render';
-import { arrowToSdf } from './marker/shapes/arrow/render';
-import { lineToSdf } from './marker/shapes/line/render';
-import { darrowToSdf } from './marker/shapes/darrow/render';
-import { starToSdf } from './marker/shapes/star/render';
-import { polygonToSdf } from './marker/shapes/polygon/render';
+import { segmentToSdf } from './marker/shapes/line-segment/geometry';
+import { radialToSdf } from './marker/shapes/polygon-family/geometry';
 import { calloutToSdf } from './marker/shapes/callout/render';
 import { sdfSolverOutline } from '@opengpex/editor/core/engine/pipeline/scene/sdfPolygonSolver';
 
@@ -63,15 +60,12 @@ function markerToSdfGeometry(data: MarkerData, size: MarkerBounding): SdfGeometr
     case 'ellipse':
       return ellipseToSdf(data, size);
     case 'arrow':
-      return arrowToSdf(data, size);
     case 'line':
-      return lineToSdf(data, size);
     case 'darrow':
-      return darrowToSdf(data, size);
+      return segmentToSdf(data);
     case 'star':
-      return starToSdf(data, size);
     case 'polygon':
-      return polygonToSdf(data, size);
+      return radialToSdf(data);
     case 'callout':
       return calloutToSdf(data, size);
     default: {

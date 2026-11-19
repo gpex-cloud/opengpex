@@ -55,8 +55,17 @@ export function calloutTailHalfBase(
   return Math.min(cap, (halfAtEdge * len) / (len - tEdge));
 }
 
+/**
+ * Outward AA margin on the tight ink envelope: half a pixel of fwidth AA bleed
+ * plus quantization insurance. The callout is an OUTLINE-family shape (the
+ * stroke grows INWARD from the body boundary), so its ink never extends past
+ * the body edges or the tail tip — the stroke width does NOT grow the box and
+ * takes no part in the layout at all.
+ */
+export const CALLOUT_AA_MARGIN_PX = 1;
+
 export interface CalloutLayout {
-  /** Layer bounding (AABB of body ∪ tip, padded by the stroke). */
+  /** Layer bounding (tight ink AABB of body ∪ tip plus the AA margin). */
   bounding: { w: number; h: number };
   /** Top-left of that bounding in the INPUT frame. */
   origin: { x: number; y: number };
@@ -70,16 +79,15 @@ export interface CalloutLayout {
 /**
  * Lay a callout out from a body rect and a tail tip given in ANY common frame
  * (canvas-local at creation, the previous layer frame while dragging the tip):
- * the bounding is the AABB of body ∪ tip padded by the stroke half-width (+1 px
- * for AA), and body/tip come back relative to that bounding so they can be
+ * the bounding is the TIGHT ink AABB of body ∪ tip expanded by the fixed AA
+ * margin only, and body/tip come back relative to that bounding so they can be
  * stored as layer-local markerData. ONE formula for creation and tail editing.
  */
 export function layoutCallout(
   body: { x: number; y: number; w: number; h: number },
   tip: { x: number; y: number },
-  strokeWidth: number,
 ): CalloutLayout {
-  const pad = Math.max(0, strokeWidth) / 2 + 1;
+  const pad = CALLOUT_AA_MARGIN_PX;
   const minX = Math.min(body.x, tip.x) - pad;
   const minY = Math.min(body.y, tip.y) - pad;
   const maxX = Math.max(body.x + body.w, tip.x) + pad;

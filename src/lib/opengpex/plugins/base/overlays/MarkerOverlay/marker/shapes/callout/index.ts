@@ -39,9 +39,10 @@ const TAIL_ANCHOR_X_RATIO = 0.25;
 
 /**
  * CalloutDefinition: speech-bubble body (the dragged rect) with a default tail
- * pointing down-left. The layer bounding is the AABB of body ∪ tip padded by
- * the stroke half-width, so `body` and `tip` are stored explicitly in
- * layer-local coordinates. Shift constrains the body to a square.
+ * pointing down-left. The layer bounding is the TIGHT ink AABB of body ∪ tip
+ * plus the fixed AA margin (the stroke grows inward and never widens the box),
+ * so `body` and `tip` are stored explicitly in layer-local coordinates. Shift
+ * constrains the body to a square.
  *
  * The tail tip is editable: `renderHandles` adds a knob at the tip in the ACTIVE
  * state and `interactions` contributes the handler that drags it (both live in
@@ -88,7 +89,7 @@ export const CalloutDefinition: MarkerDefinition<CalloutMarkerData> = {
     const tipX = bx + bw * TAIL_ANCHOR_X_RATIO;
     const tipY = by + bh + tailLen;
 
-    const layout = layoutCallout({ x: bx, y: by, w: bw, h: bh }, { x: tipX, y: tipY }, data.stroke.width);
+    const layout = layoutCallout({ x: bx, y: by, w: bw, h: bh }, { x: tipX, y: tipY });
     return {
       bounding: layout.bounding,
       centerLocal: layout.center,

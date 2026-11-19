@@ -144,9 +144,7 @@ export interface ViewConfig {
 export type SdfPrimitive =
   | 'rounded_rect'
   | 'ellipse'
-  | 'arrow'
-  | 'line'
-  | 'darrow'
+  | 'line-segment'
   | 'star'
   | 'callout';
 
@@ -170,7 +168,7 @@ export interface SdfShapeParams {
   readonly hasFill: boolean;
   /** Fill colour: working-gamut LINEAR RGB + alpha already ×fill.opacity (0..1). */
   readonly fillColor: readonly [number, number, number, number];
-  /** Arrowhead size multiplier (arrow / darrow only; ignored elsewhere). */
+  /** Head length factor (`line-segment` heads only; length = strokeWidth × headScale). */
   readonly headScale: number;
   /**
    * Edge anti-aliasing. `true` (the normalized default — the scene-assembly mapper
@@ -184,9 +182,11 @@ export interface SdfShapeParams {
    * zero-pads the tail, so each primitive lists only what it uses:
    * - rounded_rect: [cornerRadius]
    * - ellipse:      [] (geometry implied by `size`)
-   * - arrow:        [tail.x, tail.y, head.x, head.y] (arbitrary direction)
-   * - line:         [a.x, a.y, b.x, b.y] (solid capsule, no heads)
-   * - darrow: [a.x, a.y, b.x, b.y] (a head at both ends)
+   * - line-segment: [a.x, a.y, b.x, b.y, headA, headB] — solid capsule between two
+   *                 arbitrary-direction endpoints; scalars 4/5 are the head flags
+   *                 (1 = triangle head at that end, length `strokeWidth × headScale`;
+   *                 0 = plain round cap). Covers line (no heads), arrow (head at b)
+   *                 and darrow (heads at both ends) as one primitive.
    * - star:         [points, sharpness] — `points` ≥ 3 (integer-valued),
    *                 `sharpness` in [2, points] (2 = regular polygon, points =
    *                 spikes thinning to the centre); the star is inscribed in `size`

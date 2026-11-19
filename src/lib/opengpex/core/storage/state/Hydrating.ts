@@ -22,6 +22,7 @@ import type { ColorIdentity } from '@opengpex/editor/core/storage/asset/AssetSto
 import { Frame, HistoryStep } from '@opengpex/editor/core/types';
 import { sanitizeFrameDrafts } from '@opengpex/editor/core/state/drafts';
 import {
+  migrateLegacyArrowEndpoints,
   migrateLegacyBmaskInverted,
   migrateLegacyClipBoxes,
   migrateLegacyLayerGrade,
@@ -278,6 +279,7 @@ export const Hydrating = {
     migrateLegacyStrokeCollection(result);
     migrateLegacyClipBoxes(result);
     migrateLegacyBmaskInverted(result);
+    migrateLegacyArrowEndpoints(result);
 
     return result;
   },

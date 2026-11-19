@@ -17,9 +17,11 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import {Frame, GeometryService, InteractionEvent, InteractionHandler, Layer, LayerService, LocalRect, asLocalRect} from '@opengpex/editor/core/types';
+import {Frame, GeometryService, IMatrix3x3, InteractionEvent, InteractionHandler, Layer, LayerService, LocalRect, asLocalRect} from '@opengpex/editor/core/types';
 import type { MarkerData } from './marker/types';
+import {isSegmentData, segmentLayoutOf, segmentContainment, shiftSegmentEndpoints} from './marker/shapes/line-segment/geometry';
 import {resolveNextMarkerData} from './marker/pending';
+import {squareizeMarker, type CornerHandle} from './marker/squareize';
 
 import {LayerFactory} from '@opengpex/editor/core/layer';
 import {InteractionTransaction} from '@opengpex/editor/stage/interaction/Transaction';
@@ -34,8 +36,14 @@ import {_CMD_PLACE_UID, MarkerOverlayAPI, resolveMarkerToolState} from './protoc
 const ACTIVE_CRAFT_KEY = CraftDrawerAPI.signals.activeCraft;
 const DRAWING_MARKER_KEY = MarkerOverlayAPI.signals.drawingMarker;
 
-/** Minimum drag distance (canvas-local px) below which a draw is discarded. */
-const MIN_DRAG_PX = 8;
+/**
+ * Drag distance (canvas-local px) below which a draw is discarded as a
+ * mis-click. 3px is the mainstream click/drag disambiguation epsilon: pointer
+ * jitter stays under ~2px while a deliberate drag of even a tiny shape
+ * (safe since the head-length clamp makes short arrows render sanely)
+ * clears it.
+ */
+const MIN_DRAG_PX = 3;
 
 // ─── Draw Preview Store (module-level, cross-React-boundary) ─────────────────────
 //
@@ -108,9 +116,9 @@ function rescaleLocalGeometry(data: MarkerData, sx: number, sy: number): MarkerD
   const pt = (p: { x: number; y: number }) => ({ x: p.x * sx, y: p.y * sy });
   switch (data.kind) {
     case 'arrow':
-      return { ...data, tail: pt(data.tail), head: pt(data.head) };
     case 'line':
     case 'darrow':
+      // One shared endpoint model for the whole segment family.
       return { ...data, a: pt(data.a), b: pt(data.b) };
     case 'callout':
       return {
@@ -238,7 +246,7 @@ const CORNER_HANDLES: ReadonlySet<string> = new Set(['nw', 'ne', 'sw', 'se']);
  * the marker HUD's `data-marker-gizmo` scope; `test` only fires when one is hit.
  *
  * onUpdate writes the new bounding + recentered cx/cy to the fast track. For
- * arrow markers the tail/head endpoints are rescaled proportionally so the
+ * arrow markers the a/b endpoints are rescaled proportionally so the
  * arrow tracks the box. Non-silent → a single undoable checkpoint per resize.
  */
 export const createMarkerResizeHandler = (): InteractionHandler => {
@@ -246,12 +254,15 @@ export const createMarkerResizeHandler = (): InteractionHandler => {
   let resizeLayerId: string | null = null;
   let startMarkerData: MarkerData | null = null;
   let startBounding = { w: 0, h: 0 };
-  let gestureHandle: ResizeHandle | null = null;
   // Orientation-aware resize snapshot (non-null only for rotated/mirrored markers):
   // the world centre and the local-axes rect at gesture start, used to map the
   // local resize result back to world cx/cy.
   let startCenter: { cx: number; cy: number } | null = null;
   let startLocalRect: { x: number; y: number; w: number; h: number } | null = null;
+  // Gesture-start world matrix. Only its rotation/flip columns (a,b,c,d) are
+  // consumed — they are invariant under cx/cy/bounding changes — to convert the
+  // segment family's containment centre delta from local to world axes.
+  let startMatrix: IMatrix3x3 | null = null;
 
   /** Minimum bounding side (canvas px) so a marker can never collapse to 0. */
   const MIN_SIZE = 8;
@@ -280,7 +291,7 @@ export const createMarkerResizeHandler = (): InteractionHandler => {
       resizeLayerId = layer.id;
       startMarkerData = layer.markerData;
       startBounding = { w: layer.bounding.w, h: layer.bounding.h };
-      gestureHandle = handle as ResizeHandle;
+      startMatrix = e.geometry.transform.getLayerWorldMatrix(layer);
 
       return { category: 'resize', handle: handle as ResizeHandle };
     },
@@ -323,16 +334,14 @@ export const createMarkerResizeHandler = (): InteractionHandler => {
       return { rotation: layer.rotation, flip: layer.flip, cx: layer.cx, cy: layer.cy };
     },
 
-    // Figma-style corner semantics (§6.1 alignment with the text contract):
-    // corner drags run aspect-locked at the gesture-start ratio (proportional
-    // scale, matching how the callout tail and arrow endpoints track the
-    // box), Shift temporarily unlocks free two-axis drag. Edge handles stay
-    // free on their single axis. Unclamped so markers can extend to the
-    // canvas edge like text boxes.
+    // Inverted industry-default semantics: corner drags are FREE two-axis by
+    // default, and Shift locks the gesture-start ratio (the universal
+    // "Shift = proportional" convention). Edge handles pick up the same
+    // proportional treatment under Shift via the framework's
+    // shiftLocksAspect default (PS/Figma convention). Unclamped so markers
+    // can extend to the canvas edge like text boxes.
     getConstraints: () => {
-      const isCorner = gestureHandle !== null && CORNER_HANDLES.has(gestureHandle);
-      const ratio = startBounding.w > 0 && startBounding.h > 0 ? startBounding.w / startBounding.h : undefined;
-      return { aspect: isCorner ? ratio : undefined, shiftUnlocksAspect: true, clamp: false };
+      return { aspect: undefined, shiftUnlocksAspect: false, clamp: false };
     },
 
     onUpdate: (e, newRect, tx, context) => {
@@ -340,8 +349,8 @@ export const createMarkerResizeHandler = (): InteractionHandler => {
       const frame = e.activeFrame;
       const canvas = frame.canvas;
 
-      const finalW = Math.max(MIN_SIZE, newRect.w);
-      const finalH = Math.max(MIN_SIZE, newRect.h);
+      let finalW = Math.max(MIN_SIZE, newRect.w);
+      let finalH = Math.max(MIN_SIZE, newRect.h);
 
       // Recover the new world centre.
       let newCx: number;
@@ -375,6 +384,30 @@ export const createMarkerResizeHandler = (): InteractionHandler => {
         );
       }
 
+      // Segment family containment: heads and round caps paint at FIXED pixel
+      // sizes (rescaling endpoints does not scale the stroke), so a shrunken
+      // box can leave paint outside the bounding, clipped at the transient
+      // texture edge. Expand the committed box minimally to contain the paint
+      // (the dragged rect stays the scale source and endpoints keep tracking
+      // the handles); the centre moves by the containment delta converted
+      // through the gesture-start rotation columns.
+      if (isSegmentData(nextMarkerData) && startMatrix) {
+        const seg = segmentLayoutOf(nextMarkerData);
+        if (seg) {
+          const sw = Math.max(0, nextMarkerData.stroke.width);
+          const layout = segmentContainment(
+            seg.a, seg.b,
+            sw / 2, seg.headLen, seg.headA, seg.headB,
+            finalW, finalH,
+          );
+          nextMarkerData = shiftSegmentEndpoints(nextMarkerData, layout.shiftX, layout.shiftY);
+          finalW = layout.bounding.w;
+          finalH = layout.bounding.h;
+          newCx += startMatrix.a * layout.centerDeltaX + startMatrix.c * layout.centerDeltaY;
+          newCy += startMatrix.b * layout.centerDeltaX + startMatrix.d * layout.centerDeltaY;
+        }
+      }
+
       tx.update({
         // Shared pose-preserving rebaser (factory): the quartet stays
         // consistent by construction; this gesture keeps the layer pose.
@@ -388,6 +421,7 @@ export const createMarkerResizeHandler = (): InteractionHandler => {
       startMarkerData = null;
       startCenter = null;
       startLocalRect = null;
+      startMatrix = null;
     },
 
     onCancel: () => {
@@ -395,8 +429,128 @@ export const createMarkerResizeHandler = (): InteractionHandler => {
       startMarkerData = null;
       startCenter = null;
       startLocalRect = null;
+      startMatrix = null;
     },
   });
+};
+
+// ─── MarkerSquareizeHandler ────────────────────────────────────────────────────
+
+/** Max gap between two presses on a corner handle to count as a double-click. */
+const SQUAREIZE_DBL_INTERVAL_MS = 450;
+
+/** Max pointer travel between the two presses (canvas px). */
+const SQUAREIZE_DBL_TRAVEL_PX = 5;
+
+/**
+ * MarkerSquareizeHandler: double-click a CORNER handle to snap the active
+ * marker's bounding box to a square (side = min(w, h)), anchored at the
+ * corner opposite the double-clicked handle — the same "reset shape" gesture
+ * vocabulary as double-clicking a handle in mainstream design tools.
+ *
+ * Priority 166 (> marker-resize 160): must win the second press of the pair.
+ * It deliberately does NOT ride inside marker-resize: test() must stay a
+ * side-effect-free hit test, and a truthy test would let the transform
+ * framework start its own resize transaction whose subsequent onMove/onEnd
+ * would fight the squareize write-back.
+ *
+ * The FIRST press of the pair still runs a no-op resize gesture (no motion,
+ * empty commit) — same shape as the text tool's double-click, harmless.
+ *
+ * Double-click detection mirrors marker-dblclick-activate: detail === 2 with
+ * a time-window + travel fallback for platforms that drop the click count.
+ */
+export const createMarkerSquareizeHandler = (): InteractionHandler => {
+  let lastDownTime = 0;
+  let lastDownX = 0;
+  let lastDownY = 0;
+  let targetLayerId: string | null = null;
+  let gestureHandle: CornerHandle | null = null;
+
+  return {
+    id: 'marker-squareize',
+    priority: 166,
+
+    test: (e) => {
+      if (e.state.interaction.interactionMode !== 'craft') return false;
+      if (e.state.interaction.signals[ACTIVE_CRAFT_KEY] !== 'marker') return false;
+
+      const target = e.nativeEvent.target as HTMLElement;
+      const handleEl = target.closest('[data-marker-gizmo] [data-gizmo-handle]') as HTMLElement | null;
+      if (!handleEl) return false;
+
+      const handle = handleEl.dataset.gizmoHandle;
+      if (!handle || !CORNER_HANDLES.has(handle)) return false;
+
+      const now = performance.now();
+      const isDoubleClick =
+        (e.nativeEvent as MouseEvent).detail === 2 ||
+        (now - lastDownTime <= SQUAREIZE_DBL_INTERVAL_MS &&
+          Math.hypot(e.point.canvas.x - lastDownX, e.point.canvas.y - lastDownY) <= SQUAREIZE_DBL_TRAVEL_PX);
+      lastDownTime = now;
+      lastDownX = e.point.canvas.x;
+      lastDownY = e.point.canvas.y;
+
+      if (!isDoubleClick) return false;
+
+      const frame = e.activeFrame;
+      const activeId = frame.activeLayerId;
+      const layer = activeId ? frame.layers.byId[activeId] : null;
+      if (!layer || layer.type !== 'vector' || !layer.markerData) return false;
+
+      targetLayerId = layer.id;
+      gestureHandle = handle as CornerHandle;
+      return true;
+    },
+
+    onStart: (e) => {
+      if (!targetLayerId || !gestureHandle) return;
+      const frame = e.activeFrame;
+      const layer = frame.layers.byId[targetLayerId];
+      if (!layer || !layer.markerData) return;
+
+      const result = squareizeMarker(layer.markerData, layer.bounding, { kind: 'corner', handle: gestureHandle });
+      if (!result) return;
+
+      // Project the layer-local centre delta through the gesture-start world
+      // matrix's rotation/flip columns (same convention as the resize
+      // gesture's containment tail) — rotation/mirrored markers stay put.
+      const matrix = e.geometry.transform.getLayerWorldMatrix(layer);
+      const cx = layer.cx + matrix.a * result.centerDelta.x + matrix.c * result.centerDelta.y;
+      const cy = layer.cy + matrix.b * result.centerDelta.x + matrix.d * result.centerDelta.y;
+
+      const tx = new InteractionTransaction(e, { useIncreComp: true });
+      tx.begin(false);
+      tx.update({
+        // Pose-preserving rebaser: the {cx, cy, bounding, visibleShape} quartet
+        // stays consistent by construction — visibleShape MUST ride along or
+        // the LayerOverlay outline keeps the old box while the marker shrinks.
+        ...e.layers.factory.rebaseToBounds({
+          x: cx - result.bounding.w / 2,
+          y: cy - result.bounding.h / 2,
+          w: result.bounding.w,
+          h: result.bounding.h,
+        }),
+        markerData: result.markerData,
+      }, 'layer', targetLayerId);
+      tx.commit();
+
+      targetLayerId = null;
+      gestureHandle = null;
+    },
+
+    // The squareize gesture is fully consumed in onStart: the double-click
+    // must never degrade into a stray resize drag.
+    onMove: () => {},
+    onEnd: () => {
+      targetLayerId = null;
+      gestureHandle = null;
+    },
+    onCancel: () => {
+      targetLayerId = null;
+      gestureHandle = null;
+    },
+  };
 };
 
 // ─── MarkerRotateHandler ────────────────────────────────────────────────────────

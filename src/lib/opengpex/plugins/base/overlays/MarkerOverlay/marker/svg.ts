@@ -39,11 +39,8 @@
 import type { MarkerData, MarkerBounding } from './types';
 import { rectToSvg } from './shapes/rect/render';
 import { ellipseToSvg } from './shapes/ellipse/render';
-import { arrowToSvg } from './shapes/arrow/render';
-import { lineToSvg } from './shapes/line/render';
-import { darrowToSvg } from './shapes/darrow/render';
-import { starToSvg } from './shapes/star/render';
-import { polygonToSvg } from './shapes/polygon/render';
+import { segmentToSvg } from './shapes/line-segment/geometry';
+import { radialToSvg } from './shapes/polygon-family/geometry';
 import { calloutToSvg } from './shapes/callout/render';
 
 export type { MarkerBounding } from './types';
@@ -58,15 +55,12 @@ export function markerToSvg(markerData: MarkerData, bounding: MarkerBounding): s
     case 'ellipse':
       return ellipseToSvg(markerData, bounding);
     case 'arrow':
-      return arrowToSvg(markerData);
     case 'line':
-      return lineToSvg(markerData);
     case 'darrow':
-      return darrowToSvg(markerData);
+      return segmentToSvg(markerData);
     case 'star':
-      return starToSvg(markerData, bounding);
     case 'polygon':
-      return polygonToSvg(markerData, bounding);
+      return radialToSvg(markerData, bounding);
     case 'callout':
       return calloutToSvg(markerData, bounding);
     default: {

@@ -42,11 +42,9 @@ import type { VectorRenderer, VectorRenderContext, VectorRenderArgs } from './Ve
 const SHAPE_TYPE: Record<SdfPrimitive, number> = {
   rounded_rect: 0,
   ellipse: 1,
-  arrow: 2,
-  line: 3,
-  darrow: 4,
-  star: 5,
-  callout: 6,
+  'line-segment': 2,
+  star: 3,
+  callout: 4,
 };
 
 /**

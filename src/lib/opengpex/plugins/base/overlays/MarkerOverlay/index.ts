@@ -19,7 +19,7 @@
 
 import { EditorPlugin } from '@opengpex/editor/core/types';
 import { MarkerOverlayMain } from './components';
-import { createMarkerMoveHandler, createMarkerDrawHandler, createMarkerResizeHandler, createMarkerRotateHandler, createMarkerDblClickActivateHandler } from './interactions';
+import { createMarkerMoveHandler, createMarkerDrawHandler, createMarkerResizeHandler, createMarkerRotateHandler, createMarkerDblClickActivateHandler, createMarkerSquareizeHandler } from './interactions';
 import { MARKER_OVERLAY_COMMANDS } from './commands';
 import { markerContributor } from './contribution';
 // Side-effect import: registers built-in markers into MARKER_REGISTRY (must run
@@ -35,6 +35,7 @@ import * as P from './protocols';
  *
  * Interaction priority chain (marker handlers are craft+marker gated):
  * - marker-rotate (165): drag the rotation handle to freely rotate (highest)
+ * - marker-squareize (166): double-click a corner handle to snap the box to a square
  * - marker-resize (160): drag a selection handle to resize the active marker
  * - marker-move (155): drag an existing marker layer to move it (wins on hit)
  * - marker-draw (145): drag empty canvas to draw a new marker layer
@@ -67,6 +68,7 @@ export const plugin: EditorPlugin = {
 
   interactions: [
     createMarkerDblClickActivateHandler(), // Priority 175 — pan mode: double-click a marker to enter the tool
+    createMarkerSquareizeHandler(), // Priority 166 — double-click a corner handle: snap the box to a square
     createMarkerRotateHandler(), // Priority 165 — rotate active marker (highest)
     createMarkerResizeHandler(), // Priority 160 — resize active marker
     createMarkerMoveHandler(),   // Priority 155 — move existing marker (Cmd spring key only)

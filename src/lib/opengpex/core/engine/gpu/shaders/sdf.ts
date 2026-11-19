@@ -48,11 +48,11 @@
  * `sourceIsLinear/sourceIsWorkingGamut/sourceIntentApplied = true`, so the shader's
  * output is consumed without any further decode/convert/tone-map.
  *
- * Primitives: `shape_type == 0` rounded_rect, `1` ellipse, `5` star, `6` callout
- * (all drawn as an outline stroke over an optional interior fill); `2` arrow, `3`
- * line, `4` darrow — SOLID shapes (capsule shaft, optional triangle heads)
- * painted entirely in the STROKE colour (no interior/fill split; the fragment
- * dispatches the solid family separately from the outline family).
+ * Primitives: `shape_type == 0` rounded_rect, `1` ellipse, `3` star, `4` callout
+ * (all drawn as an outline stroke over an optional interior fill); `2` line-segment —
+ * SOLID shape (capsule shaft, optional triangle heads at either end) painted
+ * entirely in the STROKE colour (no interior/fill split; the fragment dispatches
+ * the solid family separately from the outline family).
  *
  * @module core/gpu/shaders/sdf
  */
@@ -63,12 +63,12 @@ export const SDF_WGSL = /* wgsl */ `
 struct SdfUniforms {
   // offset 0 (16 bytes)
   layer_size   : vec2<f32>,   // logical width, height
-  shape_type   : u32,         // 0 rounded_rect, 1 ellipse, 2 arrow, 3 line, 4 darrow, 5 star, 6 callout
+  shape_type   : u32,         // 0 rounded_rect, 1 ellipse, 2 line-segment, 3 star, 4 callout
   has_fill     : u32,         // 0: no fill, 1: fill
 
   // offset 16 (16 bytes)
   stroke_width : f32,         // logical px
-  head_scale   : f32,         // arrow head length factor (arrow / darrow only)
+  head_scale   : f32,         // line-segment head length factor (head length = stroke_width * head_scale)
   hard_edge    : u32,         // 0: smoothstep AA (default), 1: binary hard edge
   density      : f32,         // render-target texels per logical px (1 interactive; exportScale on supersampled export)
 
@@ -82,10 +82,12 @@ struct SdfUniforms {
   // ([0] = scalars 0..3, [1] = scalars 4..7; unused tail is zero):
   //   rounded_rect: [cornerRadius]
   //   ellipse:      []  (geometry implied by layer_size)
-  //   arrow:        [tail.x, tail.y, head.x, head.y]
-  //   line:         [a.x, a.y, b.x, b.y]
-  //   darrow: [a.x, a.y, b.x, b.y]
-  //   star:         [points, sharpness]
+  //   line-segment: [a.x, a.y, b.x, b.y, headA, headB] — head flags > 0.5 = head
+  //                 at that end (length = stroke_width * head_scale)
+  //   star:         [points, sharpness, rxScale, ryScale, cxDelta, cyDelta]
+  //                 (scalars 2..5 = content-filling-ellipse multipliers /
+  //                  fractional centre offsets; zero-packed legacy = the plain
+  //                  inscribed ellipse — a real multiplier is always positive)
   //   callout:      [body.x, body.y, body.w, body.h, tip.x, tip.y, cornerRadius, tailHalfBase]
   shape_params : array<vec4<f32>, 2>,
 
@@ -142,71 +144,79 @@ fn sdf_isoceles_triangle(p: vec2<f32>, q: vec2<f32>) -> f32 {
   return -sqrt(d.x) * sign(d.y);
 }
 
-// Arrow = solid capsule shaft (tail → shaft_end) ∪ triangle head (apex at head).
-// tail/head are arbitrary layer-local endpoints (any direction, not axis-aligned);
-// headLen = stroke_w * head_scale keeps ONE formula shared with the marker
-// plugin's SVG drag preview (MarkerOverlay/marker/svg.ts). Returns the SOLID
-// shape's signed distance.
-fn sdf_arrow(p: vec2<f32>, tail: vec2<f32>, head: vec2<f32>, stroke_w: f32, head_scale: f32) -> f32 {
-  let full_dir = head - tail;
-  let full_len = max(length(full_dir), 1e-4);
-  let dir = full_dir / full_len;                 // unit tail → head
-  let normal = vec2<f32>(-dir.y, dir.x);
-
-  let head_len = stroke_w * head_scale;
-  let head_half_w = head_len * 0.5;
-  let shaft_end = head - dir * head_len;         // triangle base centre = capsule end
-
-  // Shaft capsule stops at the triangle base (does not run under the head) so the
-  // union has no coverage discontinuity where the two solids meet.
-  let d_shaft = sdf_segment(p, tail, shaft_end) - (stroke_w * 0.5);
-
-  // Rotate p into the head's local frame: apex (local.y = 0) at head, base at head_len.
-  let rel = p - head;
-  let local = vec2<f32>(dot(rel, normal), -dot(rel, dir));
-  let d_head = sdf_isoceles_triangle(local, vec2<f32>(head_half_w, head_len));
-
-  return min(d_shaft, d_head);
-}
-
-// Line = solid capsule between two arbitrary layer-local endpoints (no heads).
-fn sdf_line(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, stroke_w: f32) -> f32 {
-  return sdf_segment(p, a, b) - (stroke_w * 0.5);
-}
-
-// Double arrow = capsule shaft ∪ a triangle head at EACH end. Both heads use the
-// same head_len = stroke_w * head_scale as the single arrow; the shaft is clipped
-// back by head_len on both sides so neither union seam shows a coverage step.
-fn sdf_darrow(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, stroke_w: f32, head_scale: f32) -> f32 {
+// Line segment = shaft between two arbitrary layer-local endpoints (any
+// direction, not axis-aligned) ∪ an optional triangle head at EITHER end.
+// head_a / head_b select the ends. The head length clamps to full_len / heads
+// so the shaft — clipped back by head_len at EACH headed end — never inverts
+// (an unclamped head length longer than the shaft crosses the clipped
+// endpoints and the capsule resolves into a fat bowtie). The SAME clamp lives
+// in the marker plugin's geometry (effectiveHeadLen) and the polygon solver,
+// keeping preview / box / solver / render on one formula.
+//
+// At a LIVE headed end the shaft is cut FLUSH at the head's base plane and the
+// triangle base half-width is floored at the shaft radius. Uncut, the
+// capsule's own end cap bulges a round butt out of the triangle's back and,
+// whenever the base is narrower than the shaft, pokes sideways past the base
+// corners as a pair of round ears. The cut is the exact intersection of the
+// capsule with the tip-side half-plane of the base plane (both convex, so max
+// of the two fields), which turns the shaft end into the flat edge the solver
+// outline and painted bounds already assume. The SAME floor and cut live in
+// the marker plugin's vertex helper and the polygon solver's outline walk.
+// A degenerate head length (head_scale 0, zero-width stroke) must not reach
+// the triangle SDF — its collapsed q poisons the field — and is treated
+// headless. Returns the SOLID shape's signed distance.
+fn sdf_line_segment(p: vec2<f32>, a: vec2<f32>, b: vec2<f32>, stroke_w: f32, head_scale: f32, head_a: bool, head_b: bool) -> f32 {
   let full_dir = b - a;
   let full_len = max(length(full_dir), 1e-4);
-  let dir = full_dir / full_len;
+  let dir = full_dir / full_len;                 // unit a → b
   let normal = vec2<f32>(-dir.y, dir.x);
 
-  let head_len = stroke_w * head_scale;
-  let head_half_w = head_len * 0.5;
-  let shaft_a = a + dir * head_len;
-  let shaft_b = b - dir * head_len;
-  let d_shaft = sdf_segment(p, shaft_a, shaft_b) - (stroke_w * 0.5);
+  let heads = select(0.0, 1.0, head_a) + select(0.0, 1.0, head_b);
+  let head_len = min(stroke_w * head_scale, full_len / max(heads, 1.0));
+  let live_a = head_a && head_len > 1e-3;
+  let live_b = head_b && head_len > 1e-3;
+  let head_half = max(head_len * 0.5, stroke_w * 0.5);
+  let ha = select(vec2<f32>(0.0), dir * head_len, head_a);
+  let hb = select(vec2<f32>(0.0), dir * head_len, head_b);
+  let shaft_a = a + ha;
+  let shaft_b = b - hb;
 
-  let rel_b = p - b;
-  let local_b = vec2<f32>(dot(rel_b, normal), -dot(rel_b, dir));
-  let d_head_b = sdf_isoceles_triangle(local_b, vec2<f32>(head_half_w, head_len));
+  // Shaft capsule between the (possibly clipped) ends; with heads the caps
+  // hide inside the head triangles, with no heads it is the full round-cap
+  // line.
+  var d = sdf_segment(p, shaft_a, shaft_b) - (stroke_w * 0.5);
 
-  // Head at point a points the other way: mirror the frame along dir.
-  let rel_a = p - a;
-  let local_a = vec2<f32>(dot(rel_a, normal), dot(rel_a, dir));
-  let d_head_a = sdf_isoceles_triangle(local_a, vec2<f32>(head_half_w, head_len));
+  // Flush base: keep only the shaft side of each live head's base plane
+  // (dot(p − base, dir) ≤ 0 toward b for the b head; ≥ 0 toward a for the a
+  // head), turning that end flat.
+  if (live_b) {
+    d = max(d, dot(p - shaft_b, dir));
+  }
+  if (live_a) {
+    d = max(d, dot(shaft_a - p, dir));
+  }
 
-  return min(d_shaft, min(d_head_a, d_head_b));
+  // Head at b: apex (local.y = 0) at b, base head_len back along the shaft.
+  if (live_b) {
+    let rel = p - b;
+    let local = vec2<f32>(dot(rel, normal), -dot(rel, dir));
+    d = min(d, sdf_isoceles_triangle(local, vec2<f32>(head_half, head_len)));
+  }
+  // Head at a points the other way: mirror the frame along dir.
+  if (live_a) {
+    let rel = p - a;
+    let local = vec2<f32>(dot(rel, normal), dot(rel, dir));
+    d = min(d, sdf_isoceles_triangle(local, vec2<f32>(head_half, head_len)));
+  }
+  return d;
 }
 
-// IQ's regular star SDF: n points, outer radius r, "sharpness" m in [2, n] (2 =
-// regular n-gon, n = spikes thinning all the way to the centre; the inner vertex
-// radius is r * (cos(pi/n) - sin(pi/n) / tan(pi/m))). p is centred on the star; the first point
-// is on +y. GLSL mod() is floor-mod, WGSL % is trunc-mod, hence the explicit
-// floor form for the sector fold.
-fn sdf_star(p_in: vec2<f32>, r: f32, n: f32, m: f32) -> f32 {
+// IQ's regular radial-polygon SDF: n points, outer radius r, "sharpness" m in
+// [2, n] (2 = regular n-gon, n = spikes thinning all the way to the centre; the
+// inner vertex radius is r * (cos(pi/n) - sin(pi/n) / tan(pi/m))). p is centred
+// on the shape; the first point is on +y. GLSL mod() is floor-mod, WGSL % is
+// trunc-mod, hence the explicit floor form for the sector fold.
+fn sdf_polygon(p_in: vec2<f32>, r: f32, n: f32, m: f32) -> f32 {
   let an = 3.141592653589793 / n;
   let en = 3.141592653589793 / m;
   let acs = vec2<f32>(cos(an), sin(an));
@@ -307,16 +317,13 @@ fn rect_ring_coverage(p: vec2<f32>, w: f32, h: f32, stroke_w: f32) -> f32 {
   return clamp(outer - inner, 0.0, 1.0);
 }
 
-// Analytic fill coverage for an axis-aligned rectangle (inset rect only, used
-// when has_fill is set for a zero-corner-radius rect).
-fn rect_fill_coverage(p: vec2<f32>, w: f32, h: f32, stroke_w: f32) -> f32 {
-  let inner_x0 = stroke_w;
-  let inner_y0 = stroke_w;
-  let inner_x1 = w - stroke_w;
-  let inner_y1 = h - stroke_w;
-  if (inner_x1 <= inner_x0 || inner_y1 <= inner_y0) { return 0.0; }
-  return rect_cell_overlap(inner_x0, inner_y0, inner_x1, inner_y1, p);
-}
+// Analytic fill coverage for an axis-aligned rectangle: the WHOLE rect (the
+// fill paints UNDER the stroke band — the SVG fill-then-stroke model; filling
+// only the eroded interior would over-composite two complementary coverages
+// along their shared edge and open a translucent seam with AA on).
+  fn rect_fill_coverage(p: vec2<f32>, w: f32, h: f32, stroke_w: f32) -> f32 {
+    return rect_cell_overlap(0.0, 0.0, w, h, p);
+  }
 
 // ── L2 Analytic polygon coverage solver (sdfPolygonSolver) ──────────────────
 //
@@ -404,44 +411,39 @@ fn poly_cell_area(start : u32, count : u32, p : vec2<f32>) -> f32 {
   return poly_area(n);
 }
 
-// Crossing-number point-in-ring test (hard-edge mode only; O(ring) per call).
-fn poly_contains(start : u32, count : u32, p : vec2<f32>) -> bool {
-  var inside = false;
-  let n = min(count, 32u);
-  var j = n - 1u;
-  for (var i = 0u; i < n; i = i + 1u) {
-    let vi = poly_vert(start + i);
-    let vj = poly_vert(start + j);
-    if ((vi.y > p.y) != (vj.y > p.y)) {
-      let cross = (vj.x - vi.x) * (p.y - vi.y) / (vj.y - vi.y) + vi.x;
-      if (p.x < cross) { inside = !inside; }
-    }
-    j = i;
-  }
-  return inside;
-}
-
 // L2 analytic coverage for the solver rings (straight-alpha compose downstream).
 fn solver_coverage(p : vec2<f32>, stroke_cov : ptr<function, f32>, fill_cov : ptr<function, f32>) {
+  let outer_area = poly_cell_area(0u, u.outer_count, p);
+  let inner_area = poly_cell_area(POLY_INNER_START, u.inner_count, p);
+  // Fill paints the WHOLE shape interior UNDER the stroke band (the SVG
+  // fill-then-stroke model). Compositing two COMPLEMENTARY coverages over
+  // each other (band = outer − inner, fill = inner) loses cov·(1−cov) alpha
+  // along their shared boundary — with AA on, a background-tinted seam opens
+  // between the fill and the stroke. Filling the full shape and letting the
+  // band paint over it is seam-free. The SOLID family (line-segment) has no
+  // fill split: its fill region stays the (empty) inner ring.
+  let fill_region = select(inner_area, outer_area, u.shape_type != 2u);
   if (u.hard_edge == 1u) {
-    // Hard edge keeps the binary centre-sample contract (same as the L1 rect
-    // hard path): a texel is fully in or fully out by its centre.
-    let inside = poly_contains(0u, u.outer_count, p)
-      && (u.inner_count == 0u || !poly_contains(POLY_INNER_START, u.inner_count, p));
-    *stroke_cov = select(0.0, 1.0, inside);
-    *fill_cov = select(0.0, 1.0, u.has_fill == 1u && u.inner_count > 0u
-      && poly_contains(POLY_INNER_START, u.inner_count, p));
+    // Hard edge: binary output, but the IN/OUT decision is the texel's TRUE
+    // analytic coverage thresholded at 0.5 — NOT a centre-sample crossing
+    // test. A centre sample drops most texels of a ~1px band (diagonal edges
+    // render as dotted lines, horizontal ones solid); the coverage threshold
+    // keeps such bands continuous while still emitting pure 0/1 alpha (no
+    // gray anti-aliasing). For axis-aligned edges the 0.5 threshold agrees
+    // with the centre test, so crisp pixel-art edges keep their contract.
+    let cov = clamp(outer_area - inner_area, 0.0, 1.0);
+    *stroke_cov = select(0.0, 1.0, cov >= 0.5);
+    *fill_cov = select(0.0, 1.0, u.has_fill == 1u && outer_area >= 0.5);
   } else {
-    let inner_area = poly_cell_area(POLY_INNER_START, u.inner_count, p);
-    *stroke_cov = clamp(poly_cell_area(0u, u.outer_count, p) - inner_area, 0.0, 1.0);
-    *fill_cov = select(0.0, inner_area, u.has_fill == 1u);
+    *stroke_cov = clamp(outer_area - inner_area, 0.0, 1.0);
+    *fill_cov = select(0.0, fill_region, u.has_fill == 1u);
   }
 }
 
 // Signed distance to the shape OUTLINE for the outline family (rounded_rect /
 // ellipse / star / callout: d = 0 is the outer boundary, stroke grows inward), or
-// to the SOLID shape for the solid family (arrow / line / darrow), which
-// fs_main composites separately.
+// to the SOLID shape for the solid family (line-segment), which fs_main composites
+// separately.
 fn shape_distance(p: vec2<f32>) -> f32 {
   if (u.shape_type == 0u) {
     let b = u.layer_size * 0.5;
@@ -452,36 +454,54 @@ fn shape_distance(p: vec2<f32>) -> f32 {
     let c = u.layer_size * 0.5;
     return sdf_ellipse(p - c, c);
   }
+  if (u.shape_type == 2u) {
+    // line-segment: head flags ride shape_params[1].xy (> 0.5 = head at that end).
+    return sdf_line_segment(
+      p,
+      u.shape_params[0].xy,
+      u.shape_params[0].zw,
+      u.stroke_width,
+      u.head_scale,
+      u.shape_params[1].x > 0.5,
+      u.shape_params[1].y > 0.5,
+    );
+  }
   if (u.shape_type == 3u) {
-    return sdf_line(p, u.shape_params[0].xy, u.shape_params[0].zw, u.stroke_width);
-  }
-  if (u.shape_type == 4u) {
-    return sdf_darrow(p, u.shape_params[0].xy, u.shape_params[0].zw, u.stroke_width, u.head_scale);
-  }
-  if (u.shape_type == 5u) {
-    // Inscribed in layer_size: map the (possibly non-square) box onto a circle of
-    // radius r_min, solve the star there, and scale the distance back by the
-    // smaller axis. Under a non-square aspect the stroke is thinner along the
-    // stretched axis — the same approximation an anisotropically scaled SVG makes.
-    let b = u.layer_size * 0.5;
-    let r_min = min(b.x, b.y);
+    // Inscribed in an ellipse expressed as multipliers / fractional centre
+    // offsets on layer_size (shape_params scalars 2..5; zero-packed legacy
+    // data = the plain inscribed ellipse 1, 1, 0, 0). The content-filling
+    // ellipse scales the semi-axes and shifts the centre so the painted
+    // shape's AABB equals the bounding box. Map the box onto a circle of
+    // radius r_min = min(semi), solve there, and let the anisotropic mapping
+    // stretch it back. Under a non-square aspect the stroke is thinner along
+    // the stretched axis — the same approximation an anisotropically scaled
+    // SVG makes.
+    // Declared as var (not let) so the legacy zero guard below can normalize
+    // them in place; a real multiplier is always positive, so 0 means the
+    // zero-packed legacy form and must map back to the inscribed ellipse.
+    var rx_scale = u.shape_params[0].z;
+    var ry_scale = u.shape_params[0].w;
+    if (rx_scale <= 0.0) { rx_scale = 1.0; }
+    if (ry_scale <= 0.0) { ry_scale = 1.0; }
+    let semi = vec2<f32>(u.layer_size.x * 0.5 * rx_scale, u.layer_size.y * 0.5 * ry_scale);
+    let c = vec2<f32>(
+      u.layer_size.x * (0.5 + u.shape_params[1].x),
+      u.layer_size.y * (0.5 + u.shape_params[1].y),
+    );
+    let r_min = min(semi.x, semi.y);
     // Flip y so the first point faces UP on screen (local y grows downward).
-    let q = (p - b) * (r_min / b) * vec2<f32>(1.0, -1.0);
+    let q = vec2<f32>(
+      (p.x - c.x) * r_min / semi.x,
+      -(p.y - c.y) * r_min / semi.y,
+    );
     let n = max(3.0, round(u.shape_params[0].x));
     let m = clamp(u.shape_params[0].y, 2.0, n);
-    return sdf_star(q, r_min, n, m);
+    return sdf_polygon(q, r_min, n, m);
   }
-  if (u.shape_type == 6u) {
+  if (u.shape_type == 4u) {
     return sdf_callout(p, u.shape_params[0], u.shape_params[1].xy, u.shape_params[1].z, u.shape_params[1].w);
   }
-  // arrow (2)
-  return sdf_arrow(
-    p,
-    u.shape_params[0].xy,
-    u.shape_params[0].zw,
-    u.stroke_width,
-    u.head_scale,
-  );
+  return 1e6;
 }
 
 @fragment
@@ -490,9 +510,9 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
   var fill_cov: f32;
 
   // L2 analytic polygon solver: exact area-integral coverage from the
-  // screen-front expanded rings (star / polygon / callout / arrow / line /
-  // darrow — see sdfPolygonSolver). Solid shapes carry no inner ring, so the
-  // shared compose below degenerates to the stroke-only solid output.
+  // screen-front expanded rings (star / polygon / callout / line-segment — see
+  // sdfPolygonSolver). Solid shapes carry no inner ring, so the shared compose
+  // below degenerates to the stroke-only solid output.
   if (u.solver == 1u && u.outer_count >= 3u) {
     solver_coverage(in.local, &stroke_cov, &fill_cov);
     let sa = u.stroke_color.a * stroke_cov;
@@ -512,9 +532,9 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
   // same for d and d+stroke_width (pure translation), so one aa serves both.
   let aa = max(fwidth(d), 1e-6) * 0.5;
 
-  // Solid family (arrow / line / darrow): capsule (+ heads) painted entirely
-  // in the stroke colour — no interior/fill split.
-  if (u.shape_type == 2u || u.shape_type == 3u || u.shape_type == 4u) {
+  // Solid family (line-segment): capsule (+ optional heads) painted entirely in the
+  // stroke colour — no interior/fill split.
+  if (u.shape_type == 2u) {
     // Soft edge: analytic smoothstep AA. Hard edge: binary coverage at the
     // signed-distance zero crossing (single-pixel step, no fwidth smoothing).
     let cov = select(1.0 - smoothstep(-aa, aa, d),
@@ -525,8 +545,9 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
   }
 
   // Outline family (rounded_rect / ellipse / star / callout): a stroke RING
-  // (shape − interior) over an optional fill, where the interior is the shape
-  // inset by stroke_width (d + stroke_width ≤ 0).
+  // (shape − interior, the interior being the shape inset by stroke_width)
+  // composited OVER an optional fill that paints the WHOLE shape (the SVG
+  // fill-then-stroke model — see the fill_cov note below).
   //
   // L1 fast path: axis-aligned rect with zero corner radius uses the analytic
   // area-integral solver (rect_ring_coverage / rect_fill_coverage) instead of
@@ -554,7 +575,10 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
       let in_inner = in.local.x >= sw && in.local.x <= u.layer_size.x - sw
                   && in.local.y >= sw && in.local.y <= u.layer_size.y - sw;
       stroke_cov = select(0.0, 1.0, in_outer && !in_inner);
-      fill_cov   = select(0.0, 1.0, u.has_fill == 1u && in_inner);
+      // Fill UNDER the band: the whole rect (the fill-then-stroke model —
+      // filling only the inset interior over-composites two complementary
+      // coverages along their shared edge and opens a translucent seam).
+      fill_cov   = select(0.0, 1.0, u.has_fill == 1u && in_outer);
     } else {
       // Analytic rect ring coverage — no fwidth, no smoothstep, no knife-edge.
       stroke_cov = rect_ring_coverage(in.local, u.layer_size.x, u.layer_size.y, u.stroke_width);
@@ -569,7 +593,12 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
       interior_cov = select(0.0, 1.0, d + u.stroke_width <= 0.0);
     }
     stroke_cov = clamp(shape_cov - interior_cov, 0.0, 1.0);
-    fill_cov   = select(0.0, interior_cov, u.has_fill == 1u);
+    // Fill UNDER the band (the SVG fill-then-stroke model): the fill paints
+    // the WHOLE shape and the band composites over it. Filling only the
+    // eroded interior would over-composite two complementary coverages along
+    // their shared boundary — with AA on, cov·(1−cov) alpha is lost there and
+    // a background-tinted seam opens between the fill and the stroke.
+    fill_cov   = select(0.0, shape_cov, u.has_fill == 1u);
   }
 
   // Straight-alpha 'over': stroke above fill, in working-gamut linear light.

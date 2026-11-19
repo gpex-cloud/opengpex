@@ -220,6 +220,16 @@ export interface TransformHandlerConfig<T = LocalRect> {
      * text contract, where Shift is a no-op on locked corners).
      */
     shiftUnlocksAspect?: boolean;
+    /**
+     * Whether Shift LOCKS the gesture-start aspect ratio when none was
+     * declared (default true — the universal "Shift = proportional"
+     * convention, applied to edge handles too). Opt OUT when a handler
+     * needs edges to stay free even under Shift (e.g. text's "fix this
+     * axis" edge contract, where a surprise two-axis proportional scale
+     * from a single-axis handle is wrong — and where corners are already
+     * locked, making Shift's inject dead weight).
+     */
+    shiftLocksAspect?: boolean;
     clamp?: boolean;
     alignToLayerId?: string;
   };
@@ -576,7 +586,7 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
 
         const isShiftPressed = (e.nativeEvent as MouseEvent).shiftKey;
         let effectiveAspect = constraints.aspect;
-        if (!effectiveAspect && isShiftPressed) {
+        if (!effectiveAspect && isShiftPressed && constraints.shiftLocksAspect !== false) {
           effectiveAspect = (startState.w > 0 && startState.h > 0) ? startState.w / startState.h : 1;
         }
         // Corner-proportional default (shiftUnlocksAspect): Shift temporarily
@@ -662,7 +672,7 @@ export function createTransformHandler(config: TransformHandlerConfig<LocalRect>
 
         const isShiftPressed = (e.nativeEvent as MouseEvent).shiftKey;
         let effectiveAspect = constraints.aspect;
-        if (!effectiveAspect && isShiftPressed) {
+        if (!effectiveAspect && isShiftPressed && constraints.shiftLocksAspect !== false) {
           effectiveAspect = (startState.w > 0 && startState.h > 0) ? startState.w / startState.h : 1;
         }
         // Same corner-proportional rule as the orientation path above.

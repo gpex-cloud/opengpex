@@ -27,10 +27,8 @@ import ColorSwatchRow from '@opengpex/editor/widgets/ColorSwatchRow';
 import { useMarkerPanel } from '../hooks';
 import { ABSOLUTE_MARKER_STROKE_MAX } from '../protocols';
 import { hasCornerRadius } from '../../../overlays/MarkerOverlay/marker/types';
-
-/** Side / point count range for polygon and star markers. */
-const COUNT_MIN = 3;
-const COUNT_MAX = 12;
+import { STAR_POINTS_PRESETS } from '../../../overlays/MarkerOverlay/marker/shapes/polygon-family/star';
+import { POLYGON_SIDES_PRESETS } from '../../../overlays/MarkerOverlay/marker/shapes/polygon-family/polygon';
 
 const ROW_LABEL = 'text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-20 shrink-0';
 const NUM_INPUT = 'w-8 bg-transparent text-right focus:outline-none outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none';
@@ -58,6 +56,8 @@ export const MarkerPanel = React.memo(function MarkerPanel() {
     strokeWidthMax,
     selectKind,
     updateMarkerData,
+    squareizeSelected,
+    canSquareize,
   } = useMarkerPanel();
 
   if (!markerData) return null;
@@ -134,7 +134,7 @@ export const MarkerPanel = React.memo(function MarkerPanel() {
         </div>
       </div>
 
-      {/* ─── Edge anti-aliasing (all kinds, always visible; default ON) ─── */}
+      {/* ─── Anti-aliasing (all kinds, always visible; default ON) ─── */}
       <div className="flex flex-col gap-1.5 p-1">
         <div className="flex items-center gap-1.5 px-1">
           <span className={ROW_LABEL}>Anti Alias</span>
@@ -145,6 +145,24 @@ export const MarkerPanel = React.memo(function MarkerPanel() {
             onChange={(on) => updateMarkerData({ antiAliased: on })}
           />
         </div>
+        {/* Quick regular-shape reset (selected marker only): snap the bounding
+            box to the shape's canonical regular proportions (square/circle for
+            box-derived kinds, the regular n-gon silhouette for polygon/star),
+            centre-anchored, one undo step. */}
+        {canSquareize && (
+          <div className="flex items-center gap-1.5 px-1">
+            <span className={ROW_LABEL}>Bounding</span>
+            <div className="flex-1" />
+            <button
+              type="button"
+              aria-label="Snap bounding box to regular proportions"
+              onClick={squareizeSelected}
+              className="flex items-center justify-center px-2 h-6 rounded-md border outline-none bg-[var(--bg-stage)] border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-main)] text-[9px] font-black uppercase tracking-tight transition-colors"
+            >
+              Regular
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ─── Fill (hasFill kinds only) — same color as stroke, on/off toggle ─── */}
@@ -168,37 +186,38 @@ export const MarkerPanel = React.memo(function MarkerPanel() {
         </div>
       )}
 
-      {/* ─── Sides / Points (polygon / star) ─── */}
+      {/* ─── Sides / Points (polygon / star) — fixed preset sets, no free range ─── */}
       {(markerData.kind === 'polygon' || markerData.kind === 'star') && (() => {
         const isPolygon = markerData.kind === 'polygon';
         const label = isPolygon ? 'Sides' : 'Points';
-        const field = isPolygon ? 'sides' : 'points';
+        const presets = isPolygon ? POLYGON_SIDES_PRESETS : STAR_POINTS_PRESETS;
         const value = isPolygon ? markerData.sides : markerData.points;
-        const clampCount = (n: number) => Math.max(COUNT_MIN, Math.min(COUNT_MAX, Math.round(n) || COUNT_MIN));
-        const setCount = (n: number) => updateMarkerData({ [field]: clampCount(n) } as never);
         return (
           <div className="flex flex-col gap-1.5 p-1">
             <div className="flex items-center gap-1.5 px-1">
               <span className={ROW_LABEL}>{label}</span>
-              <input
-                type="range"
-                min={COUNT_MIN}
-                max={COUNT_MAX}
-                step="1"
-                value={value}
-                onChange={(e) => updateMarkerData({ [field]: clampCount(Number(e.target.value)) } as never, true)}
-                onMouseUp={(e) => { setCount(Number((e.target as HTMLInputElement).value)); e.currentTarget.blur(); }}
-                className={RANGE_CLASS}
-              />
-              <div className="flex items-center gap-0.5 text-right w-9 justify-end text-indigo-600 dark:text-indigo-400 font-black text-[10px] tabular-nums">
-                <input
-                  type="number"
-                  min={COUNT_MIN}
-                  max={COUNT_MAX}
-                  value={value}
-                  onChange={(e) => setCount(Number(e.target.value))}
-                  className={NUM_INPUT}
-                />
+              <div className="flex-1 flex items-center justify-end gap-1">
+                {presets.map((n) => {
+                  // Legacy documents may hold off-preset counts: they render as
+                  // stored and simply show no active preset here — display never
+                  // rewrites stored data.
+                  const isActive = value === n;
+                  return (
+                    <button
+                      key={n}
+                      type="button"
+                      aria-label={`${n} ${label.toLowerCase()}`}
+                      onClick={() => updateMarkerData({ [isPolygon ? 'sides' : 'points']: n } as never)}
+                      className={`flex items-center justify-center w-7 h-7 rounded-md border text-[10px] font-black tabular-nums outline-none transition-colors ${
+                        isActive
+                          ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-600 dark:text-indigo-300'
+                          : 'bg-[var(--bg-stage)] border-[var(--border-subtle)] text-[var(--text-muted)] hover:text-[var(--text-main)]'
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>

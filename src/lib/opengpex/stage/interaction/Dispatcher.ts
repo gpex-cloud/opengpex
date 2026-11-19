@@ -54,17 +54,26 @@ export class InteractionDispatcher {
       }
     }
 
-    // ── Spring keys: an ENGAGED channel (held, not suppressed) means
-    //    "move the object under the pointer". While any channel is engaged,
+    // ── Spring keys: an ENGAGED ROUTING channel (held, not suppressed) means
+    //    "move the object under the pointer". While such a channel is engaged,
     //    only handlers that declare a springOverride on one of the engaged
     //    channels (tool-specific semantics such as selection peel) plus the
     //    global layer-move fallback are consulted — every other handler is
     //    treated as nonexistent, so craft tools cannot swallow the press and
     //    the global temporary-move holds in any mode without per-tool
-    //    cooperation. Channel-generic: a future alt spring needs no change
-    //    here, only handlers declaring 'alt'.
+    //    cooperation.
+    //
+    //    Only ROUTING channels filter the chain. Shift is deliberately
+    //    excluded: every shift consumer in the codebase (aspect toggle,
+    //    angle snap, draw constraint, snap bypass, boolean union) reads the
+    //    raw event bit inside an already-bound gesture — shift is a pure
+    //    in-gesture modifier, never a reroute. Registering it as a spring
+    //    channel (blur-safe state + cursor display) must not also hide every
+    //    handler from a shift-first press, which silently killed resize /
+    //    draw / paint gestures started while Shift was already held.
+    const ROUTING_CHANNELS: ReadonlySet<string> = new Set<SpringChannel>(['meta', 'alt']);
     const engagedChannels = (Object.keys(e.spring) as SpringChannel[]).filter(
-      (channel) => e.spring[channel],
+      (channel) => e.spring[channel] && ROUTING_CHANNELS.has(channel),
     );
 
     for (const handler of this.handlers) {

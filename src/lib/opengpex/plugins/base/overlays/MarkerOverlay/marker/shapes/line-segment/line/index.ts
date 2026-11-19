@@ -21,23 +21,22 @@
 
 import React from 'react';
 import { Slash } from 'lucide-react';
-import type { LineMarkerData } from '../../types';
 import { fromHex } from '@opengpex/editor/core/engine/color';
-import type { MarkerDefinition } from '../../registry';
-import { snapDirection45, segmentBounding } from '../shared';
+import type { LineMarkerData } from '../../../types';
+import { defineLineSegmentKind } from '../definition';
 
 /**
- * LineDefinition: plain straight stroke from drag start to drag end.
- *
- * Same endpoint model as the arrow (layer-local `a`/`b` inside a bounding box
- * padded by the stroke half-width for the round caps), minus the head.
+ * LineDefinition: plain straight stroke from drag start to drag end, no heads.
+ * A family preset — the shared drag→tight-bounding model comes from
+ * `defineLineSegmentKind` (with both head flags off the tight box is just the
+ * endpoints' round caps plus the AA margin).
  */
-export const LineDefinition: MarkerDefinition<LineMarkerData> = {
+export const LineDefinition = defineLineSegmentKind<LineMarkerData>({
   kind: 'line',
   label: 'Line',
   icon: React.createElement(Slash, { size: 16 }),
-  hasFill: false,
-  hasCornerRadius: false,
+  headA: false,
+  headB: false,
 
   defaults: (): LineMarkerData => ({
     kind: 'line',
@@ -46,17 +45,4 @@ export const LineDefinition: MarkerDefinition<LineMarkerData> = {
     a: { x: 0, y: 0 },
     b: { x: 0, y: 0 },
   }),
-
-  computeFromDrag: (drag, data, options) => {
-    const end = options.shiftKey
-      ? snapDirection45(drag.startX, drag.startY, drag.endX, drag.endY)
-      : { x: drag.endX, y: drag.endY };
-    const pad = Math.max(0, data.stroke.width) / 2 + 1;
-    const { bounding, centerLocal, a, b } = segmentBounding(
-      { x: drag.startX, y: drag.startY },
-      end,
-      pad,
-    );
-    return { bounding, centerLocal, patch: { a, b } as Partial<LineMarkerData> };
-  },
-};
+});

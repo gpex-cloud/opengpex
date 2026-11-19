@@ -21,6 +21,8 @@
 
 import { EditorCommand, EditorContextValue, Layer } from '@opengpex/editor/core/types';
 import type { MarkerData } from './marker/types';
+import { isSegmentData, segmentLayoutOf, segmentContainment, shiftSegmentEndpoints } from './marker/shapes/line-segment/geometry';
+import { squareizeMarker } from './marker/squareize';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import * as P from './protocols';
 
@@ -62,23 +64,102 @@ const updateMarkerCommand: EditorCommand<{ frameId: string; layerId: string; pat
   id: P.CMD_UPDATE_MARKER,
   name: 'Update Marker Properties',
   undoable: true,
-  execute: (ctx: EditorContextValue, payload: { frameId: string; layerId: string; patch: Partial<MarkerData> }) => {
+  execute: (ctx: EditorContextValue, payload: { frameId: string; layerId: string; patch: Partial<MarkerData> },) => {
     const frame = ctx.state.frames.byId[payload.frameId];
     const layer = frame?.layers.byId[payload.layerId];
     if (!frame || !layer || !layer.markerData) return;
 
+    const merged = { ...layer.markerData, ...payload.patch } as MarkerData;
+
+    // Segment family containment: these shapes paint OUTWARD from their
+    // endpoints, so growing the stroke width or head scale grows the ink
+    // beyond a bounding frozen at creation — it would clip at the transient
+    // texture edge. Re-derive the containment layout (minimally expanded box,
+    // re-anchored endpoints, centre delta converted through the world matrix's
+    // rotation/flip columns) and commit geometry + style as ONE undoable
+    // write. The outline family grows inward and never needs this.
+    let markerData: MarkerData = merged;
+    let cx = layer.cx;
+    let cy = layer.cy;
+    let w = layer.bounding.w;
+    let h = layer.bounding.h;
+    const widthChanged = payload.patch.stroke?.width !== undefined
+      && payload.patch.stroke.width !== layer.markerData.stroke.width;
+    const headChanged = isSegmentData(merged) && merged.kind !== 'line'
+      && 'headScale' in payload.patch
+      && payload.patch.headScale !== undefined
+      && payload.patch.headScale !== (layer.markerData as { headScale?: number }).headScale;
+    if (isSegmentData(merged) && (widthChanged || headChanged)) {
+      const seg = segmentLayoutOf(merged);
+      if (seg) {
+        const sw = Math.max(0, merged.stroke.width);
+        const layout = segmentContainment(
+          seg.a, seg.b,
+          sw / 2, seg.headLen, seg.headA, seg.headB,
+          layer.bounding.w, layer.bounding.h,
+        );
+        markerData = shiftSegmentEndpoints(merged, layout.shiftX, layout.shiftY);
+        w = layout.bounding.w;
+        h = layout.bounding.h;
+        const M = ctx.geometry.transform.getLayerWorldMatrix(layer);
+        cx += M.a * layout.centerDeltaX + M.c * layout.centerDeltaY;
+        cy += M.b * layout.centerDeltaX + M.d * layout.centerDeltaY;
+      }
+    }
+
     ctx.actions.updateLayer(payload.frameId, payload.layerId, {
-      markerData: {
-        ...layer.markerData,
-        ...payload.patch,
-      } as MarkerData,
-    });
+      markerData,
+      ...(w !== layer.bounding.w || h !== layer.bounding.h
+        ? ctx.layers.factory.rebaseToBounds({ x: cx - w / 2, y: cy - h / 2, w, h })
+        : {}),
+    } as Partial<Layer>);
   },
 };
 
 // ─── Export ────────────────────────────────────────────────────────────────────
 
+/**
+ * cmd.squareize_marker: Snaps the selected marker's bounding box to a square
+ * (side = min(w, h)), centre-anchored — the panel's "Square" button.
+ *
+ * undoable: true → the reset is a single undo step. All geometry (endpoint /
+ * body / tip rescale, segment containment) comes from the shared pure helper,
+ * so this command and the double-click-handle gesture produce identical
+ * results modulo the anchor choice.
+ */
+const squareizeMarkerCommand: EditorCommand<{ frameId: string; layerId: string }, void> = {
+  id: P.CMD_SQUAREIZE_MARKER,
+  name: 'Squareize Marker Bounding',
+  undoable: true,
+  execute: (ctx: EditorContextValue, payload: { frameId: string; layerId: string }) => {
+    const frame = ctx.state.frames.byId[payload.frameId];
+    const layer = frame?.layers.byId[payload.layerId];
+    if (!frame || !layer || !layer.markerData) return;
+
+    const result = squareizeMarker(layer.markerData, layer.bounding, { kind: 'center' });
+    if (!result) return;
+
+    const M = ctx.geometry.transform.getLayerWorldMatrix(layer);
+    const cx = layer.cx + M.a * result.centerDelta.x + M.c * result.centerDelta.y;
+    const cy = layer.cy + M.b * result.centerDelta.x + M.d * result.centerDelta.y;
+
+    ctx.actions.updateLayer(payload.frameId, payload.layerId, {
+      // Pose-preserving rebaser: the {cx, cy, bounding, visibleShape} quartet
+      // stays consistent by construction — visibleShape MUST ride along or
+      // the LayerOverlay outline keeps the old box while the marker shrinks.
+      ...ctx.layers.factory.rebaseToBounds({
+        x: cx - result.bounding.w / 2,
+        y: cy - result.bounding.h / 2,
+        w: result.bounding.w,
+        h: result.bounding.h,
+      }),
+      markerData: result.markerData,
+    } as Partial<Layer>);
+  },
+};
+
 export const MARKER_OVERLAY_COMMANDS = [
   placeCommand,
   updateMarkerCommand,
+  squareizeMarkerCommand,
 ];

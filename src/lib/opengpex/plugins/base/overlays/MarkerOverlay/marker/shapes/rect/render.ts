@@ -22,14 +22,32 @@
 import type { RectMarkerData } from '../../types';
 import type { MarkerBounding, SdfGeometry } from '../../types';
 import { clampRadius, svgFillAttrs, svgStroke } from '../shared';
+import { solverRingSvg, fillOverlay } from '../polygon-family/geometry';
+import { sdfSolverOutline } from '@opengpex/editor/core/engine/pipeline/scene/sdfPolygonSolver';
 
+/**
+ * The preview IS the engine's solver artifact: evenodd stroke band + fill
+ * under it, from the FIRST pixel of the drag (a box at or below the stroke
+ * width is solid — exactly what the GPU paints). Only pathological
+ * degenerate outlines fall to the classic inset-rect markup.
+ */
 export function rectToSvg(data: RectMarkerData, bounding: MarkerBounding): string {
   const sw = Math.max(0, data.stroke.width);
   const half = sw / 2;
+  if (bounding.w <= 0 || bounding.h <= 0) return '';
+
+  const outline = sdfSolverOutline(
+    'rounded_rect', [bounding.w, bounding.h], sw, rectToSdf(data, bounding).shapeParams, 0,
+  );
+  if (outline) {
+    const ring = solverRingSvg(outline, svgStroke(data));
+    if (ring) return fillOverlay(data, outline) + ring;
+  }
+
+  // Degenerate guard: classic markup, never blank.
   const w = Math.max(0, bounding.w - sw);
   const h = Math.max(0, bounding.h - sw);
-  if (w <= 0 || h <= 0) return '';
-  const radius = clampRadius(data.cornerRadius, w, h);
+  const radius = clampRadius(data.cornerRadius, Math.max(1, w), Math.max(1, h));
   return (
     `<rect x="${half}" y="${half}" width="${w}" height="${h}" rx="${radius}" ry="${radius}" ` +
     `${svgFillAttrs(data)} stroke="${svgStroke(data)}" stroke-width="${sw}" stroke-linejoin="miter" />`
