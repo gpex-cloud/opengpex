@@ -47,13 +47,14 @@
  *   respectively.
  *
  * The stroke RING (outline family) is `outer − inner`, where inner is the
- * stroke-eroded hole. The radial family (star / polygon) takes a closed-form
- * TRUE erosion — mitered spike corners plus polygonized valley arcs, the exact
- * offset of the boundary (`starErosionRing`); the callout takes its own
- * conservative construction (`calloutInnerRing`: miter inset of the union,
- * degrading to the exactly-eroded body when the wedge band is consumed). Both
- * match the shader's interior semantics (shape eroded by the
- * FULL stroke width). If a construction degenerates the shape falls back to
+ * stroke-inset hole. The radial family (star / polygon) takes a closed-form
+ * SVG miter inset — every vertex resolves to the intersection of its two
+ * adjacent offset lines, so the inner ring is straight edges only
+ * (`starErosionRing`); the callout takes its own conservative construction
+ * (`calloutInnerRing`: miter inset of the union, degrading to the
+ * exactly-eroded body when the wedge band is consumed). Both feed the shader's
+ * interior split (band = outer − inner, fill = inner; the band spans the FULL
+ * stroke width). If a construction degenerates the shape falls back to
  * the legacy smoothstep path with a `console.warn` — never silently.
  *
  * Everything here is pure geometry in LAYER-LOCAL logical pixels (the same
@@ -113,106 +114,6 @@ function segIntersect(
   const u = ((b1.x - a1.x) * d1y - (b1.y - a1.y) * d1x) / den;
   if (t < -EPS || t > 1 + EPS || u < -EPS || u > 1 + EPS) return null;
   return { x: a1.x + d1x * t, y: a1.y + d1y * t, t };
-}
-
-// ── miter inset (stroke ring inner ring) ────────────────────────────────────
-
-/**
- * Straight miter inset of a simple polygon by `offset` px (the ring's inner
- * boundary). Returns null when the inset degenerates: collapsed area,
- * self-intersection, or any vertex escaping the source polygon — the caller
- * falls back to the legacy smoothstep path in that case.
- */
-export function insetPolygon(verts: readonly number[], offset: number): number[] | null {
-  const n = verts.length / 2;
-  if (n < 3 || offset <= EPS) return null;
-  const area = signedArea(verts);
-  if (Math.abs(area) < EPS) return null;
-  // Inward normal for edge (v_i → v_{i+1}): perpendicular flipped by the ring
-  // orientation so it points INTO the polygon.
-  const side = area > 0 ? -1 : 1;
-  const nx = new Float64Array(n);
-  const ny = new Float64Array(n);
-  const c = new Float64Array(n);
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    const ex = verts[2 * j] - verts[2 * i];
-    const ey = verts[2 * j + 1] - verts[2 * i + 1];
-    const len = Math.hypot(ex, ey);
-    if (len < EPS) return null;
-    nx[i] = (side * ey) / len;
-    ny[i] = (-side * ex) / len;
-    c[i] = nx[i] * verts[2 * i] + ny[i] * verts[2 * i + 1] + offset;
-  }
-  // Inner vertex i = intersection of the offset lines of edges (i−1, i).
-  // At a CONCAVE vertex the two offset lines intersect at the true erosion
-  // corner (sharp join, correct). At a SHARP CONVEX vertex the raw miter
-  // intersection sits 1/sin(half-angle)·offset deep inside the spike — far
-  // beyond the true erosion boundary (a round arc of radius `offset` centred
-  // on the vertex), carving long thin slit holes into thin spikes at wide
-  // strokes. RAW MITER, deliberately unclamped: this inset serves the callout,
-  // whose convex corners are wide (rect corners, tail tip), and any ring the
-  // raw miter would slit is rejected by the validity checks below — the caller
-  // falls back to the legacy SDF path instead of rendering a wrong ring.
-  const inner: number[] = new Array(n * 2);
-  for (let i = 0; i < n; i++) {
-    const p = i === 0 ? n - 1 : i - 1;
-    const den = nx[p] * ny[i] - ny[p] * nx[i];
-    if (Math.abs(den) < 1e-9) return null; // parallel offset edges — spike collapsed
-    const x = (c[p] * ny[i] - c[i] * ny[p]) / den;
-    const y = (nx[p] * c[i] - nx[i] * c[p]) / den;
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-    inner[2 * i] = x;
-    inner[2 * i + 1] = y;
-  }
-  // Validity: same orientation, non-collapsed area, no self-intersection, and
-  // every inner vertex strictly inside the source polygon.
-  const innerArea = signedArea(inner);
-  if (innerArea * area <= 0 || Math.abs(innerArea) < EPS) return null;
-  for (let i = 0; i < n; i++) {
-    const j = (i + 1) % n;
-    for (let k = i + 2; k < n; k++) {
-      if (i === 0 && k === n - 1) continue; // adjacent through the wraparound
-      const l = (k + 1) % n;
-      if (segIntersect(
-        { x: inner[2 * i], y: inner[2 * i + 1] },
-        { x: inner[2 * j], y: inner[2 * j + 1] },
-        { x: inner[2 * k], y: inner[2 * k + 1] },
-        { x: inner[2 * l], y: inner[2 * l + 1] },
-      )) return null;
-    }
-  }
-  // Every inner vertex must sit strictly inside the source ring. The miter
-  // intersection can legitimately lie beyond a NON-adjacent edge's infinite
-  // line (sharp spike tips) while still being inside the polygon — containment
-  // is a polygon test (crossing number, concave-safe), not a distance test.
-  for (let v = 0; v < n; v++) {
-    if (!pointInRing(verts, { x: inner[2 * v], y: inner[2 * v + 1] })) return null;
-  }
-  // Over-inset guard: the source may be too thin for the offset even when the
-  // miter algebra still yields a well-formed ring (an 8×8 square inset by 5
-  // produces an inverted 2×2 square). The eroded set is non-empty only if some
-  // region sits ≥ offset from the boundary — require the inner ring's centroid
-  // to be that deep from every edge SEGMENT.
-  let cx = 0;
-  let cy = 0;
-  for (let v = 0; v < n; v++) {
-    cx += inner[2 * v];
-    cy += inner[2 * v + 1];
-  }
-  cx /= n;
-  cy /= n;
-  for (let e = 0; e < n; e++) {
-    const j = (e + 1) % n;
-    const ex = verts[2 * j] - verts[2 * e];
-    const ey = verts[2 * j + 1] - verts[2 * e + 1];
-    const len2 = ex * ex + ey * ey;
-    const t = Math.max(0, Math.min(1, ((cx - verts[2 * e]) * ex + (cy - verts[2 * e + 1]) * ey) / len2));
-    const px = verts[2 * e] + ex * t;
-    const py = verts[2 * e + 1] + ey * t;
-    if (Math.hypot(cx - px, cy - py) < offset) return null;
-  }
-  return inner;
 }
 
 /** Crossing-number point-in-ring (works for concave simple rings). */
@@ -609,11 +510,11 @@ function calloutOutline(
 
 /**
  * Stroke-eroded inner ring of the callout union — the callout's OWN
- * CONSTRUCTIVE erosion (deliberately NOT the radial family's
- * `starErosionRing`, and deliberately NOT a whole-outline miter inset: the
- * wedge mouth's two shallow reflex entry corners make line-intersection
- * miters sprout long spikes that eat the stroke band, the same lesson the
- * star's half-plane inset taught).
+ * CONSTRUCTIVE erosion (deliberately NOT the radial family's whole-ring
+ * `starErosionRing` miter inset: the wedge mouth's two shallow reflex entry
+ * corners make line-intersection miters sprout long spikes that eat the
+ * stroke band, the same lesson the star's half-plane inset taught — the star
+ * survives whole-ring miters only because its valley wedges stay obtuse).
  *
  * The eroded union = exactly-eroded body ∪ eroded wedge, and its boundary is
  * built from parts:
@@ -885,38 +786,61 @@ function capsuleHeadsOutline(
 
 
 /**
- * Closed-form TRUE erosion of a radial star / polygon ring by `offset` px —
- * the stroke band's inner boundary. The half-plane intersection this replaces
- * was structurally wrong: the intersection of half-planes is necessarily
- * CONVEX, so a concave star's inner ring lost every valley and degenerated
- * into the central pentagon. The true erosion boundary is built here vertex
- * by vertex, exactly:
+ * Cap on a valley miter's displacement from its vertex, in stroke widths. A
+ * valley miter sits `offset / sin(theta / 2)` from the valley vertex (theta =
+ * the centre-facing wedge angle); every marker preset keeps theta obtuse
+ * (108°..150° → displacement 1.04..1.24), but a legacy free `sharpness` can
+ * sharpen the wedge until the miter spears the centre. Past the cap
+ * (theta < ~38.9°) the ring continues as the valley-disk regime instead.
+ */
+const STAR_VALLEY_MITER_LIMIT = 3;
+
+/**
+ * Closed-form SVG miter inset of a radial star / polygon ring by `offset` px —
+ * the stroke band's inner boundary under `stroke-linejoin="miter"` semantics:
+ * EVERY vertex (spike tip and valley alike) resolves to the intersection of
+ * its two adjacent edge offset lines, so the inner ring is straight segments
+ * only — the same contour vector editors draw for a stroked star. The
+ * half-plane intersection this replaces was structurally wrong: the
+ * intersection of half-planes is necessarily CONVEX, so a concave star's
+ * inner ring lost every valley and degenerated into the central polygon.
  *
- * - CONVEX vertex (a spike tip): the two adjacent edge offset lines meet at
- *   the miter corner — the true erosion corner, sharp, at depth
- *   `offset / sin(half-angle)` along the bisector;
- * - REFLEX vertex (a valley): the two offset lines DIVERGE, and the true
- *   erosion boundary is the arc of radius `offset` centred on the valley
- *   vertex — every arc point sits exactly `offset` from the vertex, which is
- *   its nearest boundary point inside the valley's Voronoi wedge. The arc is
- *   polygonized with K chords; the chord sagitta stays far below a
- *   discernible pixel at marker stroke widths.
+ * This is deliberately NOT the Euclidean TRUE erosion. The true erosion of a
+ * reflex (valley) vertex is a radius-`offset` arc centred on it; polygonizing
+ * that arc cost `chords + 1` slots per valley (30 of the 32 uniform slots for
+ * a pentagram, blowing the budget for high point counts) and the chord sag
+ * over-inked the valley corner. The miter corner trades a bounded amount of
+ * Euclidean fidelity for exact straight edges and one slot per vertex: near a
+ * valley the hole reaches `offset / sin(theta / 2)` past the vertex (theta =
+ * the valley's centre-facing wedge angle) instead of stopping at `offset`,
+ * leaving a sliver of the corner pocket unfilled. For every marker preset the
+ * wedge stays obtuse (108°..150°), so the overshoot is a mild 1.04x..1.24x of
+ * the stroke — a sharp V corner, never a spike.
+ *
+ * Legacy documents may carry a free `sharpness` that sharpens the valley
+ * wedge toward acute angles, where that displacement grows without bound and
+ * would spear the centre. The per-valley miter-limit guard below hands such
+ * rings to the valley-disk regime instead of emitting a spike.
  *
  * Because consecutive constructions share the offset line of the edge between
  * them, every straight segment of the walk lies ON an edge-parallel offset
- * line — the chord-parallel property the old intersection comment claimed,
- * which actually falls out of this construction.
+ * line.
  *
- * Contract (mirrors the shader's interior = shape eroded by the FULL stroke
- * width):
- * - the spike-walk ring (miters + valley arcs) while the spikes survive — the
- *   common regime;
- * - the VALLEY-DISK ring (see `valleyDiskRing`) once the spike miters cross
- *   the neighbouring valley disks — the hole is then their intersection, and
- *   the analytic path continues without any fallback;
- * - `[]` when the band swallowed the hole (the eroded set is empty — for the
- *   radial family exactly when the ring centroid, its deepest point, sits
- *   closer than `offset` to the boundary): the caller renders SOLID;
+ * Contract (the shader's interior split: band = outer − inner, fill = inner):
+ * - the miter-inset ring while the valley structure stays shallow — the common
+ *   regime;
+ * - the VALLEY-DISK ring (see `valleyDiskRing`) once every adjacent valley
+ *   pair's `offset`-disks overlap (the deep regime): from there the hole is
+ *   governed by the valley disks, not the spikes — the walk's valley miters
+ *   would keep eating past the true boundary and its spike miters eventually
+ *   sweep through the centre, while the disk lens envelope is the true
+ *   erosion's deep boundary and shrinks monotonically to the solid snap. The
+ *   same target also catches a valley miter past the miter limit (legacy free
+ *   sharpness) and a walk that fails its validity checks — the analytic path
+ *   continues without any fallback;
+ * - `[]` when the band swallowed the hole (for the radial family exactly when
+ *   the ring centroid, its deepest point, sits closer than `offset` to the
+ *   boundary): the caller renders SOLID;
  * - `null` only for degenerate input (malformed ring); the caller falls back
  *   to the legacy SDF path.
  */
@@ -966,9 +890,11 @@ function starErosionRing(verts: readonly number[], offset: number): number[] | n
     }
   }
   // Vertex classification: a convex vertex turns the boundary the same way the
-  // ring winds (miter corner); a reflex vertex turns against it (valley arc).
+  // ring winds (a spike tip); a reflex vertex turns against it (a valley).
+  // The classification no longer forks the construction — every vertex takes
+  // the same miter intersection below — but the valley set still steers the
+  // miter-limit guard and the fold regime's `valleyDiskRing`.
   const convex: boolean[] = new Array(n);
-  let reflexCount = 0;
   for (let i = 0; i < n; i++) {
     const p = (i - 1 + n) % n;
     const j = (i + 1) % n;
@@ -977,75 +903,74 @@ function starErosionRing(verts: readonly number[], offset: number): number[] | n
     const d2x = verts[2 * j] - verts[2 * i];
     const d2y = verts[2 * j + 1] - verts[2 * i + 1];
     convex[i] = (d1x * d2y - d1y * d2x) * area > 0;
-    if (!convex[i]) reflexCount++;
   }
-  // Chords per valley arc, from the shared vertex budget: the walk emits one
-  // vertex per convex vertex and (chords + 1) per reflex vertex. When the
-  // budget allows no chord at all (high point counts — the 12-point preset),
-  // each valley degenerates to a SINGLE bisector point: shallow valleys
-  // (large n) keep that point visually on the exact boundary, and the ring
-  // stays within the uniform vertex budget instead of falling back.
-  let chords = 0;
-  if (reflexCount > 0) {
-    chords = Math.max(0, Math.floor((SDF_POLY_MAX_VERTS - (n - reflexCount)) / reflexCount) - 1);
-    chords = Math.min(chords, 8);
+  // Deep-regime handover: the miter walk owns the hole while the valley
+  // structure stays shallow. Once EVERY adjacent valley pair's disks (radius
+  // `offset` centred on the valley vertices, paired in ring order — exactly
+  // the pairs `valleyDiskRing` joints) overlap, the hole is governed by the
+  // valley disks rather than the spikes: deeper strokes would push the walk's
+  // valley miters past the true boundary and its spike miters through the
+  // centre (a hole that blooms and then snaps), while the disk lens envelope
+  // is the true erosion's deep boundary and shrinks monotonically to the
+  // solid snap. Handing over on the all-pairs condition guarantees the target
+  // construction exists, so the regime flip happens without a fallback. The
+  // radial family's congruent pairs make the condition all-or-nothing; a
+  // mixed ring keeps the walk (the envelope would not be constructible there
+  // and the walk still tracks its local structure).
+  const valleyIdx: number[] = [];
+  for (let i = 0; i < n; i++) {
+    if (!convex[i]) valleyIdx.push(i);
   }
-  // Walk the erosion boundary in ring order. Consecutive constructions share
-  // the offset line of the edge between them (a miter corner and the next
-  // valley's tangent point both sit on it), so the straight walk segments are
-  // exact edge-parallel offset lines.
+  if (valleyIdx.length >= 3) {
+    let allPairsOverlap = true;
+    for (let k = 0; k < valleyIdx.length; k++) {
+      const a = valleyIdx[k];
+      const b = valleyIdx[(k + 1) % valleyIdx.length];
+      const dx = verts[2 * b] - verts[2 * a];
+      const dy = verts[2 * b + 1] - verts[2 * a + 1];
+      if (Math.hypot(dx, dy) > 2 * offset) {
+        allPairsOverlap = false;
+        break;
+      }
+    }
+    if (allPairsOverlap) return valleyDiskRing(verts, convex, offset, gcx, gcy);
+  }
+  // Walk the inset boundary in ring order: EVERY vertex resolves to the
+  // intersection of its two adjacent offset lines (SVG `stroke-linejoin=
+  // "miter"`), so the ring is straight segments only and costs exactly one
+  // vertex slot per source vertex — a 12-point star fits the uniform budget
+  // with room to spare, with no per-valley chord budget or bisector
+  // degradation. Consecutive corners share the offset line of the edge
+  // between them, so every walk segment is an exact edge-parallel offset
+  // line.
   const inner: number[] = [];
   for (let i = 0; i < n; i++) {
     const p = (i - 1 + n) % n;
-    if (convex[i]) {
-      // Miter corner: intersection of the two adjacent offset lines.
-      const den = nx[p] * ny[i] - ny[p] * nx[i];
-      if (Math.abs(den) < 1e-9) return null; // parallel offset edges — no corner
-      const c1 = nx[p] * verts[2 * p] + ny[p] * verts[2 * p + 1] + offset;
-      const c2 = nx[i] * verts[2 * i] + ny[i] * verts[2 * i + 1] + offset;
-      const x = (c1 * ny[i] - c2 * ny[p]) / den;
-      const y = (nx[p] * c2 - nx[i] * c1) / den;
-      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-      inner.push(x, y);
-    } else if (chords === 0) {
-      // Budget-exhausted valley: the single bisector point (the arc's mid
-      // position — for shallow valleys indistinguishable from the arc).
-      const bx = nx[p] + nx[i];
-      const by = ny[p] + ny[i];
-      const bl = Math.hypot(bx, by);
-      if (bl < 1e-9) return null; // degenerate normals — cannot bisect
-      inner.push(verts[2 * i] + (bx / bl) * offset, verts[2 * i + 1] + (by / bl) * offset);
-    } else {
-      // Valley arc: polygonize the radius-`offset` circle around the vertex
-      // between the two tangent points (the feet of the perpendiculars onto
-      // the adjacent offset lines — edge p ends at the vertex, edge i leaves
-      // it), sweeping through the interior bisector.
-      const t1x = verts[2 * i] + nx[p] * offset;
-      const t1y = verts[2 * i + 1] + ny[p] * offset;
-      const t2x = verts[2 * i] + nx[i] * offset;
-      const t2y = verts[2 * i + 1] + ny[i] * offset;
-      const a1 = Math.atan2(t1y - verts[2 * i + 1], t1x - verts[2 * i]);
-      const a2 = Math.atan2(t2y - verts[2 * i + 1], t2x - verts[2 * i]);
-      let sweep = a2 - a1;
-      while (sweep > Math.PI) sweep -= 2 * Math.PI;
-      while (sweep <= -Math.PI) sweep += 2 * Math.PI;
-      const mid = a1 + sweep / 2;
-      // The interior sweep is the one whose mid direction faces the centroid;
-      // for a reflex vertex the short sweep already does, so this flip is a
-      // numerical safety net, not the expected path.
-      if (Math.cos(mid) * (gcx - verts[2 * i]) + Math.sin(mid) * (gcy - verts[2 * i + 1]) < 0) {
-        sweep = sweep > 0 ? sweep - 2 * Math.PI : sweep + 2 * Math.PI;
-      }
-      for (let k = 0; k <= chords; k++) {
-        const ang = a1 + (sweep * k) / chords;
-        inner.push(verts[2 * i] + Math.cos(ang) * offset, verts[2 * i + 1] + Math.sin(ang) * offset);
+    const den = nx[p] * ny[i] - ny[p] * nx[i];
+    if (Math.abs(den) < 1e-9) return null; // parallel offset edges — no corner
+    const c1 = nx[p] * verts[2 * p] + ny[p] * verts[2 * p + 1] + offset;
+    const c2 = nx[i] * verts[2 * i] + ny[i] * verts[2 * i + 1] + offset;
+    const x = (c1 * ny[i] - c2 * ny[p]) / den;
+    const y = (nx[p] * c2 - nx[i] * c1) / den;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    if (!convex[i]) {
+      // Miter-limit guard: the valley miter sits `offset / sin(theta / 2)`
+      // from the valley vertex along the centre-facing bisector. Marker
+      // presets stay obtuse (displacement <= 1.24·offset), but a legacy free
+      // `sharpness` can sharpen the wedge until the miter spears toward the
+      // centre — hand the whole ring to the valley-disk regime instead of
+      // emitting a spike.
+      const dist = Math.hypot(x - verts[2 * i], y - verts[2 * i + 1]);
+      if (dist > STAR_VALLEY_MITER_LIMIT * offset) {
+        return valleyDiskRing(verts, convex, offset, gcx, gcy);
       }
     }
+    inner.push(x, y);
   }
   // Validity: same orientation, non-degenerate area, no self-intersection, and
   // every vertex strictly inside the source ring. A failure here means the
-  // exact construction folded (deep stroke) while the hole still exists — the
-  // FOLD regime: the hole is then the intersection of the valley disks, built
+  // miter walk folded (deep stroke) while the hole still exists — the FOLD
+  // regime: the hole is then the intersection of the valley disks, built
   // by `valleyDiskRing`, so the analytic path continues without a fallback.
   const innerArea = signedArea(inner);
   if (innerArea * area <= 0 || Math.abs(innerArea) < EPS) {
@@ -1073,10 +998,12 @@ function starErosionRing(verts: readonly number[], offset: number): number[] | n
   // Every MITER corner must sit at least `offset` from the whole boundary — a
   // miter nearer to some OTHER boundary piece than to its own flanks (spike
   // miters crossing the neighbouring valley disks at deep strokes) means the
-  // spike walk no longer describes the hole. Valley vertices are EXEMPT: arc
-  // vertices are exactly `offset` from their own valley by construction, and
-  // budget-degenerate bisector points seat marginally inside the band —
-  // neither ever indicates a fold.
+  // walk no longer describes the hole. Valley vertices are EXEMPT: a valley
+  // miter sits exactly `offset` from its two flank LINES by construction, but
+  // it legitimately reaches past the flank segments toward the centre and can
+  // seat closer than `offset` to an opposing boundary piece — that proximity
+  // is the inset's own shape, never a fold (a real fold still trips the
+  // orientation, self-intersection or containment checks above).
   for (let v = 0; v < m; v++) {
     if (!convex[v]) continue;
     let d = Infinity;
@@ -1090,12 +1017,14 @@ function starErosionRing(verts: readonly number[], offset: number): number[] | n
 
 /**
  * The FOLD-regime hole: the spike miters have crossed the neighbouring valley
- * disks, so the eroded hole is the intersection of the valley disks (each of
- * radius `offset` centred on a valley vertex) — bounded purely by the valley
- * arcs between adjacent-disk intersection points. Closed form: standard
- * two-circle intersections for the arc endpoints, each arc polygonized into
- * chords. The emptiness probe upstream guarantees the common disk region is
- * non-empty here; degenerate geometry returns null (legacy fallback).
+ * disks (deep stroke), or a valley miter blew past the miter limit (legacy
+ * free sharpness) — either way the eroded hole is the intersection of the
+ * valley disks (each of radius `offset` centred on a valley vertex), bounded
+ * purely by the valley arcs between adjacent-disk intersection points.
+ * Closed form: standard two-circle intersections for the arc endpoints, each
+ * arc polygonized into chords. The emptiness probe upstream guarantees the
+ * common disk region is non-empty here; degenerate geometry returns null
+ * (legacy fallback).
  */
 function valleyDiskRing(
   verts: readonly number[],
@@ -1250,15 +1179,16 @@ export function sdfSolverOutline(
   }
   let inner: number[] = [];
   if (needsInner) {
-    // The radial family takes the closed-form TRUE erosion (mitered spike
-    // corners + polygonized valley arcs — see starErosionRing); the half-plane
-    // intersection it replaces is necessarily convex and amputated the star's
-    // valleys. The callout takes its own conservative construction
-    // (`calloutInnerRing`).
+    // The radial family takes the closed-form SVG miter inset (every vertex
+    // resolves to its two adjacent offset lines' intersection — see
+    // starErosionRing); the half-plane intersection it replaces is necessarily
+    // convex and amputated the star's valleys. The callout takes its own
+    // conservative construction (`calloutInnerRing`).
     // star: an EMPTY ring means the band swallowed the hole entirely — the
     // correct render is a SOLID star, expressed as an outline with no inner
-    // ring. Once the spike walk folds, the valley-disk ring continues the
-    // analytic path through the fold regime — no fallback, no preview/render
+    // ring. Once the neighbouring valley disks begin to overlap, the
+    // valley-disk ring carries the deep regime down to the solid snap (and
+    // catches any walk fold along the way) — no fallback, no preview/render
     // regime flip.
     const inset = prim === 'star'
       ? starErosionRing(outer, strokeWidth)

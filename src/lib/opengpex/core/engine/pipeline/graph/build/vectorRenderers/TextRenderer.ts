@@ -64,6 +64,7 @@ import {
   ATLAS_PAGE_SIZE,
   GlyphAtlasCache,
   resolveGlyphBand,
+  type GlyphPlacement,
   type GlyphRasterizer,
   type GlyphRequest,
 } from '@opengpex/editor/core/engine/text/glyphAtlas';
@@ -241,12 +242,24 @@ export class TextRenderer implements VectorRenderer {
    * keeps the defensive-drop warning to one line per page instead of per frame. */
   private missingTextureWarned = new Set<string>();
 
+  /** Anti-font-loss fallback: last successfully placed placement per
+   * `${setKey}\u0000${char}`, with the font size it was rasterized at. When an
+   * atlas set overflows and queues its flush, this frame's requests come back
+   * null — instead of dropping visible glyphs for a frame (the flicker), each
+   * char resamples its last placement and stretches the quad to the requested
+   * size (bilinear upscale, at most one frame before the flushed atlas
+   * replaces it with a sharp raster). Cleared whenever the cache generation
+   * moves: a flush/eviction reassigns pages and UVs, so stale placements
+   * would point at torn-down textures. */
+  private lastPlacements = new Map<string, { placement: GlyphPlacement; sourceFontSize: number }>();
+
   private ensureCache(device: GPUDevice): GlyphAtlasCache {
     if (this.cache && this.cacheDevice === device) return this.cache;
     this.cache = new GlyphAtlasCache();
     this.cacheDevice = device;
     this.gpuSets.clear();
     this.seenVersions.clear();
+    this.lastPlacements.clear();
     this.seenGeneration = this.cache.generation;
     return this.cache;
   }
@@ -338,6 +351,7 @@ export class TextRenderer implements VectorRenderer {
       this.gpuSets.clear();
       this.seenVersions.clear();
       this.missingTextureWarned.clear();
+      this.lastPlacements.clear();
       this.seenGeneration = cache.generation;
     }
 
@@ -387,15 +401,40 @@ export class TextRenderer implements VectorRenderer {
       const charX = line.charX!;
       for (let i = 0; i < chars.length; i++) {
         const placement = placementOf.get(`${chars[i]}\u0000${p.fontSize}`);
-        if (!placement) continue; // missing this frame (flush pending) — skip silently
-        emit(placement.page, [
-          charX[i] - placement.inkLeft, // origin x (pen position minus pen→ink offset — the cell's column 0 IS the ink's left edge)
-          line.baselineY - placement.inkAscent, // origin y (quad top)
-          placement.inkW,               // size x
-          placement.inkH,               // size y
-          placement.u0, placement.v0,   // uv_min
-          placement.u1 - placement.u0,  // uv_size
-          placement.v1 - placement.v0,
+        if (placement) {
+          // Record the fresh placement as this char's fallback source, then
+          // emit the quad at its natural raster size.
+          this.lastPlacements.set(`${setKey}\u0000${chars[i]}`, { placement, sourceFontSize: p.fontSize });
+          emit(placement.page, [
+            charX[i] - placement.inkLeft, // origin x (pen position minus pen→ink offset — the cell's column 0 IS the ink's left edge)
+            line.baselineY - placement.inkAscent, // origin y (quad top)
+            placement.inkW,               // size x
+            placement.inkH,               // size y
+            placement.u0, placement.v0,   // uv_min
+            placement.u1 - placement.u0,  // uv_size
+            placement.v1 - placement.v0,
+          ]);
+          continue;
+        }
+        // Anti-font-loss fallback: the set is full and waiting for its
+        // next-frame flush, so this char has no placement of its own this
+        // frame. Resample its last successful placement and stretch the quad
+        // to the requested font size (bilinear upscale — slightly soft for
+        // one frame, never MISSING). A char that was never placed (pure
+        // whitespace ink box, or the very first frame of a brand-new layer)
+        // still has nothing to draw and skips as before.
+        const fallback = this.lastPlacements.get(`${setKey}\u0000${chars[i]}`);
+        if (!fallback) continue;
+        const s = p.fontSize / fallback.sourceFontSize;
+        const fp = fallback.placement;
+        emit(fp.page, [
+          charX[i] - fp.inkLeft * s,    // origin x (ink-left offset scales with the quad)
+          line.baselineY - fp.inkAscent * s, // origin y (quad top)
+          fp.inkW * s,                  // size x
+          fp.inkH * s,                  // size y
+          fp.u0, fp.v0,                 // uv_min (stretched sampling of the smaller raster)
+          fp.u1 - fp.u0,                // uv_size
+          fp.v1 - fp.v0,
         ]);
       }
     }

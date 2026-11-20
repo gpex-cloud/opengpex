@@ -36,7 +36,7 @@ import type { MarkerData } from '../../types';
 import type { MarkerDefinition } from '../../registry';
 
 /** Per-kind preset: everything the skeleton cannot derive on its own. */
-export interface RadialKindConfig<T extends MarkerData> {
+interface RadialKindConfig<T extends MarkerData> {
   kind: T['kind'];
   label: string;
   icon: React.ReactNode;

@@ -65,7 +65,7 @@ export function snapDirection45(startX: number, startY: number, endX: number, en
 // ─── Segment family: SINGLE-SOURCE head geometry ──────────────────────────────
 
 /** The three vertices of a segment head triangle (layer-local px). */
-export interface SegmentHeadVertices {
+interface SegmentHeadVertices {
   /** Apex — sits exactly ON the endpoint (the shader's head lands there). */
   tip: Pt;
   /** Base corners, `headLen` back along the shaft, ± max(headLen/2, halfW) across it. */
@@ -273,7 +273,7 @@ export function effectiveHeadLen(fullLen: number, sw: number, headScale: number,
 }
 
 /** Head configuration + endpoints of a segment marker; null for every other kind. */
-export interface SegmentLayout {
+interface SegmentLayout {
   a: Pt;
   b: Pt;
   headLen: number;

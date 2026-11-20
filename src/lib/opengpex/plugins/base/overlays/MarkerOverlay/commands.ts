@@ -120,7 +120,9 @@ const updateMarkerCommand: EditorCommand<{ frameId: string; layerId: string; pat
 
 /**
  * cmd.squareize_marker: Snaps the selected marker's bounding box to a square
- * (side = min(w, h)), centre-anchored — the panel's "Square" button.
+ * to its natural proportions (NOT a literal square: a rect squares, a polygon
+ * or star returns to its regular n-gon silhouette), centre-anchored — the
+ * panel's "Regular" button.
  *
  * undoable: true → the reset is a single undo step. All geometry (endpoint /
  * body / tip rescale, segment containment) comes from the shared pure helper,
@@ -129,7 +131,7 @@ const updateMarkerCommand: EditorCommand<{ frameId: string; layerId: string; pat
  */
 const squareizeMarkerCommand: EditorCommand<{ frameId: string; layerId: string }, void> = {
   id: P.CMD_SQUAREIZE_MARKER,
-  name: 'Squareize Marker Bounding',
+  name: 'Regularize Marker Bounding',
   undoable: true,
   execute: (ctx: EditorContextValue, payload: { frameId: string; layerId: string }) => {
     const frame = ctx.state.frames.byId[payload.frameId];

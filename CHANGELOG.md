@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.57
+
+- Markers: the inner edge of a star's thick outline now has sharp straight-line corners — matching the outer points — instead of small curved facets, at any stroke width while the hollow still exists
+- Text: dragging a text layer's corner handle no longer makes characters flicker or briefly vanish mid-drag, even during long fast resizes of long text
+- Markers: selecting a marker while the marker tool is off no longer overrides the shape kind you last picked in the panel; gestures that mean "edit this layer" (double-click, Cmd-click, Escape) still switch the panel to the selection's shape
+
 ## 2.0.56
 
 - Markers: every marker shape is rebuilt around one rule — what you draw is what you get. The selection box hugs the drawn ink tightly instead of leaving an empty band, the drag preview appears from the first pixel and always matches the final render, clicks pass through empty interiors to the layers underneath, and thick outlines stay one continuous band without gaps, bumps or clipped edges. Stars and polygons fill the drag box as their true shape with fixed point/side sets, arrows, lines and double arrows share one rebuilt line shape, and callout tails can be dragged anywhere; shapes drawn in older documents open unchanged

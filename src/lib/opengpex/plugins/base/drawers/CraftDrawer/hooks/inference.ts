@@ -59,13 +59,13 @@ export function useCraftDrawer() {
 
   // With no tool active, the drawer infers the panel from the selection.
   // Arming the selected marker's kind keeps the inferred panel's highlight
-  // and bindings on the selected layer (otherwise the panel would show a
-  // stale armed kind — the detached state activateCraft('marker') also
-  // avoids). Only fires while NO tool is active: an active tool owns its
-  // armed kind (handlers arm it on click). The last auto-armed layer id is
-  // tracked so arming happens ONCE per selection change — re-running on
-  // every config write would fight the panel's own kind selector (the user
-  // picks a kind, the effect would snap it back to the layer's kind).
+  // and bindings on the selected layer — a pan-mode click must land in the
+  // ACTIVE phase (panel edits the layer), not detached. Only fires while NO
+  // tool is active: an active tool owns its armed kind (handlers arm it on
+  // click). The last auto-armed layer id is tracked so arming happens ONCE
+  // per selection change — re-running on every config write would fight the
+  // panel's own kind selector (the user picks a kind, the effect would snap
+  // it back to the layer's kind).
   const lastAutoArmedLayerIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (inferredCraft !== 'marker') return;

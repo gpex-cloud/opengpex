@@ -48,6 +48,7 @@ import {
   shiftSegmentEndpoints,
 } from './shapes/line-segment/geometry';
 import { radialNaturalRatio } from './shapes/polygon-family/geometry';
+import { rescaleLocalGeometry } from './shapes/shared';
 
 /** Minimum bounding side — the marker must never collapse below the resize floor. */
 export const SQUAREIZE_MIN_SIDE_PX = 8;
@@ -60,12 +61,6 @@ export type SquareizeAnchor =
   | { kind: 'corner'; handle: CornerHandle };
 
 export interface SquareizeResult {
-  /**
-   * Regularized bounding BEFORE any segment-family containment expansion —
-   * the natural-ratio box at scale s. `side` keeps its name for callers that
-   * only read the fitted size; it is the LONGER side of the target box.
-   */
-  side: number;
   /** Rescaled marker payload (endpoints / body / tip track the box). */
   markerData: MarkerData;
   /**
@@ -96,29 +91,6 @@ function naturalRatio(data: MarkerData): { w: number; h: number } {
   if (data.kind === 'polygon') return radialNaturalRatio(data.sides);
   if (data.kind === 'star') return radialNaturalRatio(data.points);
   return { w: 1, h: 1 };
-}
-
-/**
- * Scale the layer-local payload by the resize factors so endpoint / body / tip
- * geometry keeps tracking the box (shared contract with the resize gesture).
- * Kinds whose geometry is fully implied by the bounding pass through.
- */
-function rescaleLocalGeometry(data: MarkerData, sx: number, sy: number): MarkerData {
-  const pt = (p: { x: number; y: number }) => ({ x: p.x * sx, y: p.y * sy });
-  switch (data.kind) {
-    case 'arrow':
-    case 'line':
-    case 'darrow':
-      return { ...data, a: pt(data.a), b: pt(data.b) };
-    case 'callout':
-      return {
-        ...data,
-        body: { x: data.body.x * sx, y: data.body.y * sy, w: data.body.w * sx, h: data.body.h * sy },
-        tip: pt(data.tip),
-      };
-    default:
-      return data;
-  }
 }
 
 /**
@@ -193,5 +165,5 @@ export function squareizeMarker(
     }
   }
 
-  return { side: Math.max(newW, newH), markerData: nextData, centerDelta, bounding: { w: finalW, h: finalH } };
+  return { markerData: nextData, centerDelta, bounding: { w: finalW, h: finalH } };
 }

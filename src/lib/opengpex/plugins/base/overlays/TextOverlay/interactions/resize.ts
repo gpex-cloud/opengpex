@@ -74,7 +74,13 @@ export function resolveTextResizePatch(opts: {
     // same scale factor. Re-clamp the height against the scaled font's own
     // line-box floor so a heavy shrink cannot go below one visible line.
     const scale = opts.rect.w / opts.startBounding.w;
-    const fontSize = Math.max(TEXT_RESIZE_MIN_FONT_SIZE, opts.startFontSize * scale);
+    // Quantize to whole px: a continuous drag almost never repeats the same
+    // sub-pixel size, so every frame would miss the glyph atlas cache and
+    // re-rasterize every character at a brand-new size — thrashing the atlas
+    // until its pages overflow. Integer steps keep the cache hit rate high
+    // while the visual difference from the exact fractional size is 1px at
+    // most on the font's em box.
+    const fontSize = Math.round(Math.max(TEXT_RESIZE_MIN_FONT_SIZE, opts.startFontSize * scale));
     const h = Math.max(20, fontSize * lineHeight, opts.rect.h);
     const textData: TextLayerData = { ...opts.textData, fontSize };
     if (normalizeBoxMode(opts.textData.boxMode) === 'fixed') {

@@ -45,3 +45,29 @@ export function svgStroke(data: MarkerData): string {
   return toCssColor4(data.stroke.color);
 }
 
+
+/**
+ * Rescale the layer-local geometry a marker stores (segment endpoints, callout
+ * body + tip) by the bounding box's resize factors so the shape keeps tracking
+ * the box. Kinds whose geometry is fully implied by the bounding (rect /
+ * ellipse / radial families) pass through. Shared by the live resize gesture
+ * and the regularize (squareize) fit — one contract, one implementation.
+ */
+export function rescaleLocalGeometry(data: MarkerData, sx: number, sy: number): MarkerData {
+  const pt = (p: { x: number; y: number }) => ({ x: p.x * sx, y: p.y * sy });
+  switch (data.kind) {
+    case 'arrow':
+    case 'line':
+    case 'darrow':
+      // One shared endpoint model for the whole segment family.
+      return { ...data, a: pt(data.a), b: pt(data.b) };
+    case 'callout':
+      return {
+        ...data,
+        body: { x: data.body.x * sx, y: data.body.y * sy, w: data.body.w * sx, h: data.body.h * sy },
+        tip: pt(data.tip),
+      };
+    default:
+      return data;
+  }
+}

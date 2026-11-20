@@ -20,6 +20,7 @@
 import {Frame, GeometryService, IMatrix3x3, InteractionEvent, InteractionHandler, Layer, LayerService, LocalRect, asLocalRect} from '@opengpex/editor/core/types';
 import type { MarkerData } from './marker/types';
 import {isSegmentData, segmentLayoutOf, segmentContainment, shiftSegmentEndpoints} from './marker/shapes/line-segment/geometry';
+import {rescaleLocalGeometry} from './marker/shapes/shared';
 import {resolveNextMarkerData} from './marker/pending';
 import {squareizeMarker, type CornerHandle} from './marker/squareize';
 
@@ -105,30 +106,6 @@ function resolveMarkerData(e: { state: { pluginConfig: Record<string, unknown> }
   if (order.length === 0) return null;
   const kind = config?.activeMarkerKind ?? order[0];
   return resolveNextMarkerData(config, kind) ?? null;
-}
-
-/**
- * Rescale the layer-local geometry a marker stores (endpoints, body, tip) by the
- * bounding box's resize factors so the shape keeps tracking the box. Kinds whose
- * geometry is fully implied by the bounding (rect / ellipse / star) pass through.
- */
-function rescaleLocalGeometry(data: MarkerData, sx: number, sy: number): MarkerData {
-  const pt = (p: { x: number; y: number }) => ({ x: p.x * sx, y: p.y * sy });
-  switch (data.kind) {
-    case 'arrow':
-    case 'line':
-    case 'darrow':
-      // One shared endpoint model for the whole segment family.
-      return { ...data, a: pt(data.a), b: pt(data.b) };
-    case 'callout':
-      return {
-        ...data,
-        body: { x: data.body.x * sx, y: data.body.y * sy, w: data.body.w * sx, h: data.body.h * sy },
-        tip: pt(data.tip),
-      };
-    default:
-      return data;
-  }
 }
 
 // ─── MarkerMoveHandler ─────────────────────────────────────────────────────────
@@ -443,8 +420,8 @@ const SQUAREIZE_DBL_INTERVAL_MS = 450;
 const SQUAREIZE_DBL_TRAVEL_PX = 5;
 
 /**
- * MarkerSquareizeHandler: double-click a CORNER handle to snap the active
- * marker's bounding box to a square (side = min(w, h)), anchored at the
+ * MarkerSquareizeHandler: double-click a CORNER handle to regularize the
+ * active marker's bounding box to the shape's natural proportions, anchored at the
  * corner opposite the double-clicked handle — the same "reset shape" gesture
  * vocabulary as double-clicking a handle in mainstream design tools.
  *

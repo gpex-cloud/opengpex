@@ -48,15 +48,15 @@ function activateCraft(ctx: EditorContextValue, craft: CraftType) {
   ctx.scoped!.setSignal(P.SIGNAL_ACTIVE_CRAFT, craft);
   ctx.actions.setInteraction({ interactionMode: 'craft' });
 
-  // Entering the marker tool with a marker already selected arms that layer's
-  // kind, so the tool opens in the ACTIVE state (panel edits the selection)
-  // rather than detached from it.
-  if (craft === 'marker') {
-    const selectedKind = ctx.activeLayer?.type === 'vector' ? ctx.activeLayer.markerData?.kind : undefined;
-    if (selectedKind && MARKER_REGISTRY.get(selectedKind)) {
-      ctx.scoped!.setSelfConfig({ activeMarkerKind: selectedKind } as Partial<CraftDrawerConfig>);
-    }
-  }
+  // NOTE: activating the marker tool does NOT re-arm `activeMarkerKind` from
+  // the selected layer. The armed kind is the user's latest intent (panel click
+  // or Tab), and stomping it here silently discarded a kind chosen while the
+  // tool was off. Gestures that MEAN "edit this layer" arm its kind explicitly
+  // via the setMarkerKind command instead: double-click from pan mode
+  // (MarkerDblClickActivateHandler), Cmd-click inside the tool
+  // (MarkerMoveHandler), and the Escape ladder (useMarkerEscapeAction). With a
+  // mismatched marker selected the tool opens in the INACTIVE detached-ghost
+  // state — already a designed phase (Escape re-arms the selection's kind).
 }
 
 function deactivate(ctx: EditorContextValue) {

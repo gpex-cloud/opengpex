@@ -38,7 +38,7 @@ import type { MarkerDefinition } from '../../registry';
 import { effectiveHeadLen, snapDirection45, segmentTightBounding } from './geometry';
 
 /** Per-kind preset: everything the skeleton cannot derive on its own. */
-export interface SegmentKindConfig<T extends SegmentMarkerData> {
+interface SegmentKindConfig<T extends SegmentMarkerData> {
   kind: T['kind'];
   label: string;
   icon: React.ReactNode;

@@ -44,7 +44,7 @@ export const CMD_PLACE = 'cmd.place';
 /** Updates the markerData of an existing marker layer (undoable — panel edits). */
 export const CMD_UPDATE_MARKER = 'cmd.update_marker';
 
-/** Snaps the selected marker's bounding box to a square (undoable — panel button). */
+/** Regularizes the selected marker's bounding box to its natural proportions (undoable — panel button). */
 export const CMD_SQUAREIZE_MARKER = 'cmd.squareize_marker';
 
 // ─── Internal UID Constants ──────────────────────────────────────────────────────
@@ -75,7 +75,7 @@ export const MarkerOverlayAPI = {
       uid: string;
       _payload: { frameId: string; layerId: string; patch: unknown };
     },
-    /** Snap the selected marker's bounding box to a square (centre-anchored) */
+    /** Regularize the selected marker's bounding box (centre-anchored) */
     squareizeMarker: { uid: MARKER_OVERLAY_CMD_SQUAREIZE_MARKER } as {
       uid: string;
       _payload: { frameId: string; layerId: string };

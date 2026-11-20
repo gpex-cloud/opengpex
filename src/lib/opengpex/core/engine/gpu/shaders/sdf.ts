@@ -95,7 +95,8 @@ struct SdfUniforms {
   solver        : u32,   // 0: legacy SDF/smoothstep, 1: analytic polygon coverage
   outer_count   : u32,   // outer ring vertex count (≤ 32; 0 = no solver outline)
   inner_count   : u32,   // stroke-inset ring vertex count (0 = solid shape)
-  poly_pad      : f32,
+  poly_pad      : f32,   // RESERVED alignment pad — never read; the renderer leaves
+                         // this uniform slot unwritten (struct keeps 16-byte slot alignment)
 
   // offset 112 (512 bytes) — solver rings: 32 outer slots then 32 inner slots,
   // packed TWO vertices per vec4 (uniform address space requires 16-byte array

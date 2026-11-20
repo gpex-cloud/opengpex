@@ -140,8 +140,9 @@ export function useMarkerPanel() {
   const strokeWidthMax = getDynamicMarkerStrokeMax(activeFrame?.canvas.w, activeFrame?.canvas.h);
 
   /**
-   * Snap the SELECTED marker layer's bounding box to a square (side = min(w, h),
-   * centre-anchored) via MarkerOverlay's undoable command. Only meaningful when
+   * Regularize the SELECTED marker layer's bounding box to the shape's natural
+   * proportions (a rect squares, a polygon/star returns to its regular n-gon
+   * silhouette), centre-anchored, via MarkerOverlay's undoable command. Only meaningful when
    * a marker layer is actually selected — the panel's preset modes have no
    * bounding to reset.
    */

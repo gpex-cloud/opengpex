@@ -50,7 +50,7 @@ export function starTrueSharpness(points: number): number {
 }
 
 /** Effective sharpness of a star datum: the stored legacy value, or the derived true star. */
-export function starEffectiveSharpness(data: StarMarkerData): number {
+function starEffectiveSharpness(data: StarMarkerData): number {
   return data.sharpness ?? starTrueSharpness(data.points);
 }
 
@@ -103,7 +103,7 @@ export function radialPolygonPoints(
 // ─── Content-filling ellipse (tight bounding) ─────────────────────────────────
 
 /** Semi-axis multipliers + fractional centre offsets of the content-filling ellipse. */
-export interface ContentFillEllipse {
+interface ContentFillEllipse {
   rxScale: number;
   ryScale: number;
   cxDelta: number;
