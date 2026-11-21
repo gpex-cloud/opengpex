@@ -47,61 +47,92 @@ export function FrameSectionHUD({ frames, handleSelectFrame, handleSelectLayer }
         </span>
       </div>
 
-      {frames.map((frame) => (
-        <div
-          key={frame.id}
-          className="bg-[var(--bg-stage)] rounded-xl border border-[var(--border-subtle)] dark:border-white/[0.08] overflow-hidden"
-        >
-          {/* Frame Header */}
-          <div className="bg-[var(--bg-stage)] px-3 py-1.5 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] flex items-center justify-between">
-            <div
-              className="flex items-center gap-1.5 min-w-0 cursor-pointer"
-              onClick={() => handleSelectFrame(frame.id)}
-            >
-              <span className="text-[8px] font-black text-indigo-600 uppercase px-1 rounded bg-indigo-500/10 ">
-                Frame
-              </span>
-              <span className="text-[9px] font-bold text-[var(--text-main)] truncate">
-                {frame.name}
-              </span>
-            </div>
-            <span className="text-[8px] font-mono opacity-40">
-              #{frame.id.slice(0, 4)}
-            </span>
-          </div>
-
-          {/* Layers in this frame */}
-          <div className="p-2 space-y-1">
-            {frame.thumbnail && (
-              <div className="flex items-center justify-between text-[9px] p-1 rounded hover transition-colors">
-                <span className="text-[var(--text-muted)] flex items-center gap-1">
-                  🖼️ Thumbnail
+      {frames.map((frame) => {
+        // Compact cap: at most 3 entries per frame (thumbnail first, then
+        // asset-bearing layers in draw order); the overflow collapses into a
+        // "+n more entries" footer — the same pattern AssetSectionHUD uses
+        // for detached entries. Full inventories stay in the expanded tree.
+        const entries: Array<
+          | { kind: "thumbnail"; id: string; size: number }
+          | { kind: "layer"; id: string; name: string; size: number }
+        > = [
+          ...(frame.thumbnail
+            ? [{ kind: "thumbnail" as const, id: frame.thumbnail.id, size: frame.thumbnail.size }]
+            : []),
+          ...frame.layers
+            .filter((layer) => layer.asset)
+            .map((layer) => ({
+              kind: "layer" as const,
+              id: layer.id,
+              name: layer.name,
+              size: layer.asset!.size,
+            })),
+        ];
+        const visibleEntries = entries.slice(0, 3);
+        const hiddenCount = entries.length - visibleEntries.length;
+        return (
+          <div
+            key={frame.id}
+            className="bg-[var(--bg-stage)] rounded-xl border border-[var(--border-subtle)] dark:border-white/[0.08] overflow-hidden"
+          >
+            {/* Frame Header */}
+            <div className="bg-[var(--bg-stage)] px-3 py-1.5 border-b border-[var(--border-subtle)] dark:border-b-white/[0.06] flex items-center justify-between">
+              <div
+                className="flex items-center gap-1.5 min-w-0 cursor-pointer"
+                onClick={() => handleSelectFrame(frame.id)}
+              >
+                <span className="text-[8px] font-black text-indigo-600 uppercase px-1 rounded bg-indigo-500/10 ">
+                  Frame
                 </span>
-                <span className="font-mono opacity-65">
-                  {formatBytes(frame.thumbnail.size)}
+                <span className="text-[9px] font-bold text-[var(--text-main)] truncate">
+                  {frame.name}
                 </span>
               </div>
-            )}
-            {frame.layers.map((layer) =>
-              layer.asset ? (
-                <div
-                  key={layer.id}
-                  className="flex items-center justify-between text-[9px] p-1 rounded hover cursor-pointer transition-colors"
-                  onClick={() => handleSelectLayer(frame.id, layer.id)}
-                  title="Click to select layer"
-                >
-                  <span className="text-[var(--text-main)] truncate max-w-[140px] flex items-center gap-1">
-                    📁 {layer.name}
-                  </span>
-                  <span className="font-mono text-indigo-650 ">
-                    {formatBytes(layer.asset.size)}
-                  </span>
+              <span className="text-[8px] font-mono opacity-40">
+                #{frame.id.slice(0, 4)}
+              </span>
+            </div>
+
+            {/* Entries in this frame (capped for the compact view) */}
+            <div className="p-2 space-y-1">
+              {visibleEntries.map((entry) =>
+                entry.kind === "thumbnail" ? (
+                  <div
+                    key={entry.id}
+                    className="flex items-center justify-between text-[9px] p-1 rounded hover transition-colors"
+                  >
+                    <span className="text-[var(--text-muted)] flex items-center gap-1">
+                      🖼️ Thumbnail
+                    </span>
+                    <span className="font-mono opacity-65">
+                      {formatBytes(entry.size)}
+                    </span>
+                  </div>
+                ) : (
+                  <div
+                    key={entry.id}
+                    className="flex items-center justify-between text-[9px] p-1 rounded hover cursor-pointer transition-colors"
+                    onClick={() => handleSelectLayer(frame.id, entry.id)}
+                    title="Click to select layer"
+                  >
+                    <span className="text-[var(--text-main)] truncate max-w-[140px] flex items-center gap-1">
+                      📁 {entry.name}
+                    </span>
+                    <span className="font-mono text-indigo-650 ">
+                      {formatBytes(entry.size)}
+                    </span>
+                  </div>
+                ),
+              )}
+              {hiddenCount > 0 && (
+                <div className="text-[8px] opacity-60 text-center pt-1 text-[var(--text-muted)]">
+                  + {hiddenCount} more entries
                 </div>
-              ) : null,
-            )}
+              )}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

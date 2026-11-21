@@ -2,6 +2,13 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.58
+
+- Layers: sweeping the layer list stays smooth at large layer counts — the per-row hover controls drop their decorative chrome layers, and rows outside the viewport skip rendering entirely while remaining in the list
+- Layers: hovering a row in the layer list now also highlights that layer's outline on the canvas and follows it in the info panel — previously the list-side hover never reached them
+- Layers: pressing a row's eye or lock control scales its icon slightly for feedback
+- Storage: orphaned pool assets past a 10-minute age threshold are recycled automatically, the panel separates memory vs storage usage into distinct bars, and mislabeled detached-asset entries are corrected
+
 ## 2.0.57
 
 - Markers: the inner edge of a star's thick outline now has sharp straight-line corners — matching the outer points — instead of small curved facets, at any stroke width while the hollow still exists

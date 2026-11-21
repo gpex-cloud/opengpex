@@ -26,8 +26,8 @@ import { Layer } from "@opengpex/editor/core/types";
 import { Focus } from "lucide-react";
 import {
   useEditorState,
-  useOverlayRotationSync,
   useVolatileInteraction,
+  useOverlayRotationSync,
 } from "@opengpex/editor/core/context";
 import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import { useLayerOverlayCommands } from "./hooks";
@@ -36,26 +36,43 @@ import { useLayerOverlaySync, useLayerOverlayCameraHide } from "./useFastSync";
 
 /**
  * LayerOverlayItem: A single geometric helper element for a layer on the stage.
+ *
+ * Memoized + self-subscribed: hover state is read HERE (per item), not in the
+ * container. Earlier measurement: with the container subscribing and passing
+ * hover props down, every row crossing flushed a synchronous re-render of ALL
+ * N items (~9.65ms per boundary event at ~N items), which backed up the input
+ * queue ~100ms and delayed the row hover highlight. With the subscription
+ * inverted, each volatile notify costs N cheap getSnapshot compares (O(1) per
+ * item) and only the one or two items whose isHovered/activeHovered actually
+ * flipped re-render; the container itself no longer re-renders on hover at
+ * all, so no per-crossing cost scales with N.
  */
-export function LayerOverlayItem({
+export const LayerOverlayItem = React.memo(function LayerOverlayItem({
   layer,
   index,
   isActive,
-  isHoveringActive,
-  isHovered,
   showAlways,
 }: {
   layer: Layer;
   index: number;
   isActive: boolean;
-  isHoveringActive: boolean;
-  isHovered: boolean;
   showAlways: boolean;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const labelRef = useRef<HTMLDivElement>(null);
   const prevVisibleRef = useRef(false);
-  const isVisible = showAlways || (isActive && isHoveringActive) || isHovered;
+  // Hover state via the public volatile hook with per-item DERIVED boolean
+  // snapshots (shared keys, one subscription per row per field).
+  // useSyncExternalStore compares snapshot values per hook instance, so a
+  // crossing wakes every subscriber's listener but only the two rows whose
+  // derived boolean actually flips re-render; the rest pay one closure
+  // evaluation each and nothing else. The derives below are pure functions of
+  // the field value — the snapshot must never be the raw field itself (every
+  // row's value would change per crossing and all N rows would re-render,
+  // which is exactly the storm this pattern exists to avoid).
+  const isHovered = useVolatileInteraction('hoveredLayerId', (v) => v === layer.id);
+  const activeHovered = useVolatileInteraction('isHoveringActiveLayer', (v) => !!v && isActive);
+  const isVisible = showAlways || (isActive && activeHovered) || isHovered;
 
   // Use viewport-unified sync hook: Optimized for Screen Space (Ticker + Matrix)
   // [Perf] Only register ticker when overlay is visible — eliminates N×120Hz
@@ -133,7 +150,7 @@ export function LayerOverlayItem({
       </div>
     </div>
   );
-}
+});
 
 /**
  * LayerOverlayContainer: Main container component
@@ -154,8 +171,6 @@ export function LayerOverlayContainer() {
 
 function LayerOverlayContent() {
   const { activeFrame } = useEditorState();
-  const hoveredLayerId = useVolatileInteraction('hoveredLayerId');
-  const isHoveringActive = useVolatileInteraction('isHoveringActiveLayer');
   const activeLayerId = activeFrame?.activeLayerId;
   const { isAlwaysOn: showAlways } = useLayerOverlayCommands();
 
@@ -184,8 +199,6 @@ function LayerOverlayContent() {
             layer={layer}
             index={idx + 1}
             isActive={layer.id === activeLayerId}
-            isHoveringActive={isHoveringActive}
-            isHovered={layer.id === hoveredLayerId}
             showAlways={!!showAlways}
           />
         ))}

@@ -91,6 +91,8 @@ export function useFastSync<T extends Element>(
   }, [ref, frame, isActive, syncFn, volatileRef, throttleInterval]);
 
   useLayoutEffect(() => {
+    // Sync once on activation so the first visible frame is positioned
+    // before the ticker takes over.
     if (isActive) onTick();
   }, [onTick, isActive]);
 

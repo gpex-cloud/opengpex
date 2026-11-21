@@ -128,7 +128,7 @@ export default function ActionDropdown({
       <div
         onMouseDown={(e) => e.preventDefault()}
         onClick={handleTriggerClick}
-        className={`cursor-pointer select-none outline-none transition-all ${disabled ? 'opacity-50 pointer-events-none' : ''}`}
+        className={`cursor-pointer select-none outline-none transition-colors ${disabled ? 'opacity-50 pointer-events-none' : ''}`}
       >
         {typeof trigger === 'function' ? trigger(isOpen) : trigger}
       </div>

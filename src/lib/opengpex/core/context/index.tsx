@@ -765,16 +765,37 @@ export function useOverlayRotationSync(
  * This is the recommended way to read high-frequency interaction data
  * (hover, cursor, HUD) in React components without causing global re-renders.
  *
+ * With the optional `derive` function, the hook returns a per-subscriber
+ * DERIVED snapshot instead of the raw field value. useSyncExternalStore
+ * compares snapshot values per hook instance, so with a shared key only the
+ * subscribers whose derived value actually flips re-render — this is how many
+ * components can subscribe to one field (e.g. `hoveredLayerId`) while a change
+ * costs renders only for the few whose view of it changed. The derive must be
+ * a pure function of the field value (plus stable locals): an impure or
+ * constantly-varying derive would make React treat the snapshot as changed on
+ * every pass. The snapshot must never be a freshly-built object/array —
+ * booleans, strings, and numbers compare by value.
+ *
  * @example
  * ```tsx
  * const hoveredId = useVolatileInteraction('hoveredLayerId');
  * const cursor = useVolatileInteraction('resolvedCursor');
+ * // Derived: only this row re-renders when its own hover boolean flips.
+ * const isHovered = useVolatileInteraction('hoveredLayerId', (v) => v === layerId);
  * ```
  *
  */
 export function useVolatileInteraction<K extends keyof VolatileInteraction>(
   key: K,
-): VolatileInteraction[K] {
+): VolatileInteraction[K];
+export function useVolatileInteraction<K extends keyof VolatileInteraction, T>(
+  key: K,
+  derive: (value: VolatileInteraction[K]) => T,
+): T;
+export function useVolatileInteraction<K extends keyof VolatileInteraction, T>(
+  key: K,
+  derive?: (value: VolatileInteraction[K]) => T,
+) {
   const { actions, volatileRef } = useEditorServices();
 
   const subscribe = useCallback(
@@ -785,8 +806,9 @@ export function useVolatileInteraction<K extends keyof VolatileInteraction>(
   );
 
   const getSnapshot = useCallback(() => {
-    return volatileRef.current.interaction[key];
-  }, [volatileRef, key]);
+    const value = volatileRef.current.interaction[key];
+    return derive ? derive(value) : value;
+  }, [volatileRef, key, derive]);
 
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }

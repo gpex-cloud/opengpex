@@ -301,8 +301,14 @@ export function createFastFacade(deps: FastFacadeDeps) {
       const hoverChanged = vi.hoveredLayerId !== layerId;
       const activeChanged = vi.isHoveringActiveLayer !== isHoveringActive;
       if (!hoverChanged && !activeChanged) return;
-      if (hoverChanged) { vi.hoveredLayerId = layerId; notify('hoveredLayerId'); }
-      if (activeChanged) { vi.isHoveringActiveLayer = isHoveringActive; notify('isHoveringActiveLayer'); }
+      if (hoverChanged) {
+        vi.hoveredLayerId = layerId;
+        notify('hoveredLayerId');
+      }
+      if (activeChanged) {
+        vi.isHoveringActiveLayer = isHoveringActive;
+        notify('isHoveringActiveLayer');
+      }
     },
     subscribeInteraction: (key: string, listener: () => void) => {
       const map = listenersRef.current;

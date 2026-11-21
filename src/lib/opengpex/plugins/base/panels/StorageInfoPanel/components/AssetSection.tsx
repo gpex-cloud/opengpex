@@ -31,7 +31,7 @@ export function AssetSectionHUD({ detached }: AssetSectionHUDProps) {
       <div className="flex items-center gap-2 pl-1 text-rose-500 opacity-80">
         <Trash2 size={10} />
         <span className="text-[9px] font-black uppercase tracking-widest">
-          Detached Trash ({detached.length})
+          Detached — Held for Undo ({detached.length})
         </span>
       </div>
       <div className="bg-rose-500/5 rounded-xl border border-rose-500/20 p-2 text-[9px] space-y-1">
@@ -48,7 +48,7 @@ export function AssetSectionHUD({ detached }: AssetSectionHUDProps) {
         ))}
         {detached.length > 3 && (
           <div className="text-[8px] opacity-60 text-center pt-1 text-rose-500">
-            + {detached.length - 3} more orphans
+            + {detached.length - 3} more entries
           </div>
         )}
       </div>
@@ -89,7 +89,7 @@ export function AssetTreeNode({
         )}
         <Trash2 size={11} className="text-rose-500 " />
         <span>
-          global-detached-cache ({detached.length} orphans)
+          session-pool detached (undo-held {detached.length})
         </span>
       </div>
 

@@ -33,6 +33,17 @@ import type { ImageAssetInput, ImageAssetPayload } from './AssetStore';
 /** How long a birth-protection stamp stays fresh (see `pendingRegistrations`). */
 const PENDING_REGISTRATION_TTL_MS = 20_000;
 
+/**
+ * Age gate for the sweep's display-record orphan reclaim. A display record
+ * that is store-orphaned (unreferenced by the document's frames + history)
+ * is only auto-removed once it has ALSO been sitting in the store for at
+ * least this long — the window covers import-in-flight registrations,
+ * undo/redo transient reference gaps beyond the 2s GC debounce, and any
+ * save-race the debounce cannot observe. Panel-side manual Purge bypasses
+ * the gate (explicit user intent).
+ */
+const DISPLAY_ORPHAN_RECLAIM_AGE_MS = 10 * 60_000;
+
 const DEFAULT_COLOR_IDENTITY: ColorIdentity = {
   gamut: 'srgb',
   trc: 'srgb-trc',
@@ -705,7 +716,11 @@ export class AssetService {
     // Clean up orphaned heavy payloads in IDB (not tracked by pool).
     // `raw:${fileHash}` = encoded source; `dec:${id}` = decoded f16 naked pixels.
     // When a frame is deleted, its frame.assetId disappears from activeIdsInState.
-    assetStore.keys().then(allKeys => {
+    assetStore.keys().then(async (allKeys) => {
+      // Display records orphaned by the SAME protected set the raw:/dec:
+      // scans trust — the third keyspace, closed into the same auto-reclaim
+      // policy (the panel's manual Purge stays as the immediate bypass path).
+      const displayCandidates: string[] = [];
       for (const key of allKeys) {
         if (key.startsWith('raw:')) {
           // Encoded source, keyed by fileHash (one physical file, one copy) and
@@ -728,7 +743,35 @@ export class AssetService {
               console.error(`[AssetService] Failed to remove orphaned dec buffer ${decId}:`, err);
             });
           }
+        } else if (key !== 'asset-transparent-pixel' && !protectedHeavyIds.has(key)) {
+          displayCandidates.push(key);
         }
+      }
+      // Display-record reclaim: the protected set answers "orphaned"; the
+      // record's own persisted timestamp answers "aged" — BOTH must hold
+      // before auto-removal. `force` (panel Force GC / artboard deletion)
+      // bypasses the age gate; a missing timestamp on a legacy record is
+      // never auto-removed (manual Purge handles those). Removing a display
+      // record orphans its raw:/dec: companions, which the scans above (or
+      // the next sweep) reclaim through the same protected set — no extra
+      // cascade code.
+      if (displayCandidates.length === 0) return;
+      const removals: Array<Promise<unknown>> = [];
+      let removed = 0;
+      let bytes = 0;
+      for (const key of displayCandidates) {
+        const record = await assetStore.get(key);
+        if (!record) continue;
+        if (!force && (!record.timestamp || now - record.timestamp < DISPLAY_ORPHAN_RECLAIM_AGE_MS)) continue;
+        bytes += record.blob instanceof Blob ? record.blob.size : 0;
+        removals.push(assetStore.remove(key));
+        this.callbacks.onReleased?.(key);
+        removed++;
+      }
+      await Promise.all(removals);
+      if (removed > 0) {
+        // Non-silent by contract: one aggregated audit line per reclaim batch.
+        console.info(`[AssetService] Display-orphan sweep: removed ${removed} store records (${(bytes / 1024).toFixed(1)} KB)`);
       }
     }).catch(err => {
       console.error('[AssetService] Heavy-payload GC scan failed:', err);

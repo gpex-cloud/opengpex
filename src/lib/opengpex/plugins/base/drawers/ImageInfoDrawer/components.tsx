@@ -21,7 +21,7 @@
 
 import React from "react";
 import { Info } from "lucide-react";
-import { useVolatileInteraction, useEditorServices } from "@opengpex/editor/core/context";
+import { useEditorServices } from "@opengpex/editor/core/context";
 import { getClipBox } from "@opengpex/editor/core/helpers/selection";
 
 import { useImageInfoMetadata, useExportConfig, useClipMode } from "./hooks";
@@ -59,8 +59,9 @@ export function ImageInfoComponent() {
     return () => cancelAnimationFrame(id);
   }, []);
 
-  // Volatile (fast-track) hover state — doesn't trigger slow-track re-renders
-  const hoveredLayerId = useVolatileInteraction('hoveredLayerId');
+  // Hover follow lives in LayerDimensionCard (inside FrameInfoPanel), the sole
+  // consumer — the root deliberately does NOT subscribe to hoveredLayerId so a
+  // LayersDrawer row crossing cannot re-render this whole subtree.
   const { assets, actions } = useEditorServices();
 
   // Reset overriding pixels when switching frames
@@ -81,21 +82,8 @@ export function ImageInfoComponent() {
   const baseW = isClipMode && box ? box.rect.w : activeFrame.canvas.w;
   const baseH = isClipMode && box ? box.rect.h : activeFrame.canvas.h;
 
-   // Layer dimension for the hovered or active layer
-    const targetLayerId = hoveredLayerId || activeFrame.activeLayerId;
-    const targetLayer = targetLayerId ? activeFrame.layers.byId[targetLayerId] : undefined;
-    const layerDim = targetLayer?.visibleShape?.rect || targetLayer?.bounding || { w: 0, h: 0 };
-    const isHighRes = layerDim.w * layerDim.h > baseW * baseH * 1.2;
-    const isUpScaled = layerDim.w * layerDim.h < baseW * baseH * 0.8;
-
-    // Bit depth badge for the hovered/active layer card: the layer's OWN asset
-    // colour identity is the SSOT (same per-asset anchor as frameBitDepth below).
-    // Reading frame-level metadata here would show the document's depth even when
-    // the target layer carries a different one (cross-frame pasted fragments),
-    // which is exactly the mislabel this badge must never produce.
-    const layerBitDepth = targetLayer?.assetId
-      ? assets.get(targetLayer.assetId)?.bitDepth
-      : undefined;
+   // Layer dimension for the hovered or active layer now computes inside
+   // LayerDimensionCard (FrameInfoPanel.tsx) — the only hover consumer.
 
     // Per-document HDR presentation: the badge availability comes from the
     // FILE (gain map / PQ·HLG transfer); the effective state is the frame's
@@ -143,6 +131,7 @@ export function ImageInfoComponent() {
       {/* Info Panels — lightweight, render immediately */}
       <div className="space-y-2">
         <FrameInfoPanel
+          activeFrame={activeFrame}
           fileName={meta.fileName}
           fileFormat={meta.fileFormat}
           fileSize={meta.fileSize}
@@ -150,11 +139,6 @@ export function ImageInfoComponent() {
           isClipMode={isClipMode}
           baseW={baseW}
           baseH={baseH}
-          hoveredLayerId={hoveredLayerId}
-          layerDim={layerDim}
-          isHighRes={isHighRes}
-          isUpScaled={isUpScaled}
-          layerBitDepth={layerBitDepth}
           imageMetadata={meta.imageMetadata}
           hdrAvailable={hdrAvailable}
           hdrEnabled={hdrEnabled}

@@ -140,11 +140,12 @@ type GroupCollapsedRowProps = GroupControlsProps & {
 /**
  * Collapsed group presentation: a full-height row in the layer list, styled
  * like the mask group rows (stacked badge + name + trailing count). The
- * stacked badge is a pure drag handle (grab cursor). Expansion lives on the
- * blank stretch between the group name and the visibility buttons.
+ * stacked badge is the drag handle once the drag integration lands (the grip
+ * is gesture-inert until then). Expansion lives on the blank stretch between
+ * the group name and the visibility buttons.
  */
 export const GroupCollapsedRow = React.memo(
-  ({ dragControls, ...props }: GroupCollapsedRowProps) => {
+  ({ dragControls, ...props }: GroupCollapsedRowProps & { dragControls: DragControls }) => {
     const { group, childCount, isActive, hasActiveChild } = props;
     const {
       toggleCollapse, toggleVisibility, toggleLock, rename,

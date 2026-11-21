@@ -141,21 +141,6 @@ export function LayersPanel({
     }, 150);
   };
 
-  // Reveal the active layer row on an ACTIVE-LAYER CHANGE driven from outside
-  // this panel (the seek path: the animation player selects the target frame's
-  // layer). `nearest` is a no-op when the row is already in view, so regular
-  // in-panel clicks don't jerk the list; a user scroll in progress takes
-  // precedence. Rows carry their layer id as the DOM id (Reorder.Item), and a
-  // collapsed-group child has no row yet — that stays unrevealed (GIF frame
-  // layers, the seek source, are never grouped).
-  const lastActiveScrollRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!activeLayerId || activeLayerId === lastActiveScrollRef.current) return;
-    lastActiveScrollRef.current = activeLayerId;
-    if (isScrolling) return;
-    document.getElementById(activeLayerId)?.scrollIntoView({ block: "nearest" });
-  }, [activeLayerId, isScrolling]);
-
   const hostLayers = useMemo(
     () =>
       activeFrame.layers.order
@@ -179,6 +164,21 @@ export function LayersPanel({
     () => [...topLevelLayers].reverse(),
     [topLevelLayers],
   );
+
+  // Reveal the active layer row on an ACTIVE-LAYER CHANGE driven from outside
+  // this panel (the seek path: the animation player selects the target frame's
+  // layer). `nearest` is a no-op when the row is already in view, so regular
+  // in-panel clicks don't jerk the list; a user scroll in progress takes
+  // precedence. Rows carry their layer id as the DOM id (Reorder.Item), and a
+  // collapsed-group child has no row yet — that stays unrevealed (GIF frame
+  // layers, the seek source, are never grouped).
+  const lastActiveScrollRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activeLayerId || activeLayerId === lastActiveScrollRef.current) return;
+    lastActiveScrollRef.current = activeLayerId;
+    if (isScrolling) return;
+    document.getElementById(activeLayerId)?.scrollIntoView({ block: "nearest" });
+  }, [activeLayerId, isScrolling]);
 
   // Group membership map: groupId → child layers (non-host sub-layers excluded)
   const groupChildrenMap = useMemo(() => {
@@ -244,6 +244,19 @@ export function LayersPanel({
     return map;
   }, [activeFrame.layers]);
 
+  // Suppress the list scrollbar for the window of a group expand/collapse
+  // animation: the browser re-evaluates scrollbar visibility every frame
+  // and intermediate animation frames can cross the overflow threshold,
+  // painting the scrollbar for a single frame. Started synchronously from
+  // the toggle click so the guard is active on the very first committed
+  // frame.
+  const collapseGuardTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const startCollapseGuard = React.useCallback(() => {
+    if (collapseGuardTimerRef.current) clearTimeout(collapseGuardTimerRef.current);
+    setCollapseAnimGuard(true);
+    collapseGuardTimerRef.current = setTimeout(() => setCollapseAnimGuard(false), 220);
+  }, []);
+
   const handleReorder = (newDisplayOrder: Layer[], childrenOverrides?: Map<string, Layer[]>) => {
     // Reconstruct the full host-layer order from the top-level display order.
     // For each group layer, insert its children right after it (preserving
@@ -260,19 +273,6 @@ export function LayersPanel({
     }
     reorder(fullHostOrder);
   };
-
-  // Suppress the list scrollbar for the window of a group expand/collapse
-  // animation: the browser re-evaluates scrollbar visibility every frame
-  // and intermediate animation frames can cross the overflow threshold,
-  // painting the scrollbar for a single frame. Started synchronously from
-  // the toggle click so the guard is active on the very first committed
-  // frame.
-  const collapseGuardTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const startCollapseGuard = React.useCallback(() => {
-    if (collapseGuardTimerRef.current) clearTimeout(collapseGuardTimerRef.current);
-    setCollapseAnimGuard(true);
-    collapseGuardTimerRef.current = setTimeout(() => setCollapseAnimGuard(false), 220);
-  }, []);
 
   // Renders one group-child layer row; shared by the expanded group block.
   const renderChild = (child: Layer) => (
@@ -633,11 +633,10 @@ function GroupReorderItem({
       value={layer}
       dragListener={false}
       dragControls={dragControls}
-      className="list-none"
+      className="list-none [content-visibility:auto] [contain-intrinsic-size:auto_36px]"
     >
       {renderContent(dragControls)}
     </Reorder.Item>
   );
 }
-
 

@@ -33,6 +33,15 @@ interface ActionButtonProps {
   tooltipAlign?: TooltipAlign;
   size?: 'sm' | 'md';
   variant?: 'solid' | 'glass';
+  /**
+   * Skip every decorative layer (ring/glow/gradient overlays, per-property
+   * transitions) and render a single flat button. Intended for dense lists
+   * where many instances mount at once — the layered chrome measurably drops
+   * the frame rate at ~40 instances in a virtualized 190-row panel. The
+   * caller's `className` lands directly on the button element (not on a
+   * wrapper), so sizing classes behave like a plain <button>.
+   */
+  plain?: boolean;
   className?: string; // Additional classes for the outer wrapper
 }
 
@@ -47,9 +56,47 @@ export default function ActionButton({
   tooltipAlign = 'center',
   size = 'md',
   variant = 'solid',
+  plain = false,
   className = "" 
 }: ActionButtonProps) {
   const isGlass = variant === 'glass';
+
+  if (plain) {
+    const plainButton = (
+      <button
+        onClick={onClick}
+        onMouseUp={e => e.currentTarget.blur()}
+        onTouchEnd={e => e.currentTarget.blur()}
+        disabled={disabled || loading}
+        className={`group relative flex items-center justify-center gap-2 rounded-md outline-none cursor-pointer disabled:opacity-30 disabled:cursor-not-allowed ${className}`}
+      >
+        {loading ? (
+          <div className="w-4 h-4 border-2 border-indigo-400 border-t-transparent animate-spin rounded-full"></div>
+        ) : (
+          // Hover scale via transform: compositor-animated, no style recalc
+          // or paint — safe even at hundred-row list scale (unlike the
+          // paint-heavy shadow/background chrome this branch skips).
+          <div className="flex items-center justify-center transition-transform duration-300 group-hover:scale-110">
+            {icon}
+          </div>
+        )}
+        {label && (
+          <span className="text-[10px] font-black uppercase tracking-[0.18em] whitespace-nowrap">
+            {label}
+          </span>
+        )}
+      </button>
+    );
+    if (tooltip) {
+      return (
+        <Tooltip content={tooltip} position={tooltipPosition} align={tooltipAlign}>
+          {plainButton}
+        </Tooltip>
+      );
+    }
+    return plainButton;
+  }
+
 
   const buttonContent = (
     <button 

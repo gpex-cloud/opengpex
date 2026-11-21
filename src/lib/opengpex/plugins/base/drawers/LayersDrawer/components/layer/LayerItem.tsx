@@ -102,7 +102,7 @@ export const LayerItem = React.memo(
     canMergeBackAll,
     mergeFragmentsCount,
   }: LayerItemProps) => {
-    const { actions, assets } = useEditorServices();
+    const { actions, assets, volatileRef } = useEditorServices();
     const {
       visibilityCmd,
       lockCmd,
@@ -147,6 +147,26 @@ export const LayerItem = React.memo(
       }
     }, [isActive]);
 
+    // A row can unmount while hovered (layer deleted, frame switch) — DOM
+    // removal fires no mouseleave, so the volatile hover would stay stale and
+    // the live consumers (canvas outline, info panel) would keep rendering a
+    // layer that no longer exists. Id-guarded so an unmounting row never
+    // clobbers a sibling row's newer hover. Keys are stable per row, so the
+    // captured id always matches this row's own layer.
+    useEffect(() => {
+      const hoveredLayerId = layer.id;
+      return () => {
+        // Reading the volatile ref at cleanup time is the point: the guard
+        // must compare against the hover state as it exists when the row
+        // unmounts, not a mount-time snapshot.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        if (volatileRef.current.interaction.hoveredLayerId === hoveredLayerId) {
+          actions.fast.setHover(null, false);
+        }
+      };
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     // Every row is a Reorder.Item with dragListener off — drags start only
     // from the thumbnail gesture (dragControls). Group children sit inside
     // their group's nested Reorder.Group, top-level layers inside the main
@@ -159,6 +179,13 @@ export const LayerItem = React.memo(
         dragListener={false}
         dragControls={dragControls}
         id={layer.id}
+        // content-visibility: the browser skips style/layout/paint (and
+        // image decode) for rows outside the viewport while they stay in the
+        // DOM — the rendering-pipeline cost measured at ~44% in the profiling
+        // session scales with rendered rows, and this is what removes it
+        // without unmounting anything. contain-intrinsic-size's `auto`
+        // remembers each row's real height after its first render.
+        className="[content-visibility:auto] [contain-intrinsic-size:auto_36px]"
       >
         <motion.div
           layout="position"
@@ -166,11 +193,21 @@ export const LayerItem = React.memo(
           onClick={() => actions.setActiveLayer(activeFrameId, layer.id)}
           onMouseEnter={() => {
             if (isScrolling) return;
-            actions.setInteraction({ hoveredLayerId: layer.id });
+            // Row hover rides the volatile fast lane, mirroring the canvas
+            // hit-test path (useViewportEvents): per-key notify re-renders
+            // only the outline overlay and the info panel, never the whole
+            // editor. Writing the main store here would fan every row
+            // crossing out to every context consumer (with many layers this
+            // alone starves the frame budget).
+            // Second argument mirrors the canvas rule "pointer is over the
+            // active layer"; the row-level flag extends to the host of an
+            // active fragment, a case where no overlay item exists for the
+            // fragment, so the extension is visually inert.
+            actions.fast.setHover(layer.id, isActive);
           }}
           onMouseLeave={() => {
             if (isScrolling) return;
-            actions.setInteraction({ hoveredLayerId: null });
+            actions.fast.setHover(null, false);
           }}
         >
           <div
@@ -190,7 +227,7 @@ export const LayerItem = React.memo(
             )}
           </div>
 
-          <div className="relative z-10 flex-1 min-w-0 flex items-center h-full px-1.5 gap-2 group/content">
+          <div className="relative z-10 flex-1 min-w-0 flex items-center h-full px-1.5 gap-2">
             <div
               onPointerDown={(e) => dragControls.start(e)}
               style={{ touchAction: "none" }}
@@ -198,7 +235,7 @@ export const LayerItem = React.memo(
  ${
    isActive
      ? "border-[var(--border-light)] bg-[var(--bg-panel)] shadow-sm"
-     : "border-[var(--border-subtle)] bg-[var(--bg-stage)]/40 group-hover/layer:border-[var(--border-light)] group-hover/layer group-hover/layer:shadow-sm"
+     : "border-[var(--border-subtle)] bg-[var(--bg-stage)]/40 group-hover/layer:border-[var(--border-light)] group-hover/layer:shadow-sm"
  }
  ${!layer.visible ? "opacity-30 grayscale" : "opacity-100"}
 `}
@@ -357,6 +394,7 @@ export const LayerItem = React.memo(
 
             <div className="flex items-center gap-0 opacity-40 group-hover:opacity-100 transition-opacity">
               <ActionButton
+                plain
                 onClick={(e) => {
                   e.stopPropagation();
                   visibilityCmd?.execute({
@@ -374,9 +412,10 @@ export const LayerItem = React.memo(
                 }
                 variant="glass"
                 size="sm"
-                className={`w-5 h-6 ${layer.visible ? (isActive ? "text-blue-400" : "text-[var(--text-main)] group-hover/layer") : ""}`}
+                className={`w-5 h-6 ${layer.visible ? (isActive ? "text-cyan-400" : "text-[var(--text-main)]") : ""}`}
               />
               <ActionButton
+                plain
                 onClick={(e) => {
                   e.stopPropagation();
                   lockCmd?.execute({

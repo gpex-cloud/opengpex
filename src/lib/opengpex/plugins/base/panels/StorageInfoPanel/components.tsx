@@ -223,22 +223,37 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
     return sum + fSum;
   }, 0);
 
-  const historySize = metrics.history.reduce(
-    (sum, h) => sum + h.exclusiveSize,
-    0,
-  );
-  const orphanSize = metrics.detached.reduce((sum, a) => sum + a.size, 0);
+  // ── Two accounting domains, never mixed ─────────────────────────────────
+  // MEMORY — the session pool (the RAM working set THIS session hydrated):
+  //   active frames' assets + pool entries held for undo (detached). The pool
+  //   total is the single source; its segments partition it (every pool entry
+  //   is active, detached, or the built-in system placeholder). History-only
+  //   bytes are a SUBSET of detached — never an independent segment.
+  // STORAGE — IndexedDB: the store audit's alive/orphan split + serialized
+  //   state shards + downloaded models. The pool is NOT added here (hydrated
+  //   pool assets are copies of persisted records — summing both domains
+  //   would double count the same bytes).
+  const detachedSize = metrics.detached.reduce((sum, a) => sum + a.size, 0);
+  const memoryTotal = metrics.totalBytes;
+  const memoryOtherBytes = Math.max(0, memoryTotal - activeSize - detachedSize);
   const stateSize = metrics.stateBytes || 0;
   const modelSize = modelCache.totalBytes;
-  const storeOrphanBytes = metrics.storeAudit?.orphanBytes ?? 0;
-  const grandTotal = activeSize + historySize + orphanSize + stateSize + modelSize + storeOrphanBytes || 1;
+  const storeAudit = metrics.storeAudit;
+  const storeInUseBytes = storeAudit?.aliveBytes ?? 0;
+  const storeOrphanBytes = storeAudit?.orphanBytes ?? 0;
+  const storeAliveCount = storeAudit ? storeAudit.entries.length - storeAudit.orphanCount : 0;
+  const storeTotal = storeInUseBytes + storeOrphanBytes + stateSize + modelSize;
 
-  const pActive = (activeSize / grandTotal) * 100;
-  const pHistory = (historySize / grandTotal) * 100;
-  const pOrphan = (orphanSize / grandTotal) * 100;
-  const pState = (stateSize / grandTotal) * 100;
-  const pModels = (modelSize / grandTotal) * 100;
-  const pStoreOrphan = (storeOrphanBytes / grandTotal) * 100;
+  const memoryDenominator = memoryTotal || 1;
+  const pMemoryActive = (activeSize / memoryDenominator) * 100;
+  const pMemoryDetached = (detachedSize / memoryDenominator) * 100;
+  const pMemoryOther = (memoryOtherBytes / memoryDenominator) * 100;
+
+  const storeDenominator = storeTotal || 1;
+  const pStoreInUse = (storeInUseBytes / storeDenominator) * 100;
+  const pStoreOrphan = (storeOrphanBytes / storeDenominator) * 100;
+  const pState = (stateSize / storeDenominator) * 100;
+  const pModels = (modelSize / storeDenominator) * 100;
 
   // --- DUAL MODE RENDERING ---
   return (
@@ -280,11 +295,12 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                 </button>
               </div>
 
-              {/* Compact stats grid */}
+              {/* Compact stats grid — the two accounting domains, same split
+                  as the dashboard's bars (memory pool vs IndexedDB store) */}
               <div className="grid grid-cols-2 gap-2 flex-shrink-0">
                 <div className="bg-[var(--bg-stage)] p-2.5 rounded-xl border border-[var(--border-subtle)] dark:border-white/[0.08] ">
                   <div className="text-[7px] font-black uppercase tracking-widest text-[var(--text-muted)] mb-1">
-                    POOL ASSETS (SESSION)
+                    MEMORY
                   </div>
                   <div className="text-sm font-mono text-[var(--text-main)] font-bold tabular-nums">
                     {formatBytes(metrics.totalBytes)}
@@ -292,11 +308,16 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                 </div>
                 <div className="bg-[var(--bg-stage)] p-2.5 rounded-xl border border-[var(--border-subtle)] dark:border-white/[0.08] ">
                   <div className="text-[7px] font-black uppercase tracking-widest text-[var(--text-muted)] mb-1">
-                    DATABASE STATE
+                    STORAGE
                   </div>
                   <div className="text-sm font-mono text-[var(--text-main)] font-bold tabular-nums">
-                    {formatBytes(metrics.stateBytes)}
+                    {formatBytes((metrics.storeAudit?.totalBytes ?? 0) + metrics.stateBytes)}
                   </div>
+                  {metrics.storeAudit && metrics.storeAudit.orphanCount > 0 && (
+                    <div className="text-[8px] font-mono text-rose-500 mt-0.5">
+                      orphans {metrics.storeAudit.orphanCount} · {formatBytes(metrics.storeAudit.orphanBytes)}
+                    </div>
+                  )}
                 </div>
                 {modelCache.totalBytes > 0 && (
                   <div className="bg-[var(--bg-stage)] p-2.5 rounded-xl border border-purple-200 dark:border-purple-500/20 col-span-2">
@@ -337,88 +358,101 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
             <div className="flex-1 min-h-0 flex font-sans text-[var(--text-main)] select-none">
               {/* Left Column - Analytics Dashboard */}
               <div className="w-[380px] border-r border-[var(--border-subtle)] dark:border-r-white/[0.06] p-4 flex flex-col gap-3 overflow-y-auto bg-[var(--bg-stage)] custom-scrollbar">
-                {/* Classification Segment Bar */}
-                <div className="space-y-3">
+                {/* MEMORY DOMAIN — session pool (RAM working set) */}
+                <div className="space-y-2">
                   <div className="text-[10px] font-black uppercase tracking-wider text-[var(--text-muted)] flex items-center justify-between">
-                    <span>Storage Allocation</span>
+                    <span>Memory · Session Pool</span>
                     <span className="font-mono text-[var(--text-main)] font-bold">
-                      {formatBytes(metrics.totalBytes + metrics.stateBytes)} / {formatBytes(grandTotal)}
+                      {formatBytes(memoryTotal)}
                     </span>
                   </div>
-
-                  {/* Segment Bar Container */}
                   <div className="h-3 w-full bg-[var(--bg-stage)] rounded-full overflow-hidden flex ring-1 ring-inset ring-black/5 ">
                     <div
-                      style={{ width: `${pActive}%` }}
+                      style={{ width: `${pMemoryActive}%` }}
                       className="h-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-all duration-500"
                       title="Active Frame Assets"
                     />
                     <div
-                      style={{ width: `${pHistory}%` }}
-                      className="h-full bg-gradient-to-r from-amber-500 to-orange-500 transition-all duration-500"
-                      title="History Snapshots"
-                    />
-                    <div
-                      style={{ width: `${pOrphan}%` }}
+                      style={{ width: `${pMemoryDetached}%` }}
                       className="h-full bg-gradient-to-r from-rose-500 to-red-500 transition-all duration-500"
-                      title="Detached Orphans"
+                      title="Detached — Held for Undo"
                     />
-                    <div
-                      style={{ width: `${pState}%` }}
-                      className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-500"
-                      title="Database State Size"
-                    />
-                    <div
-                      style={{ width: `${pStoreOrphan}%` }}
-                      className="h-full bg-gradient-to-r from-red-700 to-rose-700 transition-all duration-500"
-                      title="Store Orphans (IndexedDB)"
-                    />
-                    <div
-                      style={{ width: `${pModels}%` }}
-                      className="h-full bg-gradient-to-r from-purple-500 to-fuchsia-500 transition-all duration-500"
-                      title="Downloaded Models (Cache Storage)"
-                    />
+                    {memoryOtherBytes > 0 && (
+                      <div
+                        style={{ width: `${pMemoryOther}%` }}
+                        className="h-full bg-gradient-to-r from-slate-400 to-slate-500 transition-all duration-500"
+                        title="System Placeholder & Other Pool Entries"
+                      />
+                    )}
                   </div>
-
-                  {/* Legends Grid */}
-                  <div className="grid grid-cols-2 gap-2.5 pt-1 text-[9px]">
+                  <div className="grid grid-cols-2 gap-2.5 text-[9px]">
                     <div className="flex flex-col gap-1 p-2 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] dark:border-white/[0.08] ">
                       <div className="flex items-center gap-1.5 text-[var(--text-muted)] ">
                         <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
                         <span>Active Frames</span>
                       </div>
                       <span className="font-mono text-[var(--text-main)] font-bold pl-3">
-                        {formatBytes(activeSize)} ({pActive.toFixed(1)}%)
-                      </span>
-                    </div>
-
-                    <div className="flex flex-col gap-1 p-2 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] dark:border-white/[0.08] ">
-                      <div className="flex items-center gap-1.5 text-[var(--text-muted)] ">
-                        <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                        <span>Undo Backlog</span>
-                      </div>
-                      <span className="font-mono text-[var(--text-main)] font-bold pl-3">
-                        {formatBytes(historySize)} ({pHistory.toFixed(1)}%)
+                        {formatBytes(activeSize)} ({pMemoryActive.toFixed(1)}%)
                       </span>
                     </div>
 
                     <div className="flex flex-col gap-1 p-2 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] dark:border-white/[0.08] ">
                       <div className="flex items-center gap-1.5 text-[var(--text-muted)] ">
                         <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
-                        <span>Detached Trash</span>
+                        <span>Detached (Undo-Held)</span>
                       </div>
                       <span className="font-mono text-[var(--text-main)] font-bold pl-3">
-                        {formatBytes(orphanSize)} ({pOrphan.toFixed(1)}%)
+                        {formatBytes(detachedSize)} ({pMemoryDetached.toFixed(1)}%)
                       </span>
                     </div>
+                  </div>
+                </div>
 
+                {/* STORAGE DOMAIN — IndexedDB persistence */}
+                <div className="space-y-2">
+                  <div className="text-[10px] font-black uppercase tracking-wider text-[var(--text-muted)] flex items-center justify-between">
+                    <span>Storage · IndexedDB</span>
+                    <span className="font-mono text-[var(--text-main)] font-bold">
+                      {formatBytes(storeTotal)}
+                    </span>
+                  </div>
+                  <div className="h-3 w-full bg-[var(--bg-stage)] rounded-full overflow-hidden flex ring-1 ring-inset ring-black/5 ">
+                    <div
+                      style={{ width: `${pStoreInUse}%` }}
+                      className="h-full bg-gradient-to-r from-emerald-500 to-teal-500 transition-all duration-500"
+                      title="Store In-Use (referenced by frames + history)"
+                    />
+                    <div
+                      style={{ width: `${pStoreOrphan}%` }}
+                      className="h-full bg-gradient-to-r from-red-700 to-rose-700 transition-all duration-500"
+                      title="Store Orphans (auto-reclaimed after the age gate; Purge bypasses)"
+                    />
+                    <div
+                      style={{ width: `${pState}%` }}
+                      className="h-full bg-gradient-to-r from-sky-500 to-cyan-500 transition-all duration-500"
+                      title="Database State Shards"
+                    />
+                    {modelSize > 0 && (
+                      <div
+                        style={{ width: `${pModels}%` }}
+                        className="h-full bg-gradient-to-r from-purple-500 to-fuchsia-500 transition-all duration-500"
+                        title="Downloaded Models (Cache Storage)"
+                      />
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2.5 text-[9px]">
                     <div className="flex flex-col gap-1 p-2 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] dark:border-white/[0.08] ">
                       <div className="flex items-center gap-1.5 text-[var(--text-muted)] ">
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                        <span>DB State Shards</span>
+                        <span>Store In-Use</span>
+                        {storeAudit && (
+                          <span className="font-mono text-[8px] text-[var(--text-muted)] ml-auto">
+                            {storeAliveCount} entries
+                          </span>
+                        )}
                       </div>
                       <span className="font-mono text-[var(--text-main)] font-bold pl-3">
-                        {formatBytes(stateSize)} ({pState.toFixed(1)}%)
+                        {formatBytes(storeInUseBytes)} ({pStoreInUse.toFixed(1)}%)
                       </span>
                     </div>
 
@@ -426,14 +460,24 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                       <div className="flex items-center gap-1.5 text-[var(--text-muted)] ">
                         <span className="w-1.5 h-1.5 rounded-full bg-red-700" />
                         <span>Store Orphans</span>
-                        {metrics.storeAudit && metrics.storeAudit.orphanCount > 0 && (
+                        {storeAudit && storeAudit.orphanCount > 0 && (
                           <span className="font-mono text-[8px] text-rose-500 ml-auto">
-                            {metrics.storeAudit.orphanCount} entries
+                            {storeAudit.orphanCount} entries
                           </span>
                         )}
                       </div>
                       <span className="font-mono text-[var(--text-main)] font-bold pl-3">
                         {formatBytes(storeOrphanBytes)} ({pStoreOrphan.toFixed(1)}%)
+                      </span>
+                    </div>
+
+                    <div className="flex flex-col gap-1 p-2 rounded-xl bg-[var(--bg-stage)] border border-[var(--border-subtle)] dark:border-white/[0.08] ">
+                      <div className="flex items-center gap-1.5 text-[var(--text-muted)] ">
+                        <span className="w-1.5 h-1.5 rounded-full bg-sky-500" />
+                        <span>DB State Shards</span>
+                      </div>
+                      <span className="font-mono text-[var(--text-main)] font-bold pl-3">
+                        {formatBytes(stateSize)} ({pState.toFixed(1)}%)
                       </span>
                     </div>
 
