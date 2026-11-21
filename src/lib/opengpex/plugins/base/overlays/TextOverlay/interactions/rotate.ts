@@ -17,113 +17,35 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { InteractionHandler } from '@opengpex/editor/core/types';
-import { InteractionTransaction } from '@opengpex/editor/stage/interaction/Transaction';
-import { ROTATE_CURSOR } from '@opengpex/editor/icons';
-import { ACTIVE_CRAFT_KEY, resolveGizmoTargetLayer } from './shared';
-
-// ─── TextRotateHandler ──────────────────────────────────────────────────────────
-
 /**
- * TextRotateHandler: drag the rotation handle to freely rotate the text layer.
+ * TextRotateHandler (priority 165) — drag the text gizmo's rotation handle to
+ * rotate the text layer. A THIN DECLARATION over the shared
+ * `createGizmoRotateHandler`: the gesture skeleton (atan2 delta, Shift 15°
+ * snap, layer-channel write, delta-chip feedback) lives there once — the
+ * retired hand-rolled copy is byte-for-byte its specialization with these
+ * three domain facts:
+ *   - scope: the text gizmo's rotation dot;
+ *   - admission: text craft mode + the gizmo's bound layer (must be a text
+ *     layer — resolveGizmoTargetLayer enforces the payload kind);
+ *   - plain transaction (text layers composite without the incre-comp
+ *     channel, unlike marker/pen).
  *
  * Priority 165 (> TextResizeHandler 160 > TextPlaceHandler 150): a pointerdown
- * on the rotate handle must win over resize / place. Gated to text craft
- * pre-edit state; the handle is a DOM dot rendered by LayerOverlay's text
- * gizmo carrying `data-gizmo-rotate`.
- *
- * Math: identical to MarkerRotateHandler — atan2 delta → rotation.
- * Shift → snap to nearest 15°.
- *
- * Non-silent: the rotation lands as its own undoable history step.
+ * on the rotate handle must win over resize / place.
  */
-export const createTextRotateHandler = (): InteractionHandler => {
-  let rotateLayerId: string | null = null;
-  let startAngleRad = 0;
-  let startRotation = 0;
-  let layerCx = 0;
-  let layerCy = 0;
-  let tx: InteractionTransaction | null = null;
 
-  return {
+import type { InteractionEvent, InteractionHandler, Layer } from '@opengpex/editor/core/types';
+import { createGizmoRotateHandler } from '@opengpex/editor/stage/interaction/handlers/GizmoRotateHandler';
+import { ACTIVE_CRAFT_KEY, resolveGizmoTargetLayer } from './shared';
+
+export const createTextRotateHandler = (): InteractionHandler =>
+  createGizmoRotateHandler({
     id: 'text-rotate',
     priority: 165,
-
-    test: (e) => {
-      if (e.state.interaction.interactionMode !== 'craft') return false;
-      if (e.state.interaction.signals[ACTIVE_CRAFT_KEY] !== 'text') return false;
-
-      const target = e.nativeEvent.target as HTMLElement;
-      if (!target.closest('[data-text-gizmo] [data-gizmo-rotate]')) return false;
-
-      const layer = resolveGizmoTargetLayer(e);
-      if (!layer) return false;
-
-      rotateLayerId = layer.id;
-      return true;
+    scopeSelector: '[data-text-gizmo] [data-gizmo-rotate]',
+    admit: (e: InteractionEvent): Layer | null => {
+      if (e.state.interaction.interactionMode !== 'craft') return null;
+      if (e.state.interaction.signals[ACTIVE_CRAFT_KEY] !== 'text') return null;
+      return resolveGizmoTargetLayer(e);
     },
-
-    onStart: (e) => {
-      if (!rotateLayerId) return;
-      const frame = e.activeFrame;
-      const layer = frame.layers.byId[rotateLayerId];
-      if (!layer) return;
-
-      layerCx = layer.cx;
-      layerCy = layer.cy;
-      startRotation = layer.rotation;
-      startAngleRad = Math.atan2(
-        e.point.world.y - layerCy,
-        e.point.world.x - layerCx,
-      );
-
-      // Non-silent: own undoable history step (see TextMoveHandler).
-      tx = new InteractionTransaction(e);
-      tx.begin();
-      // Declare the gesture feedback for the system-level delta label (the
-      // widget shows the target's live absolute angle). Cleared by the
-      // transaction's commit/abort.
-      tx.declareFeedback({ kind: 'rotate', target: 'layer', targetId: rotateLayerId, origin: { x: layerCx, y: layerCy } });
-      e.actions.fast.cursor.notifyDragging(ROTATE_CURSOR);
-    },
-
-    onMove: (e) => {
-      if (!rotateLayerId || !tx) return;
-
-      const currentAngleRad = Math.atan2(
-        e.point.world.y - layerCy,
-        e.point.world.x - layerCx,
-      );
-
-      const deltaDeg = ((currentAngleRad - startAngleRad) * 180) / Math.PI;
-      let newRotation = e.geometry.transform.normalizeAngle(startRotation + deltaDeg);
-
-      if ((e.nativeEvent as MouseEvent).shiftKey) {
-        newRotation = e.geometry.transform.normalizeAngle(
-          e.geometry.transform.snapAngle(startRotation + deltaDeg, 15),
-        );
-      }
-
-      tx.update({ rotation: newRotation }, 'layer', rotateLayerId);
-    },
-
-    onEnd: (e) => {
-      if (tx) {
-        tx.commit();
-        tx = null;
-      }
-      rotateLayerId = null;
-      e.actions.fast.cursor.notifyDragging(null);
-      e.actions.fast.cursor.notifyHover(null);
-    },
-
-    onCancel: (e) => {
-      if (tx) {
-        tx.abort();
-        tx = null;
-      }
-      rotateLayerId = null;
-      e.actions.fast.cursor.notifyDragging(null);
-    },
-  };
-};
+  });

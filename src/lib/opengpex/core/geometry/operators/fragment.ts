@@ -50,7 +50,6 @@
 
 import { Matrix3x3 } from '../matrix';
 import { getOrientationMatrix } from './transform';
-import { snapRotationRad } from './rotator';
 import { solveAffineFromTriangles, transformPolygonAffine, layerLocalToFrameLocal } from './polygon';
 import { point2dToLocalPolygon } from './point2d';
 import type {
@@ -60,7 +59,6 @@ import type {
   Layer,
   LocalPolygon,
   Point2D,
-  TransformParams,
 } from '@opengpex/editor/core/types';
 
 // The pose/gesture vocabulary is DECLARED beside the GeometryService contract
@@ -106,40 +104,15 @@ export function getFragmentContentCorners(params: FragmentPose): [Point2D, Point
 }
 
 /**
- * Rotation gesture: the content box spins about ITS OWN center by the
- * pointer's angle delta around that center. The center therefore stays
- * fixed and only (cx, cy) compensates: the visible offset (vx, vy) is
- * expressed in the ROTATING local frame, so the bounding anchor must chase
- * the rotated offset.
- *
- * `shift` snaps to the 15° grid. The grid anchor is `absoluteBaseDeg` —
- * the fragment's TRUE orientation at gesture start (which the layer's
- * `rotation` field alone may not express: a bake moves orientation into
- * pixels and zeroes the field, so the caller supplies the session's
- * accumulated orientation here). Snapping the raw delta instead would
- * strand off-grid accumulated angles (a rotated fragment could never
- * return to upright). The RETURNED rotation is still in layer-field
- * space (startRotationDeg + snapped delta); only the GRID is absolute.
+ * NOTE (20261122): `computeFragmentRotation` and the exported pose
+ * re-anchor both retired — the rotate gesture's delta solve AND its
+ * re-anchor arithmetic live INLINE in the fragment transform handler, with
+ * the selection transform handler carrying the twin inline of the delta
+ * half. The two are pinned in lockstep by the gizmo-rotation-sync guard
+ * test. Core keeps only the passive pose probes below (content center,
+ * corners, bake ROI) — it knows nothing about pointers, snap bases or
+ * gesture commits.
  */
-export function computeFragmentRotation(
-  start: FragmentPose,
-  pointerWorld: Point2D,
-  startRotationDeg: number,
-  startPointerAngleRad: number,
-  opts?: { shift?: boolean; absoluteBaseDeg?: number },
-): TransformParams {
-  const center = getFragmentContentCenter(start);
-  const angle = Math.atan2(pointerWorld.y - center.y, pointerWorld.x - center.x);
-  let deltaRad = angle - startPointerAngleRad;
-  if (opts?.shift) {
-    deltaRad = snapRotationRad(deltaRad, ((opts.absoluteBaseDeg ?? startRotationDeg) * Math.PI) / 180);
-  }
-  const rotation = startRotationDeg + (deltaRad * 180) / Math.PI;
-
-  const OS = orientationWithScale({ ...start, rotation });
-  const visOff = OS.apply(start.visibleOffset);
-  return { cx: center.x - visOff.x, cy: center.y - visOff.y, rotation };
-}
 
  /**
  * World-space AABB of the transformed content box, expanded by `pad` on

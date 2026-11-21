@@ -334,9 +334,20 @@ function needsOrientationPath(
  * Every resize/move/create branch must emit integer-aligned rects (the pixel
  * editor requires it even when canvas clamping is off, e.g. Re-Canvas). Two
  * strategies:
- *   - `alignToLayerId` set → snap to that layer's physical pixel grid (handles
- *     the layer's own rotation/flip via alignToPhysicalPixels);
+ *   - `alignToLayerId` set AND the target is an IMAGE layer → snap to that
+ *     layer's physical pixel grid (handles the layer's own rotation/flip via
+ *     alignToPhysicalPixels);
  *   - otherwise → round to the integer canvas grid.
+ *
+ * The image-kind gate is NOT optional bookkeeping: alignToPhysicalPixels
+ * silently no-ops for every non-image kind (vector stroke, text, color,
+ * group), which leaked RAW FRACTIONAL rects past this "single exit point" —
+ * visible as a selection whose gizmo box strands mid-texel while the ants
+ * staircase sits snapped. For those kinds the canvas integer grid IS the
+ * right lattice in frame-local space (a vector stroke layer's committed texel
+ * bounds are canvas integers by construction), so they take the same canvas
+ * rounding as the no-target branch. The invariant is unconditional: EVERY
+ * rect leaving the factory is integer-aligned, whatever the active layer.
  *
  * Consolidating the three previously-duplicated tails here is the "align as a
  * unified post-process" pass. It is a pure
@@ -348,7 +359,10 @@ function finalizeRectAlignment(
   alignToLayerId?: string
 ): LocalRect {
   if (alignToLayerId) {
-    return InteractionMath.alignToPhysicalPixels(e, rect, alignToLayerId);
+    const target = e.activeFrame.layers.byId[alignToLayerId];
+    if (target?.type === 'image') {
+      return InteractionMath.alignToPhysicalPixels(e, rect, alignToLayerId);
+    }
   }
   return {
     ...rect,

@@ -27,7 +27,7 @@ import {squareizeMarker, type CornerHandle} from './marker/squareize';
 import {LayerFactory} from '@opengpex/editor/core/layer';
 import {InteractionTransaction} from '@opengpex/editor/stage/interaction/Transaction';
 import {createTransformHandler, ResizeHandle} from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
-import {ROTATE_CURSOR} from '@opengpex/editor/icons';
+import {createGizmoRotateHandler} from '@opengpex/editor/stage/interaction/handlers/GizmoRotateHandler';
 import {CraftDrawerAPI} from '../../drawers/CraftDrawer/protocols';
 import type { CraftDrawerConfig } from '../../drawers/CraftDrawer/protocols';
 import {MARKER_REGISTRY} from './marker/registry';
@@ -533,123 +533,33 @@ export const createMarkerSquareizeHandler = (): InteractionHandler => {
 // ─── MarkerRotateHandler ────────────────────────────────────────────────────────
 
 /**
- * MarkerRotateHandler: drag the rotation handle to freely rotate the active marker.
+ * MarkerRotateHandler (priority 165) — drag the marker gizmo's rotation
+ * handle to rotate the active marker. A THIN DECLARATION over the shared
+ * `createGizmoRotateHandler` (the retired hand-rolled copy's specialization):
+ *   - scope: the marker gizmo's rotation dot;
+ *   - admission: marker craft mode + the ACTIVE layer, gated to the marker
+ *     payload kind (vector layer carrying markerData);
+ *   - incremental compositing declared (marker/pen precedent).
  *
  * Priority 165 (> MarkerResizeHandler 160 > MarkerMoveHandler 155): a
- * pointerdown on the rotate handle must win over resize / move. Gated to
- * craft mode + activeCraft==='marker'. The handle is a DOM dot rendered
- * inside the marker HUD's `data-marker-gizmo` scope (see also the resize
- * handler); `test` only fires when it is hit.
- *
- * Math:
- *   startAngle = atan2(pointer.world − layer center)
- *   onMove: delta = currentAngle − startAngle → newRotation = startRotation + delta
- *   Shift → snap to nearest 15° (industry standard: 0/15/30/45/60/75/90…)
- *
- * No sin/cos orientation matrix construction here — only atan2 for angle
- * measurement (pure arithmetic).
- *
- * Non-silent → a single undoable checkpoint per rotate gesture.
+ * pointerdown on the rotate handle must win over resize / move.
  */
-export const createMarkerRotateHandler = (): InteractionHandler => {
-  let rotateLayerId: string | null = null;
-  let startAngleRad = 0;  // atan2 at gesture start
-  let startRotation = 0;  // layer.rotation at gesture start
-  let tx: InteractionTransaction | null = null;
-  let layerCx = 0;
-  let layerCy = 0;
-
-  return {
+export const createMarkerRotateHandler = (): InteractionHandler =>
+  createGizmoRotateHandler({
     id: 'marker-rotate',
     priority: 165,
-
-    test: (e) => {
-      if (e.state.interaction.interactionMode !== 'craft') return false;
-      if (e.state.interaction.signals[ACTIVE_CRAFT_KEY] !== 'marker') return false;
-
-      const target = e.nativeEvent.target as HTMLElement;
-      const rotateEl = target.closest('[data-marker-gizmo] [data-gizmo-rotate]') as HTMLElement | null;
-      if (!rotateEl) return false;
-
-      // Bind to the currently active marker layer.
+    scopeSelector: '[data-marker-gizmo] [data-gizmo-rotate]',
+    admit: (e) => {
+      if (e.state.interaction.interactionMode !== 'craft') return null;
+      if (e.state.interaction.signals[ACTIVE_CRAFT_KEY] !== 'marker') return null;
       const frame = e.activeFrame;
       const activeId = frame.activeLayerId;
       const layer = activeId ? frame.layers.byId[activeId] : null;
-      if (!layer || layer.type !== 'vector' || !layer.markerData) return false;
-
-      rotateLayerId = layer.id;
-      return true;
+      if (!layer || layer.type !== 'vector' || !layer.markerData) return null;
+      return layer;
     },
-
-    onStart: (e) => {
-      if (!rotateLayerId) return;
-      const frame = e.activeFrame;
-      const layer = frame.layers.byId[rotateLayerId];
-      if (!layer) return;
-
-      layerCx = layer.cx;
-      layerCy = layer.cy;
-      startRotation = layer.rotation;
-      startAngleRad = Math.atan2(
-        e.point.world.y - layerCy,
-        e.point.world.x - layerCx,
-      );
-
-      tx = new InteractionTransaction(e, { useIncreComp: true });
-      tx.begin(false);
-      // Declare the gesture feedback for the marker HUD's delta chip: the
-      // readout is the layer's live rotation, resolved from the merged
-      // frame via targetId. Cleared by commit/abort.
-      tx.declareFeedback({
-        kind: 'rotate',
-        target: 'layer',
-        targetId: rotateLayerId,
-        origin: { x: layerCx, y: layerCy },
-      });
-      e.actions.fast.cursor.notifyDragging(ROTATE_CURSOR);
-    },
-
-    onMove: (e) => {
-      if (!rotateLayerId || !tx) return;
-
-      const currentAngleRad = Math.atan2(
-        e.point.world.y - layerCy,
-        e.point.world.x - layerCx,
-      );
-
-      const deltaDeg = ((currentAngleRad - startAngleRad) * 180) / Math.PI;
-      let newRotation = e.geometry.transform.normalizeAngle(startRotation + deltaDeg);
-
-      // Shift → snap to nearest 15°.
-      if ((e.nativeEvent as MouseEvent).shiftKey) {
-        newRotation = e.geometry.transform.normalizeAngle(
-          e.geometry.transform.snapAngle(startRotation + deltaDeg, 15),
-        );
-      }
-
-      tx.update({ rotation: newRotation }, 'layer', rotateLayerId);
-    },
-
-    onEnd: (e) => {
-      if (tx) {
-        tx.commit();
-        tx = null;
-      }
-      rotateLayerId = null;
-      e.actions.fast.cursor.notifyDragging(null);
-      e.actions.fast.cursor.notifyHover(null);
-    },
-
-    onCancel: (e) => {
-      if (tx) {
-        tx.abort();
-        tx = null;
-      }
-      rotateLayerId = null;
-      e.actions.fast.cursor.notifyDragging(null);
-    },
-  };
-};
+    useIncreComp: true,
+  });
 
 // ─── MarkerDrawHandler ─────────────────────────────────────────────────────────
 

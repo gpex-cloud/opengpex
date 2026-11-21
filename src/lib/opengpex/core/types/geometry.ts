@@ -336,13 +336,6 @@ export interface GeometryService {
      * selection has no pristine geometry to derive the ROI from).
      */
     fragmentBakeRoi: (params: FragmentPose, pad?: number) => { x: number; y: number; w: number; h: number };
-    computeFragmentRotation: (
-      start: FragmentPose,
-      pointerWorld: Point2D,
-      startRotationDeg: number,
-      startPointerAngleRad: number,
-      opts?: { shift?: boolean; absoluteBaseDeg?: number },
-    ) => TransformParams;
     /**
      * Carries the selection polygon by the same map that moved the peeled
      * fragment's content box from `start` to `end` (rotation, scaling along
@@ -456,6 +449,17 @@ export interface GeometryService {
     snapPoint: (pos: Point2D) => Point2D;
     /** Lattice placement operator (pure math): LocalRect in/out; the WHEN-to-align decision lives at layers.snap */
     snapLocalRectToLatticeRounded: (rect: LocalRect, opts?: { snapDimension?: boolean }) => LocalRect;
+    /**
+     * The POLYGON sibling of snapLocalRectToLatticeRounded (same Rounded
+     * placement strategy): rounds every ring vertex of a LocalPolygon to the
+     * integer document lattice and recomputes the bounding rect (flags
+     * preserved). The commit-time closing move of an UPRIGHT selection
+     * scale/rotate gesture — the gizmo transform path bypasses the
+     * TransformHandler factory that enforces the pixel-grid invariant on
+     * every other selection path, so it must snap its own output. Rotated
+     * polygon vertices are analytic precision and must not be passed here.
+     */
+    snapPolygonToLatticeRounded: (poly: LocalPolygon) => LocalPolygon;
     /** World-basis lattice snap (the pixel-window single source): edges expand outward onto the document texel lattice (phase depends on canvas parity). Engine and layer services consume this — never the operator module. */
     snapWorldRectToLatticeExpanded: (rect: WorldRect, canvasDim: Dimensions) => WorldRect;
     // snapRectToPixel retired: layer/element PLACEMENT alignment lives on

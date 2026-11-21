@@ -18,8 +18,9 @@
  */
 
 import {Matrix3x3} from '../matrix';
-import {CameraState, Dimensions, Frame, Layer, WorldPoint, Rect, asWorldPoint, Point2D, WorldRect, asLocalRect, asWorldRect, LocalRect} from '@opengpex/editor/core/types';
+import {CameraState, Dimensions, Frame, Layer, WorldPoint, Rect, asWorldPoint, Point2D, WorldRect, asLocalRect, asWorldRect, LocalRect, LocalPolygon, asLocalPolygon, asLocalPoint} from '@opengpex/editor/core/types';
 import {getLayerWorldMatrix} from './transform';
+import {computePolygonBounds} from './polygon';
 import {} from './space';
 
 /**
@@ -805,6 +806,38 @@ export function snapWorldRectToLatticeExpanded(rect: WorldRect, canvas: Dimensio
     w: local.w,
     h: local.h,
   });
+}
+
+/**
+ * snapPolygonToLatticeRounded — the POLYGON sibling of
+ * `snapLocalRectToLatticeRounded` (same PLACEMENT family, same
+ * round-to-nearest strategy — hence the shared Rounded suffix): rounds every
+ * ring vertex to the integer document lattice and recomputes the bounding
+ * rect. A polygon has no single top-left corner, so "round the origin, let
+ * the caller decide the dimension" degenerates to "round every vertex" —
+ * each vertex IS an origin decision, and the bounds follow.
+ *
+ * The commit-time closing move of the selection-transform gesture: an
+ * UPRIGHT selection scaled through the gizmo handles must land on the pixel
+ * grid exactly like every other selection-creation path (the retired rect
+ * resize path enforced this via TransformHandler's finalizeRectAlignment —
+ * the gizmo path bypasses that factory, so it must carry the invariant
+ * itself). Round-to-nearest, never outward: the user's gesture position
+ * decides the size, a fractional 6.45px selection becomes 6px, not 7.
+ *
+ * Caller decides WHEN to snap — this operator is pure math and knows nothing
+ * about orientation or timing; a rotated polygon's floating vertices are
+ * analytic precision (the same regime as pen/marker geometry) and must NOT
+ * be passed here. Input/output carry the LocalPolygon brand: passing a
+ * world-basis polygon is a compile-time error — the same coordinate-space
+ * provenance contract the rect lattice operators enforce.
+ */
+export function snapPolygonToLatticeRounded(poly: LocalPolygon): LocalPolygon {
+  const newRings = poly.rings.map(ring =>
+    ring.map(p => asLocalPoint({ x: Math.round(p.x), y: Math.round(p.y) }))
+  );
+  const newRect = asLocalRect(computePolygonBounds(newRings));
+  return asLocalPolygon(newRings, newRect, poly);
 }
 
 // ─── Canvas Viewport Pixel-Snap ──────────────────────────────────────────────

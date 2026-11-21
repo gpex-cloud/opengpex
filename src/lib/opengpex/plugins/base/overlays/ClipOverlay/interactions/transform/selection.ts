@@ -60,6 +60,28 @@ type TransformMode = ScaleMode | 'rotate';
 /** Minimum bbox dimension in canvas px after scaling (prevents collapse). */
 const MIN_DIMENSION_PX = 1;
 
+/**
+ * Tolerance for treating a selection's accumulated orientation as upright.
+ * The record is float arithmetic (rotatePolygon accumulates radians→degrees),
+ * so an exact 15°-snap or a full 360° turn can land at 359.999…°; anything
+ * within float noise of a 360° multiple IS the upright pose.
+ */
+const ORIENTATION_EPSILON_DEG = 1e-6;
+
+/**
+ * Is this orientation record the upright pose (0° mod 360)? Only upright
+ * selections snap to the document lattice at commit: canvas-axes geometry
+ * is bitmap-sampled (the rasterizer and the marching-ants staircase quantize
+ * to the texel grid), so fractional vertices would leave the gizmo box
+ * stranded mid-texel while the ants sit on the grid. A rotated polygon's
+ * vertices are analytic precision (the same regime as pen/marker geometry)
+ * and must keep their sub-pixel values.
+ */
+function isUprightOrientationDeg(deg: number | undefined): boolean {
+  const norm = (((deg ?? 0) % 360) + 360) % 360;
+  return norm < ORIENTATION_EPSILON_DEG || norm > 360 - ORIENTATION_EPSILON_DEG;
+}
+
 export const createSelectionTransformHandler = (): InteractionHandler => {
   let mode: TransformMode | null = null;
   let startPoly: LocalPolygon | null = null;
@@ -92,6 +114,11 @@ export const createSelectionTransformHandler = (): InteractionHandler => {
   // is already scheduled; at most one store write per display frame.
   let pendingPoly: LocalPolygon | null = null;
   let rafId: number | null = null;
+  // The LAST polygon the gesture computed, regardless of whether its rAF
+  // write already fired. onEnd needs it because the coalescer clears
+  // pendingPoly once flushed — without this record a final write that
+  // landed mid-gesture could never receive the commit-time lattice snap.
+  let lastPoly: LocalPolygon | null = null;
 
   const flushPending = () => {
     if (rafId !== null) {
@@ -105,6 +132,7 @@ export const createSelectionTransformHandler = (): InteractionHandler => {
   };
 
   const scheduleWrite = (poly: LocalPolygon) => {
+    lastPoly = poly;
     pendingPoly = poly;
     if (rafId !== null) return;
     rafId = requestAnimationFrame(() => {
@@ -243,9 +271,29 @@ export const createSelectionTransformHandler = (): InteractionHandler => {
     },
 
     onEnd: (e) => {
-      // Flush any rAF-coalesced write before committing so the committed
-      // state includes the final pointer position.
-      flushPending();
+      // Commit-time lattice alignment: an upright selection's final write is
+      // snapped to the integer document grid before it lands, restoring the
+      // pixel-grid invariant the retired rect-resize path used to enforce
+      // through TransformHandler's finalizeRectAlignment. Mid-gesture writes
+      // stay fractional (the ants track the pointer continuously); only the
+      // committed geometry quantizes, so the gizmo box, the ants and the
+      // texel grid agree at rest. Rotated selections skip the snap — their
+      // floating vertices are analytic precision. The snapped write always
+      // goes through explicitly (never via the coalescer): a final rAF flush
+      // may already have landed a fractional write before pointerup, and the
+      // committed state must not keep it.
+      if (tx?.isActive && lastPoly) {
+        const finalPoly = isUprightOrientationDeg(lastPoly.orientationDeg)
+          ? e.geometry.snapping.snapPolygonToLatticeRounded(lastPoly)
+          : lastPoly;
+        tx.update({ confinement: finalPoly }, 'frame');
+      }
+      pendingPoly = null;
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      }
+      lastPoly = null;
       if (tx) {
         tx.commit();
         tx = null;
@@ -262,6 +310,7 @@ export const createSelectionTransformHandler = (): InteractionHandler => {
         rafId = null;
       }
       pendingPoly = null;
+      lastPoly = null;
       if (tx) {
         tx.abort();
         tx = null;

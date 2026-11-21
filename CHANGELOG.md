@@ -2,6 +2,11 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.59
+
+- Selection: the transform handles now sit exactly on the marching-ants border and the pixel grid after scaling or rotating an upright selection, on every layer kind — previously the handle box could end up stranded between pixels while the selection itself looked snapped
+- Selection: drawing a selection while a brush-stroke (or text, color, group) layer is active now snaps to the pixel grid exactly like selecting on an image layer — previously only selections drawn over image layers landed on the grid
+
 ## 2.0.58
 
 - Layers: sweeping the layer list stays smooth at large layer counts — the per-row hover controls drop their decorative chrome layers, and rows outside the viewport skip rendering entirely while remaining in the list

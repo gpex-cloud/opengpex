@@ -294,13 +294,42 @@ export const createSessionTransformHandler = (): InteractionHandler => {
       if (!tx || !tx.isActive || !startParams || !mode || !exchangeId) return;
 
       if (mode === 'rotate') {
-        const next = e.geometry.transform.computeFragmentRotation(
-          startParams,
-          e.point.world,
-          startParams.rotation,
-          startPointerAngleRad,
-          { shift: e.keys.shift, absoluteBaseDeg: rotationSnapBaseDeg },
-        );
+        // ── Inline rotate-delta solve (the fragment's OWN copy) ──
+        // The pointer-angle delta about the content center, Shift-snapped on
+        // the ABSOLUTE orientation grid. This block and the selection
+        // transform's rotate branch are DELIBERATE twin inlines: same core
+        // math (atan2 delta about the pivot + snapRotationRad on the
+        // absolute base), different plug-ins (pivot source, snap-base
+        // provenance, write-back target). The gizmo-rotation-sync guard
+        // test pins the two in lockstep — keep them symmetric when editing.
+        const pivot = e.geometry.transform.fragmentContentCenter(startParams);
+        const pointerAngleRad = Math.atan2(e.point.world.y - pivot.y, e.point.world.x - pivot.x);
+        let deltaRad = pointerAngleRad - startPointerAngleRad;
+        if (e.keys.shift) {
+          deltaRad = e.geometry.transform.snapRotationRad(deltaRad, (rotationSnapBaseDeg * Math.PI) / 180);
+        }
+        const nextRotation = startParams.rotation + (deltaRad * 180) / Math.PI;
+        // ── Inline RE-ANCHOR (the record half) ──
+        // The content center stays fixed; the bounding anchor chases the
+        // visible offset rotated into the NEW orientation: O = R(θ) × F
+        // applied to the offset (mirror first, then rotate — the layer
+        // orientation sign convention). The gesture-start pose always
+        // carries scale 1 and no source tilt (the fragmentPoseFromLayer
+        // invariant: every prior gesture was baked into the pixels), so no
+        // scale/tilt terms participate here.
+        const theta = (nextRotation * Math.PI) / 180;
+        const cos = Math.cos(theta);
+        const sin = Math.sin(theta);
+        const fx = startParams.flip.h ? -1 : 1;
+        const fy = startParams.flip.v ? -1 : 1;
+        const vx = startParams.visibleOffset.x * fx;
+        const vy = startParams.visibleOffset.y * fy;
+        const next = {
+          cx: pivot.x - (vx * cos - vy * sin),
+          cy: pivot.y - (vx * sin + vy * cos),
+          rotation: nextRotation,
+        };
+
         pose = { cx: next.cx, cy: next.cy, rotation: next.rotation };
         // Rotation streams entirely through the regular layer patch; the
         // scale transient carries nothing on this branch.

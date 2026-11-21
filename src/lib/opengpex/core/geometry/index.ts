@@ -49,7 +49,7 @@ import {
   invertRings, isBoundingRing, computePolygonBounds as computePolygonBoundsP2D,
   rectToLocalPolygon, ellipseToLocalPolygon, isPointInPathRings
 } from './operators/point2d';
-import { snapRect, snapEdge, snapEdgeRotated, snapToPixel, snapLocalRectToLatticeRounded, snapWorldRectToLatticeExpanded } from './operators/snapping';
+import { snapRect, snapEdge, snapEdgeRotated, snapToPixel, snapLocalRectToLatticeRounded, snapWorldRectToLatticeExpanded, snapPolygonToLatticeRounded } from './operators/snapping';
 import {
   decomposeMatrix,
   getLayerWorldMatrix,
@@ -63,7 +63,6 @@ import {
   fragmentPoseFromLayer,
   getFragmentContentCenter,
   getFragmentBakeRoi,
-  computeFragmentRotation,
   followFragmentSelection,
   migrateFragmentContour,
 } from './operators/fragment';
@@ -159,7 +158,6 @@ export function createGeometryService(): GeometryService {
       fragmentPoseFromLayer: (l) => fragmentPoseFromLayer(l),
       fragmentContentCenter: (params) => getFragmentContentCenter(params),
       fragmentBakeRoi: (params, pad) => getFragmentBakeRoi(params, pad),
-      computeFragmentRotation: (start, pointerWorld, startRotationDeg, startPointerAngleRad, opts) => computeFragmentRotation(start, pointerWorld, startRotationDeg, startPointerAngleRad, opts),
       followFragmentSelection: (selection, start, end, frame) =>
         followFragmentSelection(selection, start, end, (p) => worldToLocal(p.x, p.y, frame.canvas)),
       migrateFragmentContour: (rings, layer, frame, start, end) =>
@@ -200,6 +198,7 @@ export function createGeometryService(): GeometryService {
       // never operator modules directly.
       snapLocalRectToLatticeRounded: (rect: LocalRect, opts?: { snapDimension?: boolean }) =>
         snapLocalRectToLatticeRounded(rect, opts),
+      snapPolygonToLatticeRounded: (poly: LocalPolygon) => snapPolygonToLatticeRounded(poly),
       snapWorldRectToLatticeExpanded: (rect: WorldRect, canvasDim: Dimensions) =>
         snapWorldRectToLatticeExpanded(rect, canvasDim),
     },
