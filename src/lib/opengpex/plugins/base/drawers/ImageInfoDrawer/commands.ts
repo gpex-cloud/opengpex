@@ -22,6 +22,8 @@ import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 
 import { calcFinalDims } from './utils';
 
+import { getExportPreset, resolvePresetDims } from './presets';
+
 import * as P from './protocols';
 
 /**
@@ -52,18 +54,24 @@ export const IMAGE_INFO_COMMANDS = {
       id: P.CMD_DOWNLOAD,
       name: 'Download Creation',
       category: 'File',
-      execute: async (ctx: EditorContextValue, payload?: { format?: P.ExportFormat }) => {
+      execute: async (ctx: EditorContextValue, payload?: { format?: P.ExportFormat; presetId?: string }) => {
          const { activeFrame, pixels, geometry } = ctx;
          const { selfConfig } = ctx.scoped || {};
          if (!activeFrame) return;
 
          const baseConfig = selfConfig as P.ExportConfig;
          // Optional one-shot format override (e.g. from the Agent's export_image
-         // tool). Does NOT mutate the user's persisted UI selection — it only
-         // affects this single export. Falls back to the UI-configured format.
+         // tool), and a one-shot export-preset override (quick-save menu items).
+         // Neither mutates the user's persisted UI selection — both only affect
+         // this single export. A preset replaces format AND quality for this
+         // export and derives the export dimensions itself (scale-only,
+         // aspect-preserving), so it also bypasses the UI-configured pixels.
+         const preset = payload?.presetId ? getExportPreset(payload.presetId) : undefined;
          const config: P.ExportConfig = payload?.format
             ? { ...baseConfig, format: payload.format }
-            : baseConfig;
+            : preset
+               ? { ...baseConfig, format: preset.format, quality: preset.quality }
+               : baseConfig;
 
          const isClipMode = ctx.state.interaction.interactionMode === 'clip';
          const box = getClipBox(activeFrame);
@@ -87,7 +95,14 @@ export const IMAGE_INFO_COMMANDS = {
          const clipShape: LocalShape | undefined = isClipMode && box ? geometry.polygon.polygonToShape(box) : undefined;
          const baseW = clipShape ? clipShape.rect.w : activeFrame.canvas.w;
          const baseH = clipShape ? clipShape.rect.h : activeFrame.canvas.h;
-         const { w: exportW, h: exportH } = calcFinalDims(baseW, baseH, config);
+         // Preset path: dimensions come from the preset's own scale rule
+         // resolved against the SAME base rect the manual path uses (full
+         // frame, or the clip-region rect — so a preset honors an active
+         // clip box exactly like `download` does, scaled per the preset).
+         // No preset: the manual path's UI-configured dimensions.
+         const { w: exportW, h: exportH } = preset
+            ? resolvePresetDims(preset, baseW, baseH)
+            : calcFinalDims(baseW, baseH, config);
 
          try {
             // ═══ 3. Egest decision + GPU render + encode → Blob ═══════════════
@@ -109,7 +124,7 @@ export const IMAGE_INFO_COMMANDS = {
          }
       },
       shortcuts: [{ key: 's', meta: true, shift: true }, { key: 's', ctrl: true, shift: true }]
-   } as EditorCommand<{ format?: P.ExportFormat } | void, Promise<void>>,
+   } as EditorCommand<{ format?: P.ExportFormat; presetId?: string } | void, Promise<void>>,
 
    downloadOriginal: {
       id: P.CMD_DOWNLOAD_ORIGINAL,

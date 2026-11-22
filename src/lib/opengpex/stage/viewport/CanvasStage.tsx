@@ -35,6 +35,7 @@ import {
 } from './CanvasStageFilter';
 import { mergeFrameSnapshot } from '@opengpex/editor/core/state/volatile/merge';
 import { RenderController } from '@opengpex/editor/core/engine/RenderController';
+import { GPU_UNAVAILABLE_SIGNAL_KEY } from '@opengpex/editor/core/engine/gpu/GpuAvailability';
 
 /**
  * CanvasStage: the React binding shell for the render loop (WebGPU v2 Core).
@@ -49,7 +50,7 @@ import { RenderController } from '@opengpex/editor/core/engine/RenderController'
  */
 export default function CanvasStage() {
   const { state, activeFrame } = useEditorState();
-  const { geometry, assets, files } = useEditorServices();
+  const { geometry, assets, files, actions } = useEditorServices();
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // Inject artboard-level CSS rotation sync animation
@@ -138,13 +139,17 @@ export default function CanvasStage() {
       })
       .catch((err: unknown) => {
         if (cancelled) return;
+        // Detection layer 2 (S2/S3 — adapter null / requestDevice failure):
+        // raise the workspace-level signal so the hint overlay renders.
+        // Hint only, per product decision — rendering stays untouched.
+        actions.setStateSignal(GPU_UNAVAILABLE_SIGNAL_KEY, true);
         console.warn('[CanvasStage] WebGPU init failed on stage canvas:', err);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [getController]);
+  }, [getController, actions]);
 
   // [Performance] Unified sync pipeline ticker (60fps): the tick body lives in
   // the controller; this shell only feeds it the session-side inputs.

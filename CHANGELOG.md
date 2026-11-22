@@ -2,6 +2,11 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.63
+
+- Workspace: opening OpenGPEX in a browser without WebGPU now shows a clear explanation with per-platform supported browsers and a reload button — instead of a silently blank canvas
+- Export: three one-click save presets in the Save menu — Avatar, Sharing and Banner — each exports a correctly sized JPEG in one tap without touching your export settings
+
 ## 2.0.62
 
 - Rule-of-thirds composition guides are back, now always visible over rectangular selections and the canvas-resize frame — they no longer disappear while dragging or hovering, and they never appear over non-rectangular selections.

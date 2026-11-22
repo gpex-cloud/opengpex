@@ -39,6 +39,7 @@ import { CommandInstance } from "@opengpex/editor/core/types";
 import { formatPrintSize, DPI_PRESETS, formatToMime } from "@opengpex/editor/core/files";
 import type { ImageMetadata } from "@opengpex/editor/core/files";
 import * as P from "../protocols";
+import { EXPORT_PRESETS } from "../presets";
 import { ResizeExportRules } from "./ResizeExportRules";
 import {
   deriveResizeState,
@@ -58,7 +59,10 @@ interface ResizeExportControlsProps {
   /** Whether an active selection exists (clip box is non-null) */
   hasSelection?: boolean;
   applyResizeCmd?: CommandInstance;
-  downloadCmd?: CommandInstance;
+  downloadCmd?: CommandInstance<
+    { format?: P.ExportFormat; presetId?: string } | void,
+    Promise<void>
+  >;
   /** Downloads the retained source blob (the ORIGINAL file bytes) verbatim. */
   downloadOriginalCmd?: CommandInstance;
   imageMetadata?: ImageMetadata;
@@ -149,6 +153,56 @@ export function ResizeExportControls({
       await downloadCmd?.execute();
     } finally {
       setIsProcessing(false);
+    }
+  };
+
+  /** Dropdown value prefix marking a quick-save preset item. */
+  const PRESET_VALUE_PREFIX = "preset:";
+
+  // Quick-save menu items built from the static preset table. Each item is a
+  // ONE-SHOT save: it hands a `presetId` to the same encode command the Save
+  // button uses, which derives format/quality/dimensions for that single
+  // export. The W/H, format and quality controls are never written back.
+  const presetDropdownOptions = EXPORT_PRESETS.map((preset) => ({
+    label: preset.label,
+    value: `${PRESET_VALUE_PREFIX}${preset.id}`,
+    description: preset.description,
+  }));
+
+  // Standalone divider row separating "Save Original" from the preset group.
+  // ActionDropdown renders a `divider: true` option AS the separator itself
+  // (the option's own label/value are not rendered), so it must be its own
+  // entry — putting `divider` on the first preset would swallow that preset.
+  // Its value matches no branch of onDropdownSelect, so it is inert even if
+  // a stray selection ever reached it.
+  const saveDropdownOptions = [
+    {
+      label: "Save Original",
+      value: "original",
+      description: "source file, verbatim",
+    },
+    { label: "", value: "divider", divider: true },
+    ...presetDropdownOptions,
+  ];
+
+  const onDropdownSelect = async (val: string) => {
+    if (val === "original") {
+      setIsProcessing(true);
+      try {
+        await downloadOriginalCmd?.execute();
+      } finally {
+        setIsProcessing(false);
+      }
+      return;
+    }
+    if (val.startsWith(PRESET_VALUE_PREFIX)) {
+      const presetId = val.slice(PRESET_VALUE_PREFIX.length);
+      setIsProcessing(true);
+      try {
+        await downloadCmd?.execute({ presetId });
+      } finally {
+        setIsProcessing(false);
+      }
     }
   };
 
@@ -421,7 +475,10 @@ export function ResizeExportControls({
                 pixels and the file must agree). The attached chevron menu adds
                 Save Original: the retained source blob downloaded verbatim via
                 `downloadOriginal` (getRaw), bypassing format & RenderGraph —
-                the RAW round-trip exit (IMG_2591.DNG stays .dng). */}
+                the RAW round-trip exit (IMG_2591.DNG stays .dng). Below it, the
+                quick-save preset items run the SAME encode command with a
+                one-shot `presetId` (own format/quality/scale), leaving every
+                control in this panel untouched. */}
             <FancyButton
               onClick={onDownload}
               disabled={isProcessing || (isClipMode && !hasSelection)}
@@ -430,23 +487,8 @@ export function ResizeExportControls({
               size="xs"
               className="flex-1"
               dropdownDirection="up"
-              dropdownOptions={[
-                {
-                  label: "Save Original",
-                  value: "original",
-                  description: "source file, verbatim",
-                },
-              ]}
-              onDropdownSelect={async (val) => {
-                if (val === "original") {
-                  setIsProcessing(true);
-                  try {
-                    await downloadOriginalCmd?.execute();
-                  } finally {
-                    setIsProcessing(false);
-                  }
-                }
-              }}
+              dropdownOptions={saveDropdownOptions}
+              onDropdownSelect={onDropdownSelect}
             >
               {/* While processing the FancyButton `loading` spinner takes the
                   icon slot; the label stays put so the button width does not

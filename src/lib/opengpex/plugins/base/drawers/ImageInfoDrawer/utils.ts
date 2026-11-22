@@ -61,6 +61,48 @@ export function calculateNextPixelsByHeight(newH: number, baseW: number, baseH: 
 }
 
 /**
+ * Proportional scale so the LONGER edge equals `target`. Preserves the aspect
+ * ratio; both edges are rounded and clamped to a minimum of 1px (same
+ * rounding discipline as `calcFinalDims`). Rounding may shift the long edge
+ * by ±1px — that is acceptable; aspect distortion never is.
+ */
+export function fitLongEdge(w: number, h: number, target: number): { w: number; h: number } {
+ const long = Math.max(w, h);
+ const factor = long > 0 ? target / long : 0;
+ return {
+   w: Math.max(1, Math.round(w * factor)),
+   h: Math.max(1, Math.round(h * factor)),
+ };
+}
+
+/**
+ * Proportional scale so the SHORTER edge equals `target` (e.g. an avatar
+ * preset: the result fits a `target` square slot without cropping).
+ * Aspect-preserving, rounded, min 1px.
+ */
+export function fitShortEdge(w: number, h: number, target: number): { w: number; h: number } {
+ const short = Math.min(w, h);
+ const factor = short > 0 ? target / short : 0;
+ return {
+   w: Math.max(1, Math.round(w * factor)),
+   h: Math.max(1, Math.round(h * factor)),
+ };
+}
+
+/**
+ * Proportional scale so the image fits entirely INSIDE the `maxW` x `maxH`
+ * box (contain): the limiting edge wins. Aspect-preserving, rounded, min 1px.
+ * An image already smaller than the box scales UP to fill the box.
+ */
+export function fitWithin(w: number, h: number, maxW: number, maxH: number): { w: number; h: number } {
+ const factor = w > 0 && h > 0 ? Math.min(maxW / w, maxH / h) : 0;
+ return {
+   w: Math.max(1, Math.round(w * factor)),
+   h: Math.max(1, Math.round(h * factor)),
+ };
+}
+
+/**
  * Calculates the next pixels when percentage slider is dragged, with snapping.
  */
 export function calculateNextPixelsByPercent(val: number, baseW: number, baseH: number) {

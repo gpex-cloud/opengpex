@@ -40,6 +40,8 @@ import { GlobalUI } from "./components/GlobalUI";
 import ToolMenu from "./components/ToolMenu";
 import ExtendButton from "./components/ExtendButton";
 import FancyOverlay from "@opengpex/editor/widgets/FancyOverlay";
+import GpuUnavailableHint from "./components/GpuUnavailableHint";
+import { GPU_UNAVAILABLE_SIGNAL_KEY } from "@opengpex/editor/core/engine/gpu/GpuAvailability";
 import DrawerBar from "./components/DrawerBar";
 
 import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
@@ -74,6 +76,14 @@ export function Workspace() {
   );
 
   const hasFrames = state.frames.order.length > 0;
+  // Detection layer 2 (S2/S3): the canvas stage raises this signal when
+  // WebGPU engine init fails (adapter null / requestDevice failure). We
+  // cover the canvas area with the advisory hint page. Hint only — no
+  // functional fallback, no flow interception.
+  const gpuUnavailable = state.getStateSignal<boolean>(
+    GPU_UNAVAILABLE_SIGNAL_KEY,
+    false,
+  );
   const midContainerRef = useRef<HTMLDivElement>(null);
 
   // 3. Top-level size perception logic (Workspace Heartbeat)
@@ -154,6 +164,16 @@ export function Workspace() {
 
             {/* Viewport Overlay (TL/TR/BL/BR/DOCK & VIEWPORT_OVERLAY) - add key to ensure UI resets synchronously on frame switches */}
             <ViewportHUD key={`hud-${activeFrameId}`} />
+
+            {/* WebGPU-unavailable hint (S2/S3) — covers the canvas area at the
+                BOOT_OVERLAY seat when engine init fails at mount. Advisory
+                only: the editor underneath stays functional. */}
+            {gpuUnavailable && (
+              <GpuUnavailableHint
+                variant="overlay"
+                style={{ zIndex: EDITOR_Z_INDEX.CHROME.BOOT_OVERLAY }}
+              />
+            )}
 
             {/* Global Dock Area - independent of Frame lifecycle to ensure interaction stability */}
             {hasFrames && (
