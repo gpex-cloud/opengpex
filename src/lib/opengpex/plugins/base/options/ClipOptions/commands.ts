@@ -429,13 +429,24 @@ export const CLIP_OPTIONS_COMMANDS = {
     }
   } as EditorCommand<void, void>,
 
-
+  /**
+   * applyReCanvas — commit the canvas-resize session. Pure GEOMETRY: the
+   * crop box becomes the new canvas bounds and every layer record shifts by
+   * the box-vs-canvas offset (resizeCanvas — records move, pixels are never
+   * resampled). A box EQUAL TO the canvas is a no-op (the UI disables the
+   * button; this guard is the defence in depth behind it) — running it would
+   * change nothing yet CLEAR the frame confinement as a side effect.
+   */
   applyReCanvas: {
     id: P.CMD_RE_CANVAS_APPLY,
     name: 'Apply Canvas Resize',
     undoable: true,
     execute: (ctx: EditorContextValue) => {
-      if (!ctx.activeFrame) return;
+      const activeFrame = ctx.activeFrame;
+      if (!activeFrame) return;
+      const box = activeFrame.canvasClipBox?.rect;
+      if (!box || box.w <= 0 || box.h <= 0) return;
+      if (Math.round(box.w) === activeFrame.canvas.w && Math.round(box.h) === activeFrame.canvas.h) return;
       ctx.actions.adv.frame.resize.resizeCanvas.execute();
       ctx.scoped?.setSignal(P.SIGNAL_RE_CANVAS, false);
       exitClipMode(ctx);
@@ -450,6 +461,12 @@ export const CLIP_OPTIONS_COMMANDS = {
       const isReCanvas = !!ctx.scoped!.getSignal(P.SIGNAL_RE_CANVAS);
       const target = getActiveTarget(ctx, isReCanvas);
       if (!target) return;
+      // Session-default box (equal to the canvas): ratio-locking it is a
+      // no-op, and the anchor math below would degenerate on the zero
+      // offset — skip.
+      if (isReCanvas && target.box && ctx.activeFrame
+        && Math.round(target.box.w) === ctx.activeFrame.canvas.w
+        && Math.round(target.box.h) === ctx.activeFrame.canvas.h) return;
 
       const targetRatio = payload.aspect;
 

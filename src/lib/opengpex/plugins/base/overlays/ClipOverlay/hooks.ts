@@ -155,8 +155,10 @@ export function useClipOverlayCommands() {
 /**
  * Directional resize cursor when the point sits within `threshold` (canvas
  * px) of a rect edge, null otherwise. Pure geometry over the axis-aligned
- * bounds — corners fall to the horizontal axis (the first match), matching
- * the previous edge-proximity behavior.
+ * bounds. CORNER zones (within threshold of two adjacent edges) resolve to
+ * the diagonal cursor — mirroring the interaction layer's corner-priority
+ * hit detection (recanvas.ts): the corner is a two-axis resize, and the
+ * glyph must promise what the press delivers.
  */
 function rectEdgeCursor(
   pt: { x: number; y: number },
@@ -166,10 +168,17 @@ function rectEdgeCursor(
   if (!rect || rect.w <= 0 || rect.h <= 0) return null;
   const inHRange = pt.x >= rect.x - threshold && pt.x <= rect.x + rect.w + threshold;
   const inVRange = pt.y >= rect.y - threshold && pt.y <= rect.y + rect.h + threshold;
-  if (inHRange && Math.abs(pt.y - rect.y) <= threshold) return 'ns-resize';
-  if (inHRange && Math.abs(pt.y - (rect.y + rect.h)) <= threshold) return 'ns-resize';
-  if (inVRange && Math.abs(pt.x - rect.x) <= threshold) return 'ew-resize';
-  if (inVRange && Math.abs(pt.x - (rect.x + rect.w)) <= threshold) return 'ew-resize';
+  const nearTop = inHRange && Math.abs(pt.y - rect.y) <= threshold;
+  const nearBottom = inHRange && Math.abs(pt.y - (rect.y + rect.h)) <= threshold;
+  const nearLeft = inVRange && Math.abs(pt.x - rect.x) <= threshold;
+  const nearRight = inVRange && Math.abs(pt.x - (rect.x + rect.w)) <= threshold;
+  // Corners first: nw/se share one diagonal, ne/sw the other.
+  if (nearTop && nearLeft) return 'nwse-resize';
+  if (nearBottom && nearRight) return 'nwse-resize';
+  if (nearTop && nearRight) return 'nesw-resize';
+  if (nearBottom && nearLeft) return 'nesw-resize';
+  if (nearTop || nearBottom) return 'ns-resize';
+  if (nearLeft || nearRight) return 'ew-resize';
   return null;
 }
 
@@ -227,10 +236,17 @@ export function useClipCursor(
     ?? toolAAMap?.[clipTool] ?? true;
 
   useEffect(() => {
-    if (isClipActive) {
+    // Re-Canvas owns the base cursor REGARDLESS of the interaction mode it
+    // was entered from (pan or clip): it is a document-level modal, and the
+    // base cursor must not flicker between the pan hand and the clip
+    // crosshair depending on the entry path. Outside Re-Canvas the clip
+    // channel is clip-mode-only, as before.
+    if (isClipActive || isReCanvas) {
       // Re-Canvas is a canvas-resize modal, not a selection tool: plain
-      // crosshair (no tool subscript indicator that would misleadingly
-      // suggest the rect selection tool is active).
+      // crosshair outside the box (no tool subscript indicator that would
+      // misleadingly suggest the rect selection tool is active). The hover
+      // pass below refines to 'move' inside the box and resize cursors at
+      // its edges.
       const toolCursor = isReCanvas
         ? 'crosshair'
         : clipTool === 'pathellipse' && !clipBox_AA
@@ -306,10 +322,20 @@ export function useClipCursor(
       const k = currentCam?.k ?? frame.camera.k;
       const T = EDGE_THRESHOLD_PX / k;
 
-      // Re-Canvas renders no gizmo: edge proximity against the canvas box is
-      // still declared here.
+      // Re-Canvas renders no gizmo: the hover vocabulary is declared here —
+      // resize cursors at the box edges, 'move' inside (a press inside the
+      // box drags the canvas-resize rect), null outside (base crosshair).
       if (isReCanvas) {
-        actions.fast.cursor.notifyHover(rectEdgeCursor(canvasPt, frame.canvasClipBox?.rect, T));
+        const boxRect = frame.canvasClipBox?.rect;
+        const edge = rectEdgeCursor(canvasPt, boxRect, T);
+        if (edge) {
+          actions.fast.cursor.notifyHover(edge);
+          return;
+        }
+        const inside = !!boxRect
+          && canvasPt.x >= boxRect.x && canvasPt.x <= boxRect.x + boxRect.w
+          && canvasPt.y >= boxRect.y && canvasPt.y <= boxRect.y + boxRect.h;
+        actions.fast.cursor.notifyHover(inside ? 'move' : null);
         return;
       }
 

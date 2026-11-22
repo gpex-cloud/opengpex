@@ -28,10 +28,12 @@ import { readPeelSession } from "../peel/session";
 import { isPeelSettleInFlight } from "../peel/controller";
 import { useClipOverlayCommands, useClipCursor, useSelectionHudAnchor } from "../hooks";
 import { TransformHud } from "@opengpex/editor/widgets/affordances";
+import { RuleOfThirdsGrid } from "./ThirdsGrid";
 import {
   useCropDimSync,
   useReCanvasBoxSync,
   useSelectionAntsSync,
+  useThirdsGridSync,
 } from "../useFastSync";
 import { PeelActionButtons } from "../peel/actions";
 import { lassoPreviewPathRef } from "../interactions";
@@ -128,6 +130,22 @@ export function ClipOverlayMain() {
   const selectionHudActive =
     ((isEditing && !wandSelection) || peelSessionActive) && !isReCanvas && hasSelection;
 
+  // Rule-of-thirds guides: a rectangular lattice only carries compositional
+  // meaning over a RECTANGLE, so the gate admits exactly two scenes — clip
+  // mode with a rectangle-shaped selection (rect tool, classified 'rect' by
+  // polygonToShape — boolean combinations under the rect tool can produce
+  // multi-ring shapes whose lattice would lie), and Re-Canvas (whose
+  // canvas-resize rect is always rectangular). Ellipse / lasso / wand / SAM
+  // selections never see the grid: their shapes are not rectangles.
+  //
+  // In clip mode the grid is an INDEPENDENT always-visible box pinned to the
+  // selection rect (useThirdsGridSync) — deliberately NOT a child of the
+  // gizmo container, whose hover-reveal would hide the guides whenever the
+  // pointer leaves the frame. The guides belong to the composition, not to
+  // the interaction chrome: they stay up while dragging, hovering, or doing
+  // nothing at all.
+  const thirdsInClip = isClipActive && !isReCanvas && clipTool === 'rect' && clipType === 'rect' && hasSelection;
+
   // ─── Staircase grid phase (ants/GPU alignment) ───────────────────────────
   // The aa/na ants are the pixel staircase of the TARGET layer's (active
   // layer's) pixel grid. That grid sits at the layer's origin in frame-local
@@ -157,6 +175,12 @@ export function ClipOverlayMain() {
     boxRef,
     isReCanvas,
   );
+
+  // Rule-of-thirds grid (clip mode): independent always-visible box pinned
+  // to the selection rect — see the gate comment above for the mounting
+  // rationale (deliberately outside the hover-revealed gizmo container).
+  const thirdsGridRef = useRef<HTMLDivElement>(null);
+  useThirdsGridSync(thirdsGridRef, thirdsInClip);
 
   // ─── Selection HUD declaration ──────────────────────────────────────────
   // The dimension chip shows for EVERY selection shape in clip mode —
@@ -248,6 +272,15 @@ export function ClipOverlayMain() {
         </svg>
       </div>
 
+      {/* Rule-of-thirds grid (clip mode, rect selection): ALWAYS visible —
+          an independent box pinned to the selection rect by useThirdsGridSync,
+          outside the gizmo container so hover-reveal never hides it. */}
+      {thirdsInClip && (
+        <div ref={thirdsGridRef} className="absolute top-0 left-0">
+          <RuleOfThirdsGrid />
+        </div>
+      )}
+
       {/* Re-Canvas box (DECOUPLED): the canvas-resize rect's own flat
           container — pinned to rect, no gizmo, no selection chips. Presses
           are claimed by the Re-Canvas handlers through the data-handle
@@ -258,6 +291,10 @@ export function ClipOverlayMain() {
           className="absolute pointer-events-auto transition-[border-radius] duration-300"
           data-handle="move"
         >
+          {/* Rule-of-thirds guides: the Re-Canvas rect is always a plain
+              axis-aligned rectangle, so the grid mounts as a direct child
+              and tracks the box without any extra sync. */}
+          <RuleOfThirdsGrid />
           <div
             className="absolute left-0 bg-zinc-900/90 backdrop-blur-md border border-white/10 rounded flex items-center shadow-2xl pointer-events-none whitespace-nowrap"
             style={{

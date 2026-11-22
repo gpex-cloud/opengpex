@@ -35,7 +35,14 @@ export const FrameResizeCommands = {
     name: 'Resize Canvas',
     undoable: true,
     execute: (ctx: EditorContextValue): void => {
-      const { activeFrame, actions } = ctx;
+      const { actions } = ctx;
+      // ALWAYS re-read the frame from the live store: this command is often
+      // the tail of an async multi-write flow, where `ctx.activeFrame` is
+      // the dispatch-time React snapshot — its `layers` would overwrite
+      // every patch earlier awaited writes landed with stale records
+      // (general pit: an async command must re-read latestFrame after its
+      // awaits before delegating to a sub-command).
+      const activeFrame = ctx.actions.fast.latestFrame(ctx.activeFrame?.id ?? '') ?? ctx.activeFrame;
       if (!activeFrame) return;
 
       const { canvasClipBox: clipShape, canvas: oldCanvas, layers } = activeFrame;

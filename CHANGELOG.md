@@ -2,6 +2,11 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.62
+
+- Rule-of-thirds composition guides are back, now always visible over rectangular selections and the canvas-resize frame — they no longer disappear while dragging or hovering, and they never appear over non-rectangular selections.
+- Canvas resize (Re-Canvas) interaction fixes: diagonal dragging from the frame corners works again, the pointer now matches the action at every position (crosshair outside, move inside, resize at edges) consistently in every entry mode, and APPLY stays disabled until the frame actually differs from the canvas so a no-op apply can no longer wipe the active selection.
+
 ## 2.0.61
 
 - Filters: 20 one-click photo looks with live previews of your own photo, applicable at Weak / Medium / Strong strength

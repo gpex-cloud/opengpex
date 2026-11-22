@@ -223,7 +223,7 @@ export const useClipOptionsCommands = () => {
         const finalBox = target.clampRect(nextBox);
         target.updateShape({ rect: finalBox });
       },
-      closeReCanvas: () => reCanvasActiveSignal?.set(false),
+            closeReCanvas: () => reCanvasActiveSignal?.set(false),
 
       // Feather display value — the signal is a derived session mirror (the
       // linkage effect above is its single writer); `persistFeather` writes

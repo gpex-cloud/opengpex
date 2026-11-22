@@ -112,6 +112,7 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
   usePeelCursor();
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+
   const [isOffsetOpen, setIsOffsetOpen] = useState(false);
   const [offsetValue, setOffsetValue] = useState(0);
 
@@ -203,6 +204,13 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
     ? activeFrame.canvasClipBox
     : getRegularClipShape(activeFrame) || activeFrame.canvasClipBox;
   const clipRect = clipShape.rect;
+  // A box EQUAL TO the canvas (the session's default - the clip box is
+  // born at 1.0x canvas) is a no-op APPLY: the resize would only reset
+  // confinement while changing nothing. The button disables; the command
+  // keeps its own backstop.
+  const reCanvasBoxEqualsCanvas = isReCanvas
+    && Math.round(clipRect.w) === activeFrame.canvas.w
+    && Math.round(clipRect.h) === activeFrame.canvas.h;
   const activeAspect = isReCanvas
     ? activeFrame.canvasAspect
     : activeFrame.imageAspect;
@@ -967,8 +975,9 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                 />
                 <FancyButton shape="rect"
                   onClick={() => reCanvasApplyCmd?.execute()}
+                  disabled={reCanvasBoxEqualsCanvas}
                   variant="ghost"
-                  className="h-6 w-auto px-2 text-[10px] !bg-rose-500 hover:!bg-rose-600 !text-white gap-1 ml-1.5"
+                  className={`h-6 w-auto px-2 text-[10px] gap-1 ml-1.5 ${reCanvasBoxEqualsCanvas ? "!bg-rose-500/40 !text-white/50" : "!bg-rose-500 hover:!bg-rose-600 !text-white"}`}
                 >
                   <Check size={11} strokeWidth={3} />
                   APPLY

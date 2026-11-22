@@ -89,10 +89,27 @@ export const createReCanvasHandler = (): InteractionHandler => {
       const inHRange = px >= rect.x - T && px <= rect.x + rect.w + T;
       const inVRange = py >= rect.y - T && py <= rect.y + rect.h + T;
 
-      if (dTop <= T && inHRange) return { category: 'resize', handle: 'n' };
-      if (dBottom <= T && inHRange) return { category: 'resize', handle: 's' };
-      if (dLeft <= T && inVRange) return { category: 'resize', handle: 'w' };
-      if (dRight <= T && inVRange) return { category: 'resize', handle: 'e' };
+      const nearTop = dTop <= T && inHRange;
+      const nearBottom = dBottom <= T && inHRange;
+      const nearLeft = dLeft <= T && inVRange;
+      const nearRight = dRight <= T && inVRange;
+
+      // Corner zones have PRIORITY over the edges: within threshold of two
+      // adjacent edges the press is a CORNER resize (both axes follow the
+      // pointer, diagonal 45° drag included — the corner handles the
+      // factory's resize math already knows: nw/ne/sw/se), never a single
+      // axis. First-match edge ordering below would otherwise claim the
+      // corner for whichever edge is tested first and pin the drag to one
+      // axis.
+      if (nearTop && nearLeft) return { category: 'resize', handle: 'nw' };
+      if (nearTop && nearRight) return { category: 'resize', handle: 'ne' };
+      if (nearBottom && nearLeft) return { category: 'resize', handle: 'sw' };
+      if (nearBottom && nearRight) return { category: 'resize', handle: 'se' };
+
+      if (nearTop) return { category: 'resize', handle: 'n' };
+      if (nearBottom) return { category: 'resize', handle: 's' };
+      if (nearLeft) return { category: 'resize', handle: 'w' };
+      if (nearRight) return { category: 'resize', handle: 'e' };
 
       // ─── Inside box → move ─────────────────────────────────────────────
       if (handleElement && handleElement.dataset.handle === 'move') {
@@ -132,8 +149,6 @@ export const createReCanvasHandler = (): InteractionHandler => {
           tx.update({ canvasClipBox: { ...frame.canvasClipBox, rect: fullCanvasRect } }, 'frame');
         }
       },
-      // NOTE: No 'static-click-clear' for Re-Canvas — static click inside is a no-op.
-      // Re-Canvas always has a canvasClipBox (it represents the physical canvas bounds).
     ],
   });
 };

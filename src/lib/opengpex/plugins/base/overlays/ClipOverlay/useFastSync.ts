@@ -92,6 +92,40 @@ export function useReCanvasBoxSync(
   return {};
 }
 
+// ─── useThirdsGridSync ──────────────────────────────────────────────────────
+
+/**
+ * Rule-of-thirds grid positioning + visibility for the CLIP-mode rect
+ * selection. The grid is an ALWAYS-VISIBLE companion of the selection: it
+ * does NOT ride the TransformHud gizmo container (whose hover-reveal would
+ * hide the guides whenever the pointer leaves the frame) — it is an
+ * independent box pinned to the selection's own rect by this hook, so the
+ * guides stay up while dragging, hovering, or doing nothing at all.
+ *
+ * Reads only the frame-level selection entity (`frame.confinement.rect`).
+ * The caller gates the mount to rectangle-shaped selections; for any other
+ * shape the rect still exists (its bounding box) but this hook simply pins
+ * whatever rect it is given — the compositional-meaning gate is the
+ * component's job, not the sync's.
+ */
+export function useThirdsGridSync(
+  ref: React.RefObject<HTMLElement | null>,
+  isActive: boolean
+) {
+  // Grid position (fast-track CSS left/top/width/height)
+  useFastRectSync(ref, isActive, {
+    selector: (_v, f) => f.confinement?.rect ?? { x: 0, y: 0, w: 0, h: 0 },
+    space: 'local'
+  });
+
+  // Cleanup: toggle grid visibility on active state changes
+  useEffect(() => {
+    if (ref.current) (ref.current as HTMLElement).style.display = isActive ? '' : 'none';
+  }, [isActive, ref]);
+
+  return {};
+}
+
 // ─── useSelectionAntsSync ──────────────────────────────────────────────────────
 
 /**
