@@ -2,6 +2,7 @@ overrides:
   undici: 8.11.0
 
 allowBuilds:
+  esbuild: true
   exifreader: true
   onnxruntime-node: true
   protobufjs: true

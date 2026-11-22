@@ -2,6 +2,10 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.60
+
+- Image Formats: importing and exporting GIF files works again in the cloud deployment — the decoder/encoder libraries failed to load there since a recent release, showing an import error instead
+
 ## 2.0.59
 
 - Selection: the transform handles now sit exactly on the marching-ants border and the pixel grid after scaling or rotating an upright selection, on every layer kind — previously the handle box could end up stranded between pixels while the selection itself looked snapped

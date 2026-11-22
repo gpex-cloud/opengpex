@@ -1,6 +1,6 @@
 {
   "name": "opengpex",
-  "version": "2.0.59",
+  "version": "2.0.60",
   "license": "GPL-3.0-only",
   "private": true,
   "scripts": {
@@ -48,6 +48,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/unzipper": "^0.10.11",
     "@vitest/coverage-v8": "^4.1.10",
+    "esbuild": "^0.28.2",
     "eslint": "^9.9.1",
     "eslint-config-next": "16.2.6",
     "gifenc": "^1.0.3",
