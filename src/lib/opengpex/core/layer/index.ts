@@ -406,3 +406,4 @@ export function createLayerService(
 }
 
 export * from './factory';
+export * from './amask';

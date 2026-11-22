@@ -202,6 +202,28 @@ export interface AdjustmentMask {
   enabled: boolean;
   /** Feather radius (px) applied to the coverage edge. */
   feather?: number;
+  /**
+   * Who wrote this mask. `'preset'` marks a mask written by a filter-preset
+   * application — applying another preset (or resetting inside the presets
+   * panel) removes exactly these masks and leaves everything else intact.
+   * ABSENCE MEANS MANUAL: masks written by hand (sliders, curves, levels...)
+   * may omit the field and are treated as user-owned, so documents saved
+   * before the field existed keep working unchanged.
+   */
+  origin?: 'preset' | 'manual';
+  /**
+   * The id of the filter preset whose application produced this mask. Written
+   * ONLY by the preset apply path and only on `origin: 'preset'` masks; every
+   * mask in one application shares the same id. Identity is recorded at write
+   * time, so the presets panel's selection highlight looks this id up
+   * directly and NEVER infers it from mask values. Absent = not
+   * preset-derived (manual masks, legacy documents saved before the field
+   * existed) — such chains simply highlight nothing; the panel's Reset still
+   * works because reset removes masks by `origin`, not by this field. All
+   * other mask consumers (grade extraction, the render translation) ignore
+   * this field; the save/hydrate JSON round-trip carries it for free.
+   */
+  fromPreset?: string;
 }
 
 /** Hard per-layer cap on adjustment masks (product decision, not a performance limit). */
@@ -469,6 +491,7 @@ export type LayerSourceTool =
   | 'eraser'   // Legacy eraser bake
   | 'restore'  // Legacy restore bake
   | 'mosaic'   // Mosaic bake
+  | 'heal'     // Spot-heal bake (mosaic-overlay heal variant)
   | 'pen'      // Pen shape layer (Phase 3 face renderer)
   | 'misc';    // Fallback: tag missing or unrecognised
 

@@ -46,13 +46,20 @@
 import type { Layer, Frame, InteractionEvent, LocalPolygon } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import type { LayerService } from '@opengpex/editor/core/layer/types';
-import type { Point2D, StrokeSession, PaintBakeRequest, BakeRequest } from './types';
+import { healStamp } from './healKernel';
+import type { Point2D, StrokeSession, PaintBakeRequest, BakeRequest, MosaicSessionMode } from './types';
 
 // ─── Configuration ─────────────────────────────────────────────────────────────
 
 export interface MosaicStrokeConfig {
   brushDiameter: number;
   blockSize: number;
+  /**
+   * Variant kernel: 'mosaic' pixelates blocks; 'heal' synthesizes stamps
+   * from a ring band around the brush (spot heal). blockSize is unused by
+   * the heal kernel but kept in the config shape so factories can share it.
+   */
+  mode: MosaicSessionMode;
   canvasSize: { w: number; h: number };
   /** Layer service access — new mosaic canvases are named through the smart naming service, not static factory calls. */
   layers: LayerService;
@@ -77,6 +84,8 @@ export class MosaicStrokeSession implements StrokeSession {
   private ctx: OffscreenCanvasRenderingContext2D;
   private config: MosaicStrokeConfig;
   private processedBlocks = new Set<string>();
+  /** Heal variant: anti-repeat keys of stamp cells already synthesized (one stamp per radius-sized cell). */
+  private processedStamps = new Set<string>();
   private _version = 0;
   private forceNewLayer: boolean;
 
@@ -122,7 +131,7 @@ export class MosaicStrokeSession implements StrokeSession {
       // Replay any points that arrived before source was ready
       if (this.bufferedPoints.length > 0) {
         for (const pt of this.bufferedPoints) {
-          this.pixelateAt(pt.x, pt.y);
+          this.stampAt(pt.x, pt.y);
         }
         // Same confinement contract as begin()/move(): a buffered point may
         // sit outside the selection — clip before the replayed blocks reach
@@ -139,7 +148,7 @@ export class MosaicStrokeSession implements StrokeSession {
 
   begin(point: Point2D, _pressure: number): void {
     if (this.sourceImageData) {
-      this.pixelateAt(point.x, point.y);
+      this.stampAt(point.x, point.y);
       this.applyConfinementClip();
     } else {
       this.bufferedPoints.push({ x: point.x, y: point.y });
@@ -149,12 +158,25 @@ export class MosaicStrokeSession implements StrokeSession {
 
   move(point: Point2D, _pressure: number, _e: InteractionEvent): void {
     if (this.sourceImageData) {
-      this.pixelateAt(point.x, point.y);
+      this.stampAt(point.x, point.y);
       this.applyConfinementClip();
     } else {
       this.bufferedPoints.push({ x: point.x, y: point.y });
     }
     this._version++;
+  }
+
+  /**
+   * Variant dispatch: routes one brush stamp to the mode's kernel.
+   * Both kernels read the same composited source and write the same stroke
+   * buffer, so confinement, dirty tracking and bake are shared unchanged.
+   */
+  private stampAt(cx: number, cy: number): void {
+    if (this.config.mode === 'heal') {
+      this.healStampAt(cx, cy);
+    } else {
+      this.pixelateAt(cx, cy);
+    }
   }
 
   /**
@@ -262,24 +284,30 @@ export class MosaicStrokeSession implements StrokeSession {
     const activeLayerId = frame.activeLayerId;
     const activeLayer = activeLayerId ? frame.layers.byId[activeLayerId] : null;
 
+    // Each variant owns its layer family exclusively: heal never reuses a
+    // mosaic canvas and vice versa, so either tool's result can be deleted
+    // or erased independently without touching the other's pixels.
+    const expectedSourceTool: 'mosaic' | 'heal' = this.config.mode === 'heal' ? 'heal' : 'mosaic';
+    const layerNameBase = this.config.mode === 'heal' ? 'Heal' : 'Mosaic';
+
     const hasMasks = activeLayer?.bitmapMasks && activeLayer.bitmapMasks.length > 0;
     // P5: the dedicated paint kind merged into image — a reusable mosaic
-    // canvas is an image stamped `sourceTool:'mosaic'`. Unstamped image
-    // layers (photos, baked text) are NOT mosaic targets: drawing mosaic
-    // onto a photo must stay impossible.
-    if (!this.forceNewLayer && !hasMasks && activeLayer && activeLayer.type === 'image' && activeLayer.metadata?.sourceTool === 'mosaic' && !activeLayer.locked && activeLayer.visible) {
+    // canvas is an image stamped `sourceTool:'mosaic'` (heal mirrors this
+    // with `sourceTool:'heal'`). Unstamped image layers (photos, baked
+    // text) are NOT targets: painting onto a photo must stay impossible.
+    if (!this.forceNewLayer && !hasMasks && activeLayer && activeLayer.type === 'image' && activeLayer.metadata?.sourceTool === expectedSourceTool && !activeLayer.locked && activeLayer.visible) {
       return { layer: activeLayer, isNew: false };
     }
 
     // Create new Paint Layer
-    const smartName = this.config.layers.factory.getNewLayerNameFor(frame, 'Mosaic');
+    const smartName = this.config.layers.factory.getNewLayerNameFor(frame, layerNameBase);
     const newLayer = LayerFactory.createLayer('blank', {
       name: smartName,
       cx: 0,
       cy: 0,
       bounding: { w: frame.canvas.w, h: frame.canvas.h },
       visible: true,
-      metadata: { sourceTool: 'mosaic' },
+      metadata: { sourceTool: expectedSourceTool },
     });
 
     return { layer: newLayer, isNew: true };
@@ -432,5 +460,67 @@ export class MosaicStrokeSession implements StrokeSession {
 
     this.ctx.fillStyle = `rgba(${avgR}, ${avgG}, ${avgB}, ${avgA})`;
     this.ctx.fillRect(x0, y0, x1 - x0, y1 - y0);
+  }
+
+  // ─── Heal Core ─────────────────────────────────────────────────────────────
+
+  /**
+   * Synthesizes one spot-heal stamp at the brush position.
+   *
+   * Anti-repeat: the heal kernel is idempotent-ish but re-synthesizing the
+   * same spot every pointermove would churn CPU and visibly re-roll the
+   * jitter. Stamps are deduped on a radius-sized grid (one stamp per cell),
+   * mirroring the mosaic `processedBlocks` strategy — a slow drag still
+   * lays overlapping stamps that chain through the working buffer, because
+   * the SOURCE passed to the kernel is the session composite that already
+   * contains every previous stamp of this stroke.
+   */
+  private healStampAt(cx: number, cy: number): void {
+    const { brushDiameter, canvasSize, sampleScale } = this.config;
+    const radius = brushDiameter / 2;
+
+    // Confinement rect fast-reject (same contract as pixelateAt: stamps
+    // fully outside the selection would be clipped by the compose anyway,
+    // but drawing them would dirty the session and bake an empty layer).
+    if (this.confinement) {
+      const r = this.confinement.rect;
+      if (cx + radius <= r.x || cx - radius >= r.x + r.w) return;
+      if (cy + radius <= r.y || cy - radius >= r.y + r.h) return;
+    }
+
+    // Anti-repeat grid (canvas space).
+    const step = Math.max(1, radius);
+    const key = `${Math.floor(cx / step)},${Math.floor(cy / step)}`;
+    if (this.processedStamps.has(key)) return;
+    this.processedStamps.add(key);
+
+    const sourceData = this.sourceImageData!; // guaranteed non-null: called only after sourceReady
+    const size = Math.ceil(radius) * 2;
+    if (size <= 0) return;
+
+    // Run the kernel in sample space, then draw the patch back into the
+    // canvas-space stroke buffer scaled by 1/sampleScale. A temp canvas is
+    // required because putImageData ignores compositing and would punch
+    // transparent holes over previously stamped areas of the buffer.
+    const patch = healStamp(
+      { source: sourceData, cx: cx * sampleScale, cy: cy * sampleScale, radius: radius * sampleScale },
+    );
+    if (patch.size <= 0) return;
+
+    const tmp = new OffscreenCanvas(patch.size, patch.size);
+    const tmpCtx = tmp.getContext('2d');
+    if (!tmpCtx) return;
+    tmpCtx.putImageData(new ImageData(patch.data as unknown as ImageDataArray, patch.size, patch.size), 0, 0);
+
+    // Clamp the destination rect to canvas bounds (drawImage handles
+    // out-of-bounds fine, but the dirty rect must stay sane).
+    const dx = cx - radius;
+    const dy = cy - radius;
+    this.ctx.drawImage(tmp, 0, 0, patch.size, patch.size, dx, dy, radius * 2, radius * 2);
+
+    this.dirtyMinX = Math.min(this.dirtyMinX, Math.max(0, dx));
+    this.dirtyMinY = Math.min(this.dirtyMinY, Math.max(0, dy));
+    this.dirtyMaxX = Math.max(this.dirtyMaxX, Math.min(canvasSize.w, dx + radius * 2));
+    this.dirtyMaxY = Math.max(this.dirtyMaxY, Math.min(canvasSize.h, dy + radius * 2));
   }
 }

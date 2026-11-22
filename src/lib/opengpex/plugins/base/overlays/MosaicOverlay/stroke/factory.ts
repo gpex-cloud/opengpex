@@ -28,7 +28,25 @@ import { sampleImageData } from '@opengpex/editor/core/engine/utils/sample-utils
 import { CraftDrawerAPI, MOSAIC_SIZE_PRESETS } from '../../../drawers/CraftDrawer/protocols';
 import type { CraftDrawerConfig } from '../../../drawers/CraftDrawer/protocols';
 import { MosaicStrokeSession } from './MosaicStrokeSession';
-import type { StrokeSession } from './types';
+import type { MosaicSessionMode, StrokeSession } from './types';
+
+/**
+ * Capture downsample target for the heal variant. The heal kernel does real
+ * patch matching against the ring band around each stamp, so unlike mosaic
+ * (average block colors only) it needs noticeably finer source detail; a
+ * 1280px composite keeps patches (default 6px at scale 1) meaningful while
+ * still bounding the readback buffer to a few MB.
+ */
+const HEAL_SAMPLE_TARGET_DIM = 1280;
+
+/**
+ * Sampling margin for heal, as a fraction of the brush radius. The kernel
+ * samples the ring band r..1.5r OUTSIDE the stamp, so the composited source
+ * must be trusted at least half a brush diameter beyond every stamp edge.
+ * The capture itself is canvas-wide; this only documents the effective
+ * range contract (and guards degenerate presets below).
+ */
+export const HEAL_SAMPLE_MARGIN_FACTOR = 0.5;
 
 // ─── Mosaic Session Creation ───────────────────────────────────────────────────
 
@@ -71,22 +89,33 @@ export function createMosaicSession(e: InteractionEvent): StrokeSession | null {
     return null;
   }
 
-  // Read preset size from CraftDrawer config
+  // Read preset size + active variant from CraftDrawer config. Heal is a
+  // sub-mode of the single mosaic Craft button; the size presets table is
+  // shared (for heal, `brushDiameter` is the stamp diameter and `blockSize`
+  // is unused by the kernel).
   const craftConfig = e.state.pluginConfig[CraftDrawerAPI.configKey] as unknown as CraftDrawerConfig | undefined;
+  const mode: MosaicSessionMode = craftConfig?.mosaicToolMode === 'heal' ? 'heal' : 'mosaic';
   const preset = craftConfig?.mosaicSizePreset ?? 'M';
   const presetData = MOSAIC_SIZE_PRESETS[preset as keyof typeof MOSAIC_SIZE_PRESETS] ?? MOSAIC_SIZE_PRESETS['M'];
   const { brushDiameter, blockSize } = presetData;
 
-  // Downsample large canvases (max dimension > 640) for mosaic source readback.
-  // The mosaic stroke session only needs average block colors. Downsampling to ≤640
-  // ensures the GPU readback buffer is only ~6.5MB (vs 392MB) and CPU sRGB gamut
-  // encode finishes in ~15ms (1 frame, vs 400ms freeze), eliminating mousedown frame drops.
+  // Downsample large canvases for mosaic/heal source readback.
+  // The mosaic stroke session only needs average block colors (≤640 target);
+  // heal does patch matching on a ring band around each stamp, so it needs
+  // finer source detail — its composite target is relaxed to 1280px, which
+  // still bounds the GPU readback buffer to a few MB and keeps the sRGB
+  // encode within a frame.
   const maxDim = Math.max(frame.canvas.w, frame.canvas.h);
   let sampleScale = 1;
-  const targetDim = 640;
+  const targetDim = mode === 'heal' ? HEAL_SAMPLE_TARGET_DIM : 640;
   if (maxDim > targetDim) {
     const targetScale = targetDim / maxDim;
-    const minScale = blockSize > 0 ? Math.min(1, 1 / blockSize) : targetScale;
+    // Mosaic floor: blockSize maps to at least 1 sample pixel. Heal has no
+    // block grid; its floor is the patch size, so patch matching never
+    // degenerates below its minimum working scale.
+    const minScale = mode === 'heal'
+      ? Math.min(1, Math.max(0.25, 6 / brushDiameter))
+      : (blockSize > 0 ? Math.min(1, 1 / blockSize) : targetScale);
     sampleScale = Math.min(1, Math.max(targetScale, minScale));
   }
 
@@ -96,7 +125,7 @@ export function createMosaicSession(e: InteractionEvent): StrokeSession | null {
 
   try {
     return new MosaicStrokeSession(
-      { brushDiameter, blockSize, canvasSize: { w: frame.canvas.w, h: frame.canvas.h }, sampleScale, layers: e.layers },
+      { brushDiameter, blockSize, mode, canvasSize: { w: frame.canvas.w, h: frame.canvas.h }, sampleScale, layers: e.layers },
       compositePromise,
       forceNewLayer,
       // Gesture-start selection snapshot (factory runs at gesture start).

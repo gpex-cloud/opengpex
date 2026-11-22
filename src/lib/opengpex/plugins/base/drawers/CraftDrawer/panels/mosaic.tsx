@@ -20,7 +20,6 @@
 "use client";
 
 import React from "react";
-import { Sparkles } from "lucide-react";
 import FunctionTabs from "@opengpex/editor/widgets/FunctionTabs";
 import { useMosaicPanel } from "../hooks";
 import { MOSAIC_SIZE_PRESETS } from "../protocols";
@@ -31,10 +30,14 @@ import { MOSAIC_SIZE_PRESETS } from "../protocols";
  * MosaicPanel: Mosaic tool attributes panel
  *
  * Rendered inside CraftDrawer, displayed when activeCraft='mosaic'.
- * Provides preset size selection (S/M/L) for block size and brush diameter
- * using FunctionTabs widget.
- * Also shows a "Coming Soon" hint for AI Mosaic Tool.
+ * Top: variant switch (Mosaic pixelation vs Spot Heal). Below: shared
+ * XS-XL preset tabs — block size for mosaic, stamp diameter for heal.
  */
+
+const MODE_OPTIONS = [
+  { value: 'mosaic', label: 'Mosaic' },
+  { value: 'heal', label: 'Heal' },
+] as const;
 
 const PRESET_OPTIONS = (['XS', 'S', 'M', 'L', 'XL'] as const).map((key) => {
   const data = MOSAIC_SIZE_PRESETS[key];
@@ -52,19 +55,21 @@ const PRESET_OPTIONS = (['XS', 'S', 'M', 'L', 'XL'] as const).map((key) => {
 });
 
 export const MosaicPanel = React.memo(function MosaicPanel() {
-  const { sizePreset, setSizePreset } = useMosaicPanel();
+  const { sizePreset, setSizePreset, toolMode, setToolMode } = useMosaicPanel();
+
+  const isHeal = toolMode === 'heal';
 
   return (
     <div className="flex flex-col gap-2 p-1">
-      {/* ── Upper: Block size selection ── */}
+      {/* ── Top: Variant switch (mosaic pixelation vs spot heal) ── */}
       <div className="flex flex-col gap-1.5">
         <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight px-1">
-          Block Size
+          Tool
         </span>
         <FunctionTabs
-          options={PRESET_OPTIONS}
-          value={sizePreset}
-          onChange={setSizePreset}
+          options={MODE_OPTIONS as unknown as { value: string; label: string }[]}
+          value={toolMode}
+          onChange={(v) => setToolMode(v as 'mosaic' | 'heal')}
           size="sm"
         />
       </div>
@@ -72,12 +77,17 @@ export const MosaicPanel = React.memo(function MosaicPanel() {
       {/* ── Middle: Divider ── */}
       <div className="border-t border-[var(--border-subtle)] dark:border-white/10 my-1" />
 
-      {/* ── Lower: AI Mosaic Tool Coming Soon ── */}
-      <div className="flex items-center gap-1.5 px-1 py-1.5 rounded-md bg-[var(--surface-alt)] opacity-60">
-        <Sparkles size={12} className="text-[var(--text-muted)]" />
-        <span className="text-[9px] text-[var(--text-muted)]">
-          AI Mosaic Tool — Coming Soon
+      {/* ── Lower: Size preset (block size for mosaic, stamp diameter for heal) ── */}
+      <div className="flex flex-col gap-1.5">
+        <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight px-1">
+          {isHeal ? 'Stamp Size' : 'Block Size'}
         </span>
+        <FunctionTabs
+          options={PRESET_OPTIONS}
+          value={sizePreset}
+          onChange={setSizePreset}
+          size="sm"
+        />
       </div>
     </div>
   );

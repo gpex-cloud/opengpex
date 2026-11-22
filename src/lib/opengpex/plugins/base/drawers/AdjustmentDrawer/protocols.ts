@@ -42,6 +42,7 @@
  */
 
 import type { CurvePoints, CurvesState, LevelsState, ChannelMixState, ColorBalanceState, AdjustmentState } from '@opengpex/editor/core/types/models';
+import type { FilterPreset } from '@opengpex/editor/plugins/base/drawers/AdjustmentDrawer/grading/presets/preset-chain';
 
 /**
  * Re-export `CurvePoints` from the domain model so the auto-generated
@@ -293,12 +294,32 @@ export const CMD_UPDATE_COLOR_BALANCE = 'cmd.update_color_balance';
  * expose the entry-level adjustments before Curves/Levels/Mixer, and we
  * default new documents to it via `DEFAULT_GRADING_TOOL` below.
  *
+ * The `'presets'` tool is the one-click filter wall (14 built-in looks in a
+ * 2-column thumbnail grid). It leads the union because it is the DEFAULT
+ * (see `DEFAULT_GRADING_TOOL` below): amateur users open the drawer and see
+ * the preset grid first, then dive into the manual panels when they want
+ * pixel-precise control.
+ *
  * Backwards-compatibility note: `pluginConfig.lastTool` may hold a legacy
  * value of `'curves' | 'levels' | 'mixer'` from before `'basic'` shipped;
  * those values remain part of the union so persisted preferences continue
  * to round-trip without needing a migration.
  */
-export type GradingTool = 'basic' | 'curves' | 'levels' | 'mixer' | 'colorBalance';
+export type GradingTool = 'presets' | 'basic' | 'curves' | 'levels' | 'mixer' | 'colorBalance';
+
+// ─── Filter Preset commands ───────────────────────────────────────────
+//
+// One preset click = one undo step: the panel bookends the write with the
+// shared `beginAdjustmentsEdit` checkpoint, so `applyFilterPreset` itself is
+// NON-undoable (same gesture-coalescing contract as every other write).
+// `updateFilterPreset` re-writes the same preset at a new strength during the
+// strength-slider drag — also non-undoable, covered by the same checkpoint.
+
+/** Atomically write a built-in filter preset. Payload: `{ presetId, strength }` where `strength` is the interpolation parameter t in [0, 1] (panels convert their percent sliders). */
+export const CMD_APPLY_FILTER_PRESET = 'cmd.apply_filter_preset';
+
+/** Re-write the current preset at a new strength (drag path). Payload: `{ presetId, strength }` with `strength` as t in [0, 1]. */
+export const CMD_UPDATE_FILTER_PRESET = 'cmd.update_filter_preset';
 
 
 /** Which per-channel curve is being edited inside the Curves panel. */
@@ -340,12 +361,14 @@ export type ActiveGradingTool = GradingTool;
 /**
  * Default sub-panel when the plugin first mounts.
  *
- * This changed from `'curves'` to `'basic'` to align with the
- * Photoshop / Lightroom onboarding convention: entry-level users should see
- * the familiar brightness / contrast / saturation sliders first, and only
- * dive into Curves/Levels/Mixer when they need pixel-precise tonal control.
+ * `'presets'` (the one-click filter wall) is the entry surface: amateur users
+ * open the drawer to make a photo look better with ONE click, so the preset
+ * grid fronts the drawer. Manual panels (basic/curves/levels/...) remain one
+ * header-icon away for pixel-precise tonal control. Previously `'basic'`
+ * (Photoshop / Lightroom onboarding convention) — the persisted
+ * `pluginConfig.lastTool` still round-trips whatever the user last picked.
  */
-export const DEFAULT_GRADING_TOOL: GradingTool = 'basic';
+export const DEFAULT_GRADING_TOOL: GradingTool = 'presets';
 
 
 /**
@@ -358,6 +381,12 @@ export const DEFAULT_GRADING_TOOL: GradingTool = 'basic';
 export interface AdjustmentDrawerConfig {
   /** Remembered sub-panel across sessions (persisted via `pluginConfig`). */
   lastTool?: GradingTool;
+  /**
+   * User-saved filter presets ("save current look"). Persists via
+   * `pluginConfig` so saved looks survive editor reloads. Capped at
+   * `CUSTOM_FILTER_PRESET_CAP` entries (oldest evicted first).
+   */
+  customFilterPresets?: FilterPreset[];
 }
 
 

@@ -25,11 +25,11 @@ import {
   Eye,
   ScanEye,
   CirclePlus,
-  ChevronRight,
   ChevronDown,
   Merge,
   FolderPlus,
   Loader2,
+  Blend,
 } from "lucide-react";
 import { Reorder, useDragControls, type DragControls } from "framer-motion";
 import {
@@ -578,24 +578,18 @@ export function LayersPanel({
       {/* ─── Blend & Opacity Section (collapsible, default collapsed) ─── */}
       <div className="flex flex-col gap-1.5">
         <button
-          onClick={() => setBlendCollapsed((prev) => !prev)}
+          onClick={() => setBlendCollapsed(!blendCollapsed)}
           onMouseDown={(e) => e.preventDefault()}
-          className="flex items-center gap-1.5 px-1 py-0.5 rounded hover:bg-[var(--bg-stage)]/50 transition-colors w-full text-left"
+          className="flex items-center gap-1.5 w-full group cursor-pointer"
         >
-          {blendCollapsed ? (
-            <ChevronRight
-              size={10}
-              className="text-[var(--text-muted)] shrink-0"
-            />
-          ) : (
-            <ChevronDown
-              size={10}
-              className="text-[var(--text-muted)] shrink-0"
-            />
-          )}
-          <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-wide">
+          <Blend size={12} className="text-[var(--text-muted)] opacity-70" />
+          <span className="text-[9px] font-black uppercase tracking-[0.15em] text-[var(--text-muted)] flex-1 text-left opacity-80">
             Blend & Opacity
           </span>
+          <ChevronDown
+            size={12}
+            className={`text-[var(--text-muted)] opacity-50 group-hover:opacity-100 transition-transform duration-200 ${blendCollapsed ? "-rotate-90" : ""}`}
+          />
         </button>
         {!blendCollapsed && <LayerPropsBar />}
       </div>

@@ -41,6 +41,8 @@ export interface AdjustmentDrawerCommandsMap {
   setEdgeFeatherCmd: CommandInstance<{ radius: number; cascade?: boolean; hole?: 'match' | 'clear' | 'none'; holeOnly?: boolean }>;
   beginColorBalanceEditCmd: CommandInstance;
   updateColorBalanceCmd: CommandInstance<{ patch: ColorBalancePatch }>;
+  applyFilterPresetCmd: CommandInstance<{ presetId: string; strength: number }>;
+  updateFilterPresetCmd: CommandInstance<{ presetId: string; strength: number }>;
 }
 
 /** Type map for usePluginSignals<AdjustmentDrawerSignalsMap>() */

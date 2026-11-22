@@ -31,6 +31,14 @@ export interface Point2D {
   y: number;
 }
 
+// ─── Variant Mode ──────────────────────────────────────────────────────────────
+
+/**
+ * Which pixelation-family variant the overlay synthesizes: 'mosaic'
+ * pixelates blocks; 'heal' spot-heals stamps from a ring band (A2).
+ */
+export type MosaicSessionMode = 'mosaic' | 'heal';
+
 // ─── Shared Worker Message Types ───────────────────────────────────────────────
 
 export interface BakeWorkerRequest {

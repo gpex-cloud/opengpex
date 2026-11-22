@@ -2,6 +2,14 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.61
+
+- Filters: 20 one-click photo looks with live previews of your own photo, applicable at Weak / Medium / Strong strength
+- Filters: save your current look as a custom preset — rename it on its card, and share looks between devices with JSON export/import
+- Filters: an applied preset keeps its highlight after a reload, and hand tuning always survives a look swap
+- Workspace: drawer panels taller than the screen now scroll internally instead of pushing other drawer entries out of reach
+- Healing: a new Heal mode in the Mosaic brush removes blemishes and small objects with the surrounding texture, on its own layer with full undo
+
 ## 2.0.60
 
 - Image Formats: importing and exporting GIF files works again in the cloud deployment — the decoder/encoder libraries failed to load there since a recent release, showing an import error instead

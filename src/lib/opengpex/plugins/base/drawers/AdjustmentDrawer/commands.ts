@@ -19,25 +19,30 @@
 
 'use client';
 
+
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
 import type {
-  AdjustmentMask,
-  GradeCategory,
-  GradeState,
+  AdjustmentState,
   Layer,
-  Frame,
   CurvePoints,
   CurvesState,
   LevelsState,
   ChannelMixState,
   ColorBalanceState,
-  AdjustmentState,
 } from '@opengpex/editor/core/types/models';
-import { MAX_ADJUSTMENT_MASKS_PER_LAYER } from '@opengpex/editor/core/types/models';
+import { GRADE_ARM_KEY, dropManualCategoryMasks, dropPresetOwnedMasks } from '@opengpex/editor/core/layer/amask';
 
 import { LayerFactory } from '@opengpex/editor/core/layer/factory';
 import * as P from './protocols';
-import { resolveEditableTail, projectSelectionToLayer, toolCategory } from './utils-hotTail';
+import { resolveEditableTail, toolCategory } from './utils-hotTail';
+import {
+  writeArm,
+  nextMasksForArm,
+  readPanelArm,
+  mergeCurves,
+  insertPointSorted,
+} from './grading/manual-apply';
+import { buildPresetMasks, resolvePresetForApply } from './grading/presets/preset-apply';
 import type {
   GradingTool,
   AdjustmentDrawerConfig,
@@ -48,20 +53,6 @@ import type {
   AdjustmentsPatch,
   ColorBalancePatch,
 } from './protocols';
-
-
-
-
-// ─── Shared Logic ──────────────────────────────────────────────────────────────
-
-/** The grade-state key that holds a category's parameters. */
-const GRADE_ARM_KEY = {
-  basic: 'adjustments',
-  levels: 'levels',
-  curves: 'curves',
-  channelMix: 'channelMix',
-  colorBalance: 'colorBalance',
-} as const;
 
 /**
  * Persists the active grading tool both to the shared signal (so other plugins
@@ -98,138 +89,6 @@ function openDrawerWithTool(ctx: EditorContextValue, tool: GradingTool) {
   setActiveTool(ctx, tool);
 }
 
-// ─── Hot-tail grade reads (panel view) ────────────────────────────────────────
-
-/**
- * The grade value a panel should display: the EDITABLE hot tail's arm when
- * one exists (same category, same layer, coverage matching the current
- * selection), otherwise `undefined` — the panel then starts from its
- * defaults and the next write appends a new mask.
- */
-/** Any category's parameter arm (the panels narrow by their own category). */
-export type GradeArm = AdjustmentState | CurvesState | LevelsState | ChannelMixState | ColorBalanceState;
-
-export function readPanelArm(
-  ctx: EditorContextValue,
-  category: GradeCategory,
-): GradeArm | undefined {
-  const { activeFrame, activeLayer } = ctx;
-  if (!activeFrame || !activeLayer) return undefined;
-  const tail = resolveEditableTail(ctx.geometry, activeFrame, activeLayer, category);
-  return tail?.grade[GRADE_ARM_KEY[category]];
-}
-
-// ─── Hot-tail grade writes ────────────────────────────────────────────────────
-
-/** HUD message when the per-layer mask cap blocks a new commit. */
-function capBlocked(ctx: EditorContextValue, category: GradeCategory): boolean {
-  ctx.actions.setInteraction({
-    hud: {
-      message: `Adjustment limit reached: ${MAX_ADJUSTMENT_MASKS_PER_LAYER} masks per layer. Delete one in the Layers panel to add another.`,
-      type: 'error',
-    },
-  });
-  void category;
-  return true;
-}
-
-/**
- * Compute the next `adjustMasks` array for a write of one category's arm:
- * the EDITABLE hot tail is patched in place; otherwise a NEW single-category
- * mask is appended, carrying the frozen selection snapshot when one is active.
- * Returns `undefined` (no write) when the append hits the per-layer cap.
- */
-function nextMasksForArm(
-  ctx: EditorContextValue,
-  frame: Frame,
-  layer: Layer,
-  category: GradeCategory,
-  arm: GradeArm,
-): AdjustmentMask[] | undefined {
-  const masks = layer.adjustMasks ?? [];
-  const tail = resolveEditableTail(ctx.geometry, frame, layer, category);
-  const key = GRADE_ARM_KEY[category];
-  if (tail) {
-    return masks.map((m) => (m.id === tail.id ? { ...m, grade: { ...m.grade, [key]: arm } } : m));
-  }
-  if (masks.length >= MAX_ADJUSTMENT_MASKS_PER_LAYER) {
-    capBlocked(ctx, category);
-    return undefined;
-  }
-  const shape = projectSelectionToLayer(ctx.geometry, frame, layer);
-  const mask: AdjustmentMask = {
-    id: LayerFactory.newAdjustMaskId(),
-    category,
-    grade: { [key]: arm } as GradeState,
-    enabled: true,
-  };
-  if (shape) mask.shape = shape;
-  return [...masks, mask];
-}
-
-/**
- * Write one category's arm through the hot-tail rules (one Redux write, one
- * undo step with the gesture's checkpoint). A selection snapshot rides the
- * SAME write when a new mask is born, matching "draw selection → adjust".
- */
-function writeArm(
-  ctx: EditorContextValue,
-  category: GradeCategory,
-  arm: GradeArm,
-): void {
-  const { activeFrame, activeLayer, actions } = ctx;
-  if (!activeFrame || !activeLayer) return;
-  const masks = nextMasksForArm(ctx, activeFrame, activeLayer, category, arm);
-  if (!masks) return;
-  actions.updateLayer(activeFrame.id, activeLayer.id, {
-    adjustMasks: masks.length ? masks : undefined,
-  });
-}
-
-// ─── Curves helpers ────────────────────────────────────────────────────────────
-
-/**
- * Merge a channel-scoped `points` patch into a curves arm while keeping the
- * other channels intact.
- */
-function mergeCurves(
-  current: CurvesState | undefined,
-  channel: CurveChannel,
-  points: CurvePoints,
-): CurvesState {
-  return { ...(current ?? {}), [channel]: points };
-}
-
-/**
- * Insert a control point into a channel's points array while keeping the list
- * sorted by x and preventing exact-x duplicates (which would confuse the
- * cubic-spline evaluator downstream). Endpoints at x=0 / x=1 are kept because
- * they anchor the curve — new points can nudge in-between them.
- */
-function insertPointSorted(
-  points: CurvePoints,
-  x: number,
-  y: number,
-): CurvePoints {
-  const clampedX = Math.max(0, Math.min(1, x));
-  const clampedY = Math.max(0, Math.min(1, y));
-  const next: CurvePoints = [];
-  let inserted = false;
-  for (const p of points) {
-    if (!inserted && p[0] > clampedX) {
-      next.push([clampedX, clampedY]);
-      inserted = true;
-    }
-    // Skip duplicates on x — the new point wins (Photoshop-style).
-    if (p[0] === clampedX) continue;
-    next.push([p[0], p[1]]);
-  }
-  if (!inserted) next.push([clampedX, clampedY]);
-  return next;
-}
-
-// ─── Commands ──────────────────────────────────────────────────────────────────
-
 /**
  * Zero the layer's Edge Feather across ALL its carriers, honouring the route.
  * Reset semantics: this layer's feather back to identity — the source hole (a
@@ -257,11 +116,6 @@ function clearEdgeFeatherPatch(layer: Layer): Partial<Layer> | undefined {
   return undefined;
 }
 
-/** Drop every mask of `category` from a layer's chain (`undefined` when none survive). */
-function dropCategoryMasks(layer: Layer, category: GradeCategory): Partial<Layer> {
-  const remaining = (layer.adjustMasks ?? []).filter((m) => m.category !== category);
-  return { adjustMasks: remaining.length ? remaining : undefined };
-}
 
 /**
  * ADJUSTMENT_COMMANDS: Command definitions for the AdjustmentDrawer.
@@ -365,14 +219,27 @@ export const ADJUSTMENT_COMMANDS = {
         (scoped!.getSignal(P.SIGNAL_ACTIVE_GRADING_TOOL, P.DEFAULT_GRADING_TOOL) as GradingTool) ??
         P.DEFAULT_GRADING_TOOL;
       const category = toolCategory(tool);
+      // The presets tool spans several grade categories, so its reset is not
+      // a single-category drop: it removes exactly the preset-owned masks
+      // (`origin: 'preset'`) and keeps every hand-written grade intact
+      // (see the reset-semantics comment above).
+      // Edge Feather's routed carriers are not preset-written, so they are
+      // left untouched here.
+      if (tool === 'presets') {
+        actions.updateLayer(activeFrame.id, activeLayer.id, dropPresetOwnedMasks(activeLayer));
+        return;
+      }
+      // Every other tool resets ONE category, and only its hand-written
+      // masks (see dropManualCategoryMasks) — the preset's contribution to
+      // this category stays because it belongs to the applied look.
       // Basic owns the Edge Feather slider — its routed carriers must reset
       // with the panel (other tools never touched them).
       actions.updateLayer(
         activeFrame.id,
         activeLayer.id,
         tool === 'basic'
-          ? { ...dropCategoryMasks(activeLayer, category), ...clearEdgeFeatherPatch(activeLayer) }
-          : dropCategoryMasks(activeLayer, category),
+          ? { ...dropManualCategoryMasks(activeLayer, category), ...clearEdgeFeatherPatch(activeLayer) }
+          : dropManualCategoryMasks(activeLayer, category),
       );
     },
   } as EditorCommand<void, void>,
@@ -544,10 +411,11 @@ export const ADJUSTMENT_COMMANDS = {
     ) => {
       const { activeFrame, activeLayer, actions } = ctx;
       if (!activeFrame || !activeLayer) return;
-      // `'none'` drops the category's masks entirely — treated exactly like a
-      // reset from the render pipeline's perspective.
+      // `'none'` drops the mixer panel's MANUAL channelMix masks — the same
+      // provenance-aware reset rule as resetActivePanel: masks the applied
+      // look owns (`origin: 'preset'`) stay until the presets panel resets.
       if (payload.presetId === 'none') {
-        actions.updateLayer(activeFrame.id, activeLayer.id, dropCategoryMasks(activeLayer, 'channelMix'));
+        actions.updateLayer(activeFrame.id, activeLayer.id, dropManualCategoryMasks(activeLayer, 'channelMix'));
         return;
       }
       const preset = P.CHANNEL_MIX_PRESETS[payload.presetId];
@@ -589,11 +457,14 @@ export const ADJUSTMENT_COMMANDS = {
       ctx: EditorContextValue,
       payload: { patch: AdjustmentsPatch },
     ) => {
-      // Merge onto the identity baseline so a partial patch (e.g. only
-      // brightness) never accidentally erases the other values. This also
-      // keeps `getAdjustmentsData()` happy — it expects a fully-formed
-      // AdjustmentState with all keys populated.
-      const current = (readPanelArm(ctx, 'basic') as AdjustmentState | undefined) ?? P.DEFAULT_ADJUSTMENTS_STATE;
+      // Merge onto the editable hot tail's arm when one exists. When there is
+      // NO tail (cold start, or an applied preset owns the chain head), the
+      // appended manual mask carries ONLY the patch-defined fields: identity
+      // fields are true no-ops in the chain composition, and extraction
+      // ("Save as Preset" / Export) merges basic masks at FIELD level, so a
+      // later manual mask overriding just brightness must not shadow the
+      // preset's other basic values with identity numbers.
+      const current = (readPanelArm(ctx, 'basic') as Partial<AdjustmentState> | undefined) ?? {};
       writeArm(ctx, 'basic', { ...current, ...payload.patch } as AdjustmentState);
     },
   } as EditorCommand<{ patch: AdjustmentsPatch }, void>,
@@ -627,8 +498,16 @@ export const ADJUSTMENT_COMMANDS = {
       const latest = actions.fast.latestLayer(activeFrame.id, activeLayer.id) ?? activeLayer;
       const tail = resolveEditableTail(ctx.geometry, activeFrame, latest, 'basic');
       const key = GRADE_ARM_KEY.basic;
-      const current = (tail?.grade[key] as AdjustmentState | undefined) ?? P.DEFAULT_ADJUSTMENTS_STATE;
-      const next: AdjustmentState = { ...current, ...payload.patch };
+      // Partial-append baseline: with no editable tail, only the patch's
+      // fields land in the new mask (see updateAdjustments) so a preset's
+      // basic values earlier in the chain are neither double-applied nor
+      // shadowed by identity numbers at extraction time. Chain arms are
+      // effectively partial (`AdjustmentState` fields all carry identity
+      // defaults downstream), hence the `Partial` read and the cast back —
+      // the shared `AdjustmentState` type still models the fields as
+      // required, and relaxing it ripples far beyond this drawer.
+      const current = (tail?.grade[key] as Partial<AdjustmentState> | undefined) ?? {};
+      const next = { ...current, ...payload.patch } as AdjustmentState;
 
       // ── Blur motion quantization (same cure as fastUpdateEdgeFeather) ──
       // The slider steps 0.1σ; a SLOW drag crosses a step on nearly every
@@ -726,8 +605,15 @@ export const ADJUSTMENT_COMMANDS = {
         // (created on first write when none exists).
         const tail = resolveEditableTail(ctx.geometry, activeFrame, latest, 'basic');
         const key = GRADE_ARM_KEY.basic;
-        const current = (tail?.grade[key] as AdjustmentState | undefined) ?? P.DEFAULT_ADJUSTMENTS_STATE;
-        const masks = nextMasksForArm(ctx, activeFrame, latest, 'basic', { ...current, edgeFeather: radius });
+        // Partial-append baseline (see updateAdjustments).
+        const current = (tail?.grade[key] as Partial<AdjustmentState> | undefined) ?? {};
+        const masks = nextMasksForArm(
+          ctx,
+          activeFrame,
+          latest,
+          'basic',
+          { ...current, edgeFeather: radius } as AdjustmentState,
+        );
         if (masks) {
           actions.fast.overrideLayer(frameId, activeLayer.id, {
             adjustMasks: masks.length ? masks : undefined,
@@ -820,8 +706,11 @@ export const ADJUSTMENT_COMMANDS = {
           );
           actions.updateLayer(activeFrame.id, activeLayer.id, { vectorMasks: masks });
         } else {
-          const current = (readPanelArm(ctx, 'basic') as AdjustmentState | undefined) ?? P.DEFAULT_ADJUSTMENTS_STATE;
-          writeArm(ctx, 'basic', { ...current, edgeFeather: radius });
+          // Partial-append baseline (see updateAdjustments): with no editable
+          // tail the new mask carries only edgeFeather, so it neither
+          // double-applies nor shadows earlier chain values.
+          const current = (readPanelArm(ctx, 'basic') as Partial<AdjustmentState> | undefined) ?? {};
+          writeArm(ctx, 'basic', { ...current, edgeFeather: radius } as AdjustmentState);
         }
       }
 
@@ -871,4 +760,60 @@ export const ADJUSTMENT_COMMANDS = {
       writeArm(ctx, 'colorBalance', { ...current, ...payload.patch });
     },
   } as EditorCommand<{ patch: ColorBalancePatch }, void>,
+
+  // ─── Filter Preset commands ────────────────────────────────────────
+  //
+  // A preset click is a PRESET-OWNED REPLACEMENT: the masks the previous
+  // preset wrote (`origin: 'preset'`) are discarded and the chosen preset's
+  // strength-resolved masks are appended, while every hand-written grade mask
+  // on the layer survives untouched. Undo comes from the panel's
+  // `beginAdjustmentsEdit` checkpoint, so both commands here are non-undoable.
+  // Capturing a look that combines a preset with manual edits is the separate
+  // "Save as Preset" flow (chain-snapshot extraction: one saved stage per
+  // enabled grade mask, in chain order).
+  //
+  // `presetId: 'none'` is the second-click reset: only the preset-owned
+  // masks are dropped — the layer keeps its manual grades.
+
+  applyFilterPreset: {
+    id: P.CMD_APPLY_FILTER_PRESET,
+    name: 'Apply Filter Preset',
+    execute: (
+      ctx: EditorContextValue,
+      payload: { presetId: string; strength: number },
+    ) => {
+      const { activeFrame, activeLayer, actions } = ctx;
+      if (!activeFrame || !activeLayer) return;
+      if (payload.presetId === 'none') {
+        actions.updateLayer(activeFrame.id, activeLayer.id, dropPresetOwnedMasks(activeLayer));
+        return;
+      }
+      const preset = resolvePresetForApply(ctx, payload.presetId);
+      if (!preset) return; // Silently ignore unknown ids.
+      const masks = buildPresetMasks(ctx, activeFrame, activeLayer, preset, payload.strength);
+      if (!masks) return;
+      actions.updateLayer(activeFrame.id, activeLayer.id, {
+        adjustMasks: masks.length ? masks : undefined,
+      });
+    },
+  } as EditorCommand<{ presetId: string; strength: number }, void>,
+
+  updateFilterPreset: {
+    id: P.CMD_UPDATE_FILTER_PRESET,
+    name: 'Update Filter Preset Strength',
+    execute: (
+      ctx: EditorContextValue,
+      payload: { presetId: string; strength: number },
+    ) => {
+      const { activeFrame, activeLayer, actions } = ctx;
+      if (!activeFrame || !activeLayer) return;
+      const preset = resolvePresetForApply(ctx, payload.presetId);
+      if (!preset) return;
+      const masks = buildPresetMasks(ctx, activeFrame, activeLayer, preset, payload.strength);
+      if (!masks) return;
+      actions.updateLayer(activeFrame.id, activeLayer.id, {
+        adjustMasks: masks.length ? masks : undefined,
+      });
+    },
+  } as EditorCommand<{ presetId: string; strength: number }, void>,
 } as const;

@@ -199,6 +199,12 @@ export interface CraftDrawerConfig {
   pendingTextData?: PendingTextData;
   /** Mosaic brush size preset */
   mosaicSizePreset: 'XS' | 'S' | 'M' | 'L' | 'XL';
+  /**
+   * Active variant under the single Mosaic craft button: 'mosaic' pixelates
+   * blocks, 'heal' runs the spot-heal patch kernel (stamp diameter = preset
+   * brushDiameter). Omitted = 'mosaic' (historical behaviour).
+   */
+  mosaicToolMode?: 'mosaic' | 'heal';
   /** Active marker sub-type (persisted across tool switches; default resolves to first registered kind) */
   activeMarkerKind?: MarkerKind;
   /**

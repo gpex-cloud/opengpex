@@ -21,7 +21,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ChartSpline, RotateCcw as ResetIcon } from "lucide-react";
+import { ChartSpline, NotebookText, RotateCcw as ResetIcon } from "lucide-react";
 import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { AdjustmentDrawerCommandsMap } from "./commands.d";
 import SplitButton from "@opengpex/editor/widgets/SplitButton";
@@ -33,6 +33,7 @@ import { CurvesPanel } from "./panels/curves";
 import { LevelsPanel } from "./panels/levels";
 import { ChannelMixerPanel } from "./panels/mixer";
 import { ColorBalancePanel } from "./panels/balance";
+import { PresetsPanel } from "./panels/presets/PresetsPanel";
 
 import { useAdjustmentDrawer, useGradingToolSwitch, useHotTailGrade } from "./hooks";
 import { toolCategory } from "./utils-hotTail";
@@ -43,13 +44,12 @@ import type { GradingTool } from "./protocols";
 /**
  * Header button definitions.
  *
- * Order deliberately puts Basic first, then Levels → Curves → Channel Mixer.
- * Basic fronts the list because it is the default tool
- * (Photoshop / Lightroom convention — entry-level users see brightness/
- * contrast / saturation first). Levels precedes Curves because it's a
- * simpler operation (range clamp + gamma) suitable for intermediate users;
- * Curves is the most flexible (arbitrary tone mapping) and sits before
- * Mixer for pixel-precise tonal work.
+ * Order deliberately puts Presets first (the DEFAULT tool — the one-click
+ * filter wall fronts the drawer), then Basic → Levels → Curves → Channel
+ * Mixer. Levels precedes Curves because it's a simpler operation (range
+ * clamp + gamma) suitable for intermediate users; Curves is the most
+ * flexible (arbitrary tone mapping) and sits before Mixer for pixel-precise
+ * tonal work.
  *
  * No shortcut label is shown: we intentionally do NOT register
  * global shortcuts for these tools to avoid polluting the shortcut namespace
@@ -65,6 +65,11 @@ const GRADING_BUTTONS: {
   iconSmall: React.ReactNode;
   label: string;
 }[] = [
+  {
+    tool: "presets",
+    iconSmall: <NotebookText size={11} />,
+    label: "Presets",
+  },
   {
     tool: "basic",
     iconSmall: <LetterIcon letter="U" />,
@@ -204,6 +209,7 @@ export const AdjustmentDrawerComponent = React.memo(function AdjustmentDrawerCom
       ) : (
         <motion.div layout="position" className="flex flex-col">
           <ChainStatusLine tool={activeTool} />
+          {activeTool === "presets" && <PresetsPanel />}
           {activeTool === "basic" && <BasicPanel />}
           {activeTool === "curves" && <CurvesPanel />}
           {activeTool === "levels" && <LevelsPanel />}

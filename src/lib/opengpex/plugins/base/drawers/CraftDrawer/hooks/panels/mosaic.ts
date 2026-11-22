@@ -35,6 +35,7 @@ export function useMosaicPanel() {
 
   const sizePreset = selfConfig.mosaicSizePreset ?? 'M';
   const presetValues = MOSAIC_SIZE_PRESETS[sizePreset];
+  const toolMode = selfConfig.mosaicToolMode === 'heal' ? 'heal' : 'mosaic';
 
   const setSizePreset = useCallback(
     (preset: 'XS' | 'S' | 'M' | 'L' | 'XL') => {
@@ -43,5 +44,12 @@ export function useMosaicPanel() {
     [setSelfConfig]
   );
 
-  return { sizePreset, presetValues, setSizePreset };
+  const setToolMode = useCallback(
+    (mode: 'mosaic' | 'heal') => {
+      setSelfConfig({ mosaicToolMode: mode } as Partial<CraftDrawerConfig>);
+    },
+    [setSelfConfig]
+  );
+
+  return { sizePreset, presetValues, setSizePreset, toolMode, setToolMode };
 }

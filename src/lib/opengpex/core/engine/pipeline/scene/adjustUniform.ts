@@ -27,9 +27,11 @@
  * MATH PROVENANCE (do NOT re-derive): the saturation / hueRotate 3×3 matrices,
  * the Rec.709 luma weights, the channelMix fusion and the fusion ORDER
  * (saturation → hueRotate → channelMix, left-multiplied) are line-for-line ports
- * of v1 `shared/filter2d.ts` (`buildSaturationMatrix` / `buildHueRotationMatrix`
- * / `buildFusedColorMatrix`). brightness/contrast/colorBalance are evaluated
- * IN-SHADER (adjust.wgsl); this packer only forwards their scalars/offsets.
+ * of v1 `shared/filter2d.ts`; the matrices themselves now live in the shared
+ * pure module `engine/color/adjustMatrices.ts` so CPU graders (filter-preset
+ * thumbnails) reuse the identical math. brightness/contrast/colorBalance are
+ * evaluated IN-SHADER (adjust.wgsl); this packer only forwards their
+ * scalars/offsets.
  *
  * ⚠️ MATRIX STORAGE — ROW-MAJOR (v1) → COLUMN-MAJOR (WGSL). v1's
  * `applyMatrixRGBA8` is row-major: `out_i = Σ_j M[i][j]·v_j`. WGSL `mat3x3<f32>`
@@ -61,60 +63,13 @@ import {
   ADJUST_SLOT_COVERAGE_LAYER,
   ADJUST_SLOT_FLAGS,
 } from '@opengpex/editor/core/engine/gpu/shaders/adjust';
-
-// Rec.709 luma weights — MUST match v1 filter2d LUMA_R/G/B and adjust.wgsl.
-const LUMA_R = 0.2126;
-const LUMA_G = 0.7152;
-const LUMA_B = 0.0722;
-
-/** Row-major 3×3 identity. */
-type Mat9 = [number, number, number, number, number, number, number, number, number];
-const IDENTITY_M9: Mat9 = [1, 0, 0, 0, 1, 0, 0, 0, 1];
-
-/** v1 `buildSaturationMatrix` — Rec.709 luminance-preserving, s = sat/100. */
-function saturationMatrix(saturation: number): Mat9 {
-  const s = clamp(saturation, 0, 200) / 100;
-  const invR = (1 - s) * LUMA_R;
-  const invG = (1 - s) * LUMA_G;
-  const invB = (1 - s) * LUMA_B;
-  return [
-    invR + s, invG, invB,
-    invR, invG + s, invB,
-    invR, invG, invB + s,
-  ];
-}
-
-/** v1 `buildHueRotationMatrix` — the exact CSS/SVG hue-rotate coefficients. */
-function hueMatrix(hueDegrees: number): Mat9 {
-  const rad = (hueDegrees % 360) * (Math.PI / 180);
-  const cosH = Math.cos(rad);
-  const sinH = Math.sin(rad);
-  return [
-    LUMA_R + cosH * (1 - LUMA_R) - sinH * LUMA_R,
-    LUMA_G - cosH * LUMA_G - sinH * LUMA_G,
-    LUMA_B - cosH * LUMA_B + sinH * (1 - LUMA_B),
-
-    LUMA_R - cosH * LUMA_R + sinH * 0.143,
-    LUMA_G + cosH * (1 - LUMA_G) + sinH * 0.14,
-    LUMA_B - cosH * LUMA_B - sinH * 0.283,
-
-    LUMA_R - cosH * LUMA_R - sinH * (1 - LUMA_R),
-    LUMA_G - cosH * LUMA_G + sinH * LUMA_G,
-    LUMA_B + cosH * (1 - LUMA_B) + sinH * LUMA_B,
-  ];
-}
-
-/** Multiply two row-major 3×3 matrices (v1 `multiplyMatrix3`). */
-function mul3(a: Mat9, b: Mat9): Mat9 {
-  const out = new Array<number>(9) as Mat9;
-  for (let row = 0; row < 3; row++) {
-    for (let col = 0; col < 3; col++) {
-      out[row * 3 + col] =
-        a[row * 3] * b[col] + a[row * 3 + 1] * b[3 + col] + a[row * 3 + 2] * b[6 + col];
-    }
-  }
-  return out;
-}
+import {
+  ADJUST_IDENTITY_M9,
+  adjustHueMatrix,
+  adjustSaturationMatrix,
+  mulAdjustMat3,
+  type Mat9,
+} from '@opengpex/editor/core/engine/color/adjustMatrices';
 
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v;
@@ -154,7 +109,7 @@ export function packAdjustUniform(
 
   // Fused colour matrix (row-major) + channelMix constant offset, built in v1
   // order: saturation → hueRotate → channelMix, each left-multiplied.
-  let matrix: Mat9 = IDENTITY_M9;
+  let matrix: Mat9 = ADJUST_IDENTITY_M9;
   let constant: [number, number, number] = [0, 0, 0];
   let matrixTouched = false;
 
@@ -166,16 +121,16 @@ export function packAdjustUniform(
         out[29] = (clamp(a.contrast, 0, 200) - 100) / 100;
         flags |= ADJUST_FLAG_BASIC;
         if (a.saturation !== 100) {
-          matrix = mul3(saturationMatrix(a.saturation), matrix);
+          matrix = mulAdjustMat3(adjustSaturationMatrix(a.saturation), matrix);
           matrixTouched = true;
         }
         if (a.hueRotate !== 0) {
-          matrix = mul3(hueMatrix(a.hueRotate), matrix);
+          matrix = mulAdjustMat3(adjustHueMatrix(a.hueRotate), matrix);
           matrixTouched = true;
         }
       } else if (a.kind === 'channelMix') {
         const m = a.matrix;
-        matrix = mul3([m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8]] as Mat9, matrix);
+        matrix = mulAdjustMat3([m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8]] as Mat9, matrix);
         constant = [
           constant[0] + a.constant[0],
           constant[1] + a.constant[1],

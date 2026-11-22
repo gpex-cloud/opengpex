@@ -56,6 +56,10 @@ import type { GradingTool } from './protocols';
 
 /** Grading tool (panel id) → grade category (chain discriminator). */
 export function toolCategory(tool: GradingTool): GradeCategory {
+  // The presets panel writes across several categories; its reset semantics
+  // are handled by the preset commands, so the generic panel-reset path maps
+  // it onto the basic arm (the category every preset rewrites).
+  if (tool === 'presets') return 'basic';
   return tool === 'mixer' ? 'channelMix' : tool;
 }
 

@@ -234,12 +234,19 @@ export const LAYER_KINDS: Readonly<Record<Layer['type'], LayerKind>> = {
     clippable: 'logical',
     /**
      * Stamp routing (P5: the paint kind merged into image): a mosaic canvas
-     * is an image stamped `sourceTool:'mosaic'` and infers the MosaicPanel;
-     * UNSTAMPED image layers are plain pixels/photos — no owning tool, no
-     * panel (so mosaic can never hijack a photo's panel).
+     * is an image stamped `sourceTool:'mosaic'` (spot-heal canvases mirror
+     * it with `sourceTool:'heal'`) and infers the MosaicPanel; UNSTAMPED
+     * image layers are plain pixels/photos — no owning tool, no panel (so
+     * mosaic/heal can never hijack a photo's panel).
      */
-    icon: (layer) => (layer.metadata?.sourceTool === 'mosaic' ? 'mosaic' : 'thumbnail'),
-    ui: (layer) => (layer.metadata?.sourceTool === 'mosaic' ? 'mosaic' : null),
+    icon: (layer) => {
+      const tool = layer.metadata?.sourceTool;
+      return tool === 'mosaic' || tool === 'heal' ? 'mosaic' : 'thumbnail';
+    },
+    ui: (layer) => {
+      const tool = layer.metadata?.sourceTool;
+      return tool === 'mosaic' || tool === 'heal' ? 'mosaic' : null;
+    },
     // Image layers may be blank (canvas-sized host layers) — no payload gate.
     normalize: normalizePatch,
   },
