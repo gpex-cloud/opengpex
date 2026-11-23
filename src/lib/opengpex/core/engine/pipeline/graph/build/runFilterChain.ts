@@ -82,5 +82,9 @@ export function runFilterChain(
     // The output holds ONLY the window's content — the compositor's UV map
     // must re-express layer.crop relative to it (see resolveLayerGeometry).
     contentWindow: window,
+    // A beyondSource window (alphaFeather's unclamped feather ring) is REAL
+    // visible content — the drawn quad must cover the whole window, not just
+    // the crop, or the feathered ring lands on no screen pixels.
+    expandQuadToWindow: window?.beyondSource === true,
   };
 }

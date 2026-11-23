@@ -75,6 +75,12 @@ export interface DrawBlendParams {
    */
   readonly contentWindow?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
   /**
+   * `contentWindow` extends beyond the source asset (alphaFeather's unclamped
+   * feather ring) — the drawn quad covers the WHOLE window so the feathered
+   * ring outside the crop is visible (see `resolveLayerGeometry`).
+   */
+  readonly expandQuadToWindow?: boolean;
+  /**
    * The layer's COMBINED bmask coverage — the texture the bmask combine pass
    * baked from ALL enabled records (each record's hard bit + erase/restore
    * family folded into its red channel). Absent when the layer has no bmask or
@@ -197,6 +203,7 @@ export class BlendPass {
       fgTexture.height,
       resolveLayerDprScale(layer, fgTexture.width, params.vectorTransient),
       params.contentWindow,
+      params.expandQuadToWindow === true,
     );
 
     // ⚠️ POT-BUCKET UV FIX: same rationale as CompositePass — scale content-relative

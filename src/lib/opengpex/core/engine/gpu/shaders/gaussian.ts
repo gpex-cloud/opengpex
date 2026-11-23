@@ -107,6 +107,17 @@ export const GAUSS_FLAG_UNPREMULTIPLY_ON_STORE = 1 << 1;
  * `rgba8unorm` asset — the common case.
  */
 export const GAUSS_FLAG_SRC_LINEAR = 1 << 2;
+/**
+ * `flags` bit: sample the source with TRANSPARENT-ZERO out-of-bounds semantics
+ * instead of clamp-to-edge. Required by the alphaFeather windowed route, whose
+ * window legitimately extends BEYOND the source texture (the feathered alpha
+ * ramp must land on real output texels outside the baked fragment's tight
+ * bbox — see `resolveFilterWindow`'s `beyondSource`). Clamping there would
+ * repeat the edge texel outward and inflate the feathered alpha; transparency
+ * is what actually lives beyond the source. When the flag is clear the load
+ * keeps its historical clamp-to-edge addressing (bit-identical windows).
+ */
+export const GAUSS_FLAG_SRC_ZERO_OOB = 1 << 3;
 
 
 /** `axis` value: filter along X (horizontal pass). */
@@ -202,10 +213,14 @@ export function packGaussianUniform(
   uints[68] = flags >>> 0;
   // [70..71] src_dims, [72..73] src_origin (vec2<u32> members are 8-B aligned in
   // the WGSL struct, so they land on even float slots after a 4-B pad post-flags).
+  // The origin is packed BIT-exactly (`>>> 0` two's-complement): the
+  // alphaFeather window may start at a NEGATIVE source coordinate (beyondSource
+  // windows), and the WGSL side converts back with `i32(u32)` which reinterprets
+  // the same bits.
   uints[70] = Math.max(1, src?.width ?? width) >>> 0;
   uints[71] = Math.max(1, src?.height ?? height) >>> 0;
-  uints[72] = Math.max(0, src?.originX ?? 0) >>> 0;
-  uints[73] = Math.max(0, src?.originY ?? 0) >>> 0;
+  uints[72] = (src?.originX ?? 0) >>> 0;
+  uints[73] = (src?.originY ?? 0) >>> 0;
   return out;
 }
 
@@ -273,6 +288,14 @@ fn gauss_load(coord : vec2<i32>) -> vec4<f32> {
   let max_x = i32(gauss.src_dims.x) - 1;
   let max_y = i32(gauss.src_dims.y) - 1;
   let sc = coord + vec2<i32>(gauss.src_origin);
+  // TRANSPARENT-ZERO addressing (bit 3): beyondSource windows read past the
+  // source bounds, where the truthful content is transparency — not the
+  // repeated edge texel clamp-to-edge would smear outward.
+  if ((gauss.flags & ${GAUSS_FLAG_SRC_ZERO_OOB}u) != 0u) {
+    if (sc.x < 0 || sc.y < 0 || sc.x >= i32(gauss.src_dims.x) || sc.y >= i32(gauss.src_dims.y)) {
+      return vec4<f32>(0.0);
+    }
+  }
   let c = vec2<i32>(clamp(sc.x, 0, max_x), clamp(sc.y, 0, max_y));
   var s = textureLoad(src_tex, c, 0);
   if ((gauss.flags & ${GAUSS_FLAG_SRC_LINEAR}u) == 0u) {
@@ -421,6 +444,11 @@ fn cs_feather_combine(@builtin(global_invocation_id) gid : vec3<u32>) {
   }
   let xy = vec2<i32>(gid.xy);
   let bleed = textureLoad(bleed_tex, xy, 0);
+  // ORIG may be the FULL source with a beyondSource window inside it: the
+  // shifted coordinate can fall outside the source bounds (negative or past the
+  // far edge). WGSL defines out-of-bounds textureLoad as transparent zero, so
+  // the mix takes the bleed there (original alpha zero) — exactly the desired
+  // "no original content beyond the source" semantics.
   let orig = textureLoad(orig_tex, xy + vec2<i32>(gauss.src_origin), 0);
   var o = orig.rgb;
   if ((gauss.flags & ${GAUSS_FLAG_SRC_LINEAR}u) == 0u) {

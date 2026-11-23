@@ -2,6 +2,10 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.64
+
+- Edge Feather: feathering an irregular cut-out or lasso fragment no longer clips flat against the fragment's bounding box — the soft fade now extends fully around the shape, including where the contour touches the fragment edges
+
 ## 2.0.63
 
 - Workspace: opening OpenGPEX in a browser without WebGPU now shows a clear explanation with per-platform supported browsers and a reload button — instead of a silently blank canvas

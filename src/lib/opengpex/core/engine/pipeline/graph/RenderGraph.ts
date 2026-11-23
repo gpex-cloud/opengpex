@@ -427,6 +427,7 @@ export class RenderGraph {
             sourceIsWorkingGamut: src?.sourceIsWorkingGamut,
             sourceIntentApplied: src?.sourceIntentApplied,
             contentWindow: src?.contentWindow,
+            expandQuadToWindow: src?.expandQuadToWindow,
           });
         }
       }
@@ -591,6 +592,7 @@ export class RenderGraph {
             sourceIsWorkingGamut: src?.sourceIsWorkingGamut,
             sourceIntentApplied: src?.sourceIntentApplied,
             contentWindow: src?.contentWindow,
+            expandQuadToWindow: src?.expandQuadToWindow,
           });
         }
 
@@ -663,6 +665,7 @@ export class RenderGraph {
           sourceIsWorkingGamut: src?.sourceIsWorkingGamut,
           sourceIntentApplied: src?.sourceIntentApplied,
           contentWindow: src?.contentWindow,
+          expandQuadToWindow: src?.expandQuadToWindow,
         });
         blendPass.end();
 

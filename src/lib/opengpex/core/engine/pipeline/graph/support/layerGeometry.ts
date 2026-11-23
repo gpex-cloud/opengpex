@@ -73,7 +73,26 @@ export function resolveLayerGeometry(
    * source (historical behaviour, byte-identical UVs).
    */
   textureContentRect?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number },
+  /**
+   * The texture's content rect extends BEYOND the layer's crop (alphaFeather's
+   * beyondSource window): the region outside the crop is REAL visible content
+   * (the feathered ring), so the drawn quad covers the whole content rect —
+   * quad size / local offset derive from the rect (converted back to logical px
+   * through `dprScale`) and the UV spans the full [0,1] domain. Without this
+   * the quad would stop at the crop edge and the feathered ring would never
+   * reach the screen.
+   */
+  quadCoversContentRect = false,
 ): LayerGeometry {
+  if (quadCoversContentRect && textureContentRect && layer.crop) {
+    const d = dprScale > 0 ? dprScale : 1;
+    return {
+      contentWidth: textureContentRect.w / d,
+      contentHeight: textureContentRect.h / d,
+      localOffset: [textureContentRect.x / d, textureContentRect.y / d],
+      uvRect: [0, 0, 1, 1],
+    };
+  }
   const contentWidth = layer.crop
     ? layer.crop.w
     : typeof layer.width === 'number' && layer.width > 0

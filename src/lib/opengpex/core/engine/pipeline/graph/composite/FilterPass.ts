@@ -80,6 +80,7 @@ import {
   GAUSS_FLAG_PREMULTIPLY_ON_LOAD,
   GAUSS_FLAG_UNPREMULTIPLY_ON_STORE,
   GAUSS_FLAG_SRC_LINEAR,
+  GAUSS_FLAG_SRC_ZERO_OOB,
   FEATHER_COMBINE_WORKGROUP,
 } from '@opengpex/editor/core/engine/gpu/shaders/gaussian';
 
@@ -142,6 +143,17 @@ export interface FilterWindow {
   readonly y: number;
   readonly w: number;
   readonly h: number;
+  /**
+   * The window extends BEYOND the source texture bounds (negative origin
+   * and/or past the far edge). Only the alphaFeather route produces this: its
+   * feathered alpha ramp must land on real output texels OUTSIDE the baked
+   * fragment's tight bbox, so the window may not be clamped to the source.
+   * The first dispatch then samples the source with transparent-zero
+   * out-of-bounds semantics (`GAUSS_FLAG_SRC_ZERO_OOB`) instead of
+   * clamp-to-edge, and the compositor expands the drawn quad to the whole
+   * window (`expandQuadToWindow`) so the soft ring is actually visible.
+   */
+  readonly beyondSource?: boolean;
 }
 
 /**
@@ -180,6 +192,36 @@ export function resolveFilterWindow(
     if (f.kind === 'gaussianBlur' || f.kind === 'alphaFeather') {
       reachLogical = Math.max(reachLogical, gaussianKernelRadius(f.radius) / dpr);
     }
+  }
+
+  // alphaFeather on a cropped (fragment) layer: the feathered alpha ramp decays
+  // OUTWARD past the fragment's baked alpha extent, so the window must keep the
+  // kernel reach on every side WITHOUT clamping to the source bounds — a clamp
+  // would leave the fade nowhere to land and hard-cut it at the fragment bbox
+  // (the tight-trim case, where crop == the baked texture exactly). Out-of-range
+  // source reads are handled downstream: the first dispatch samples with
+  // transparent-zero OOB semantics (`GAUSS_FLAG_SRC_ZERO_OOB`), and the window
+  // is marked `beyondSource` so the compositor expands the drawn quad to it.
+  // Blur-only layers keep the clamped window: a blur never draws outside the
+  // crop, so its halo needs no visible ring and clamping preserves the
+  // historical bit-exact windowed contract.
+  const hasFeather = filters.some((f) => f.kind === 'alphaFeather');
+  if (hasFeather) {
+    const d = dpr;
+    const x0 = Math.floor(layer.crop.x * d - reachLogical);
+    const y0 = Math.floor(layer.crop.y * d - reachLogical);
+    const x1 = Math.ceil((layer.crop.x + layer.crop.w) * d + reachLogical);
+    const y1 = Math.ceil((layer.crop.y + layer.crop.h) * d + reachLogical);
+    const w = x1 - x0;
+    const h = y1 - y0;
+    if (w <= 0 || h <= 0) return undefined;
+    return {
+      x: x0,
+      y: y0,
+      w,
+      h,
+      beyondSource: x0 < 0 || y0 < 0 || x1 > srcWidth || y1 > srcHeight,
+    };
   }
 
   // Expand + clamp, in source texels. Rounded OUTWARD so the window always
@@ -242,16 +284,23 @@ export class FilterPass {
     // win.xy inside it); every subsequent filter chains on the previous
     // window-sized output, so its source origin is (0,0).
     let isFirst = true;
+    // A beyondSource window (alphaFeather's unclamped feather ring) reads past
+    // the source bounds on its first dispatch — switch that dispatch to
+    // transparent-zero OOB addressing; later dispatches chain on window-sized
+    // transients and keep their historical clamp-to-edge at the window edge
+    // (the outermost kernel-reach ring, where the feathered alpha has already
+    // decayed to ≈0, so the clamp there is imperceptible).
+    const srcOobFlag = win?.beyondSource ? GAUSS_FLAG_SRC_ZERO_OOB : 0;
     for (const desc of filters) {
       const srcOrigin = win && isFirst ? { x: win.x, y: win.y } : undefined;
       isFirst = false;
       switch (desc.kind) {
         case 'gaussianBlur':
-          current = FilterPass.gaussianBlur(encoder, ctx, layer, current, desc.radius, currentIsLinear, win, srcOrigin);
+          current = FilterPass.gaussianBlur(encoder, ctx, layer, current, desc.radius, currentIsLinear, win, srcOrigin, isFirst ? srcOobFlag : 0);
           currentIsLinear = true;
           break;
         case 'alphaFeather':
-          current = FilterPass.alphaFeather(encoder, ctx, layer, current, desc.radius, currentIsLinear, win, srcOrigin);
+          current = FilterPass.alphaFeather(encoder, ctx, layer, current, desc.radius, currentIsLinear, win, srcOrigin, isFirst ? srcOobFlag : 0);
           currentIsLinear = true;
           break;
         default:
@@ -289,6 +338,8 @@ export class FilterPass {
     sourceIsLinear: boolean,
     win?: FilterWindow,
     srcOrigin?: { readonly x: number; readonly y: number },
+    /** Extra first-dispatch flag bits (transparent-zero OOB when beyondSource). */
+    srcFlagBits = 0,
   ): LayerTexture {
     const ping = FilterPass.acquireTransient(ctx, layer.id, 'h', win ? { width: win.w, height: win.h } : source);
     const pong = FilterPass.acquireTransient(ctx, layer.id, 'v', win ? { width: win.w, height: win.h } : source);
@@ -304,7 +355,9 @@ export class FilterPass {
       sigma,
       axis: GAUSS_AXIS_HORIZONTAL,
       flags:
-        GAUSS_FLAG_PREMULTIPLY_ON_LOAD | (sourceIsLinear ? GAUSS_FLAG_SRC_LINEAR : 0),
+        GAUSS_FLAG_PREMULTIPLY_ON_LOAD |
+        (sourceIsLinear ? GAUSS_FLAG_SRC_LINEAR : 0) |
+        srcFlagBits,
       label: 'H',
       win,
       srcOrigin,
@@ -364,6 +417,8 @@ export class FilterPass {
     sourceIsLinear: boolean,
     win?: FilterWindow,
     srcOrigin?: { readonly x: number; readonly y: number },
+    /** Extra first-dispatch flag bits (transparent-zero OOB when beyondSource). */
+    srcFlagBits = 0,
   ): LayerTexture {
     const ping = FilterPass.acquireTransient(ctx, layer.id, 'h', win ? { width: win.w, height: win.h } : source);
     const pong = FilterPass.acquireTransient(ctx, layer.id, 'v', win ? { width: win.w, height: win.h } : source);
@@ -376,7 +431,9 @@ export class FilterPass {
       sigma,
       axis: GAUSS_AXIS_HORIZONTAL,
       flags:
-        GAUSS_FLAG_PREMULTIPLY_ON_LOAD | (sourceIsLinear ? GAUSS_FLAG_SRC_LINEAR : 0),
+        GAUSS_FLAG_PREMULTIPLY_ON_LOAD |
+        (sourceIsLinear ? GAUSS_FLAG_SRC_LINEAR : 0) |
+        srcFlagBits,
       label: 'Feather H',
       win,
       srcOrigin,

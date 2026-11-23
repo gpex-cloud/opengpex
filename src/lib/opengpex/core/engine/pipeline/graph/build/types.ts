@@ -51,6 +51,15 @@ export type PreparedSource = {
    */
   contentWindow?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
   /**
+   * The `contentWindow` extends BEYOND the source asset bounds (alphaFeather's
+   * unclamped feather ring — see `resolveFilterWindow`'s `beyondSource`), so the
+   * compositor must draw the quad over the WHOLE window (not just `layer.crop`):
+   * the feathered ring outside the crop is real content that has to be visible.
+   * `resolveLayerGeometry` then derives quad placement + full [0,1] UVs from the
+   * window itself. Undefined/false → the historical crop-quad behaviour.
+   */
+  expandQuadToWindow?: boolean;
+  /**
    * The source is an UNFILTERED DECLARATIVE SOLID — its colour rides the
    * layer uniform's tail vec4 and `texture` is the shared 1×1 white
    * binding formality (the shader discards the sample and reads the

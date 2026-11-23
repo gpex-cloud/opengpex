@@ -110,6 +110,12 @@ export interface DrawLayerParams {
    */
   readonly contentWindow?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
   /**
+   * `contentWindow` extends beyond the source asset (alphaFeather's unclamped
+   * feather ring) — the drawn quad covers the WHOLE window so the feathered
+   * ring outside the crop is visible (see `resolveLayerGeometry`).
+   */
+  readonly expandQuadToWindow?: boolean;
+  /**
    * The `texture` already holds LINEAR light because the pipeline produced it
    * (`AdjustPrePass` bake and/or `FilterPass` output), regardless of the original
    * asset's encoding. Overrides `layer.source.trc`; see `sourceDomain.ts`.
@@ -334,6 +340,7 @@ export class CompositePass {
       texture.height,
       resolveLayerDprScale(layer, texture.width, params.vectorTransient),
       params.contentWindow,
+      params.expandQuadToWindow === true,
     );
 
     // ⚠️ POT-BUCKET UV FIX: `resolveLayerGeometry` computes UVs in CONTENT-relative
