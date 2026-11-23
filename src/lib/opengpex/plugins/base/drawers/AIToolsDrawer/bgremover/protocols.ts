@@ -47,7 +47,6 @@ export type { ModelEntry, ModelCatalog } from '../_shared/types';
 /**
  * @deprecated Use `ModelCatalog` from `'../_shared/types'` directly.
  */
-export type BgRemoverConfig = ModelCatalog;
 
 // ─── Model Management ────────────────────────────────────────────────────────
 

@@ -2,6 +2,14 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.66
+
+- AI Tools: new AI Denoiser — NAFNet / SCUNet models with New Layer / New Frame outputs. Large-image warnings now key off megapixels, so ordinary photos no longer trigger them.
+- AI Tools: the Denoiser and Upscaler keep 16-bit sources at full depth end-to-end (f32 inference, 16-bit output) and honestly narrow Adobe RGB / Display-P3 to sRGB before inference.
+- Retouch: new Remove All Dust button in the Heal panel — one tap cleans dust specks across the whole layer, landing on the heal layer so the result stays undoable and erasable. A sensitivity slider trades cleaning strength against detail preservation; thin strokes and texture are protected.
+- Color: fixed Hue Rotate showing NaN after an edit that left the adjustment arm partially filled.
+
+
 ## 2.0.65
 
 - Retouch: the Mosaic tool expands into a five-tool retouch set — Heal, Clone, Mosaic, Blur and Sharpen — switchable with Tab, each with its own layer icon

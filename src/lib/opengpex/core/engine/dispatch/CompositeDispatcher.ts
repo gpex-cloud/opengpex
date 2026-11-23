@@ -55,7 +55,7 @@ import { SceneAssembler } from '@opengpex/editor/core/engine/pipeline/scene/Scen
 import { highDepthCache } from '@opengpex/editor/core/engine/sources/HighDepthCache';
 import { imageBitmapCache } from '@opengpex/editor/core/engine/sources/ImageBitmapCache';
 import type { HighDepthSource, HighDepthFetcher } from '@opengpex/editor/core/engine/sources/HighDepthCache';
-import { unpremultiplyEncodeGamut, unpremultiplyEncodeLinearF16 } from '@opengpex/editor/core/engine/utils/export-utils';
+import { unpremultiplyEncodeGamut, unpremultiplyEncodeLinearF16 } from '@opengpex/editor/core/engine/utils/readback-utils';
 import { resampleBilinear } from '@opengpex/editor/core/engine/color/resampleHighDepth';
 import { WORKING_GAMUT } from '@opengpex/editor/core/engine/color/gamut';
 import { canvasToBlob, toDisplayTrackCanvasColorSpace } from '../utils/pixel-utils';

@@ -21,11 +21,12 @@
 
 import React from "react";
 import FunctionTabs from "@opengpex/editor/widgets/FunctionTabs";
-import { useEditorState } from "@opengpex/editor/core/context";
+import { useEditorServices, useEditorState } from "@opengpex/editor/core/context";
 import { useRetouchPanel } from "../hooks";
 import { MOSAIC_SIZE_PRESETS } from "../protocols";
 import { RETOUCH_MODE_ICONS } from "../icon";
 import { clearCloneSourceFor } from "@opengpex/editor/plugins/base/overlays/RetouchOverlay/stroke/clone/cloneSource";
+import { runFullFrameDustRemoval } from "@opengpex/editor/plugins/base/overlays/RetouchOverlay/stroke/dust/dustRemoval";
 
 // ─── RetouchPanel ───────────────────────────────────────────────────────────────
 
@@ -128,12 +129,40 @@ export const RetouchPanel = React.memo(function RetouchPanel() {
   const {
     sizePreset, setSizePreset, toolMode, setToolMode,
     blurRadius, setBlurRadius, blurStrength, setBlurStrength,
-    hardness, setHardness, stampDiameter, blockSize, isCustomDiameter, setStampDiameter,
+    hardness, setHardness, dustSensitivity, setDustSensitivity,
+    stampDiameter, blockSize, isCustomDiameter, setStampDiameter,
   } = useRetouchPanel();
 
   const isConv = toolMode === 'blur' || toolMode === 'sharpen';
   const isClone = toolMode === 'clone';
+  const isHeal = toolMode === 'heal';
   const { activeFrame } = useEditorState();
+  const { actions, pixels, assets, layers } = useEditorServices();
+  const [dustRunning, setDustRunning] = React.useState(false);
+
+  const runDustRemoval = React.useCallback(async () => {
+    if (!activeFrame || dustRunning) return;
+    setDustRunning(true);
+    try {
+      const result = await runFullFrameDustRemoval(
+        { layers, pixels, assets, actions, activeFrame },
+        dustSensitivity,
+      );
+      if (result.healed > 0) return;
+      // Nothing changed — pick the message from the skip reason so a blank
+      // layer, a wrong layer kind, and a clean scan read differently.
+      const messages: Record<NonNullable<typeof result.skipReason>, string> = {
+        'no-pixel-layer': 'Remove Dust needs a pixel (image) layer selected.',
+        'empty-layer': 'The selected layer has no pixels to scan.',
+        'transformed-layer': 'Remove Dust skips rotated/flipped layers — heal those spots manually.',
+        'no-specks': 'No dust specks detected at this sensitivity.',
+      };
+      const reason = result.skipReason ?? 'no-specks';
+      actions.notifyHUD(messages[reason], reason === 'no-specks' ? 'info' : 'error');
+    } finally {
+      setDustRunning(false);
+    }
+  }, [activeFrame, dustRunning, dustSensitivity, layers, pixels, assets, actions]);
 
   return (
     <div className="flex flex-col gap-2 p-1">
@@ -180,6 +209,24 @@ export const RetouchPanel = React.memo(function RetouchPanel() {
         <>
           <SliderRow label="Radius" value={blurRadius} min={1} max={64} onChange={setBlurRadius} />
           <SliderRow label="Strength" value={blurStrength} min={0} max={100} unit="%" onChange={setBlurStrength} />
+        </>
+      )}
+
+      {/* ── Heal: full-frame Remove Dust (the automated heal variant).
+          Result lands on the heal layer family — undo/erase like a manual stroke.
+          No divider here: the Tools section already draws one, and heal mode
+          would stack a second line right under it. ── */}
+      {isHeal && (
+        <>
+          <button
+            onClick={runDustRemoval}
+            disabled={dustRunning || !activeFrame}
+            title="Detect dust specks across the entire active layer and heal them automatically (manual dabbing stays available)"
+            className="mt-1.5 w-full h-7 rounded-md text-[10px] font-black uppercase tracking-wider text-[var(--text-main)] bg-[var(--bg-stage)] border border-[var(--border-subtle)] hover:bg-[var(--bg-stage)]/70 hover:border-[var(--text-muted)] transition-all outline-none disabled:opacity-50 disabled:cursor-wait"
+          >
+            {dustRunning ? 'Removing…' : 'Remove All Dust'}
+          </button>
+          <SliderRow label="Sensitivity" value={dustSensitivity} min={0} max={100} unit="%" onChange={setDustSensitivity} />
         </>
       )}
 

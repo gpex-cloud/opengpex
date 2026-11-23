@@ -69,6 +69,8 @@ export { TransformersSession } from './tfm-session';
 export {
   rgbaToNchw,
   tensorToRgba,
+  nchwFromRasterF32,
+  rasterFromNchwF32,
   detectOutputRange,
   detectLayout,
 } from './tensor-utils';
@@ -87,4 +89,8 @@ export {
   padTile,
   unpadTile,
   pasteTileBlend,
+  extractTileF32,
+  padTileF32,
+  unpadTileF32,
+  pasteTileBlendF32,
 } from './tile-utils';

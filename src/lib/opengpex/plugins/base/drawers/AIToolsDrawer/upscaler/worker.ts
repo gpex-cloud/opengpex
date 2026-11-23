@@ -37,6 +37,7 @@
  */
 
 import type { UpscaleRequest, UpscaleResult } from './worker.types';
+import { quantizeRgbaF32To8 } from '../_shared/inference/highDepthSource';
 import { createInference } from '../_shared/inference';
 
 // ─── Scale Mismatch Post-Processing ─────────────────────────────────────────
@@ -116,6 +117,44 @@ const handleRequest = createInference<UpscaleRequest, UpscaleResultPayload>({
   },
 
   execute: async (session, req, { progress, device }) => {
+    // ── f32 precision path (16-bit source) ──
+    // Same contract as the denoiser's f32 branch: [0, 1] end-to-end, no
+    // ÷255 / ×255 quantization at either pipeline end. The session's tile
+    // config already carries modelScale, so the output is scale× the input
+    // exactly like the 8-bit path. Ships BOTH the f32 truth and its 8-bit
+    // display proxy.
+    if (req.f32ImageData) {
+      const f32Start = performance.now();
+      if (req.imageData) {
+        throw new Error('[Upscaler] Both f32ImageData and imageData provided — feed exactly one');
+      }
+      if (!session.runImageF32) {
+        throw new Error('[Upscaler] Backend does not support f32 precision inference');
+      }
+      const { data, width, height } = req.f32ImageData;
+
+      const output = await session.runImageF32(
+        { data: new Float32Array(data), width, height },
+        (done, total) => progress(done / total),
+      );
+
+      const display = quantizeRgbaF32To8(output.data);
+
+      return {
+        imageData: {
+          data: display.buffer as ArrayBuffer,
+          width: output.width,
+          height: output.height,
+        },
+        f32ImageData: {
+          data: output.data.buffer as ArrayBuffer,
+          width: output.width,
+          height: output.height,
+        },
+        debug: { deviceUsed: device, totalMs: performance.now() - f32Start, tilesProcessed: 0 },
+      };
+    }
+
     const { imageData, modelScale: reqModelScale, scale: targetScale } = req;
     const { data, width, height } = imageData!;
     const srcData = new Uint8Array(data);

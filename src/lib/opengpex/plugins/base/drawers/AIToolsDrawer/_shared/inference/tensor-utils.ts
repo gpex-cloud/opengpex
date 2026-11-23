@@ -55,6 +55,82 @@ export function rgbaToNchw(rgba: Uint8Array, width: number, height: number): Flo
   return inputF32;
 }
 
+// ─── RGBA f32 ↔ NCHW (precision-preserving path) ─────────────────────────────
+
+/**
+ * Convert interleaved RGBA float32 [0, 1] pixels to RGB float32 NCHW [1, 3, H, W].
+ *
+ * Precision-preserving variant of {@link rgbaToNchw}: the input is ALREADY
+ * float32 in [0, 1] (e.g. decoded from 16-bit naked pixels divided by 65535),
+ * so no quantization happens on the way in. The model's tensor domain is
+ * unchanged — this only removes the two 8-bit quantization steps at the
+ * pipeline's ends, not the [0, 1] contract itself.
+ *
+ * @param rgba - Input interleaved RGBA float32 pixels, length = width × height × 4
+ * @param width - Image width in pixels
+ * @param height - Image height in pixels
+ * @returns Float32Array in NCHW layout [1, 3, H, W] with values in [0, 1]
+ */
+export function nchwFromRasterF32(rgba: Float32Array, width: number, height: number): Float32Array {
+  const pixels = width * height;
+  const nchw = new Float32Array(3 * pixels);
+  for (let i = 0; i < pixels; i++) {
+    nchw[i] = rgba[i * 4];                  // R
+    nchw[pixels + i] = rgba[i * 4 + 1];     // G
+    nchw[2 * pixels + i] = rgba[i * 4 + 2]; // B
+  }
+  return nchw;
+}
+
+/**
+ * Convert an RGB float32 NCHW output tensor back to interleaved RGBA float32
+ * [0, 1] pixels (alpha forced to 1).
+ *
+ * Precision-preserving counterpart of {@link tensorToRgba}: the denoiser model
+ * family (NAFNet et al.) is trained to emit [0, 1] sRGB-encoded values, so the
+ * range is FIXED here — no sampling-based range detection, no rounding, no
+ * clamping to 255 steps. Callers encode the result to their target depth
+ * (÷65535 inverse for 16-bit, ×255 for 8-bit).
+ *
+ * @param data - Output tensor float data (3-channel RGB)
+ * @param dims - Tensor dimensions (e.g. [1, 3, H, W] or [1, H, W, 3])
+ * @returns Object with interleaved RGBA float32 pixels and resolved width/height
+ */
+export function rasterFromNchwF32(
+  data: Float32Array,
+  dims: number[],
+): { rgba: Float32Array; width: number; height: number } {
+  const layout = detectLayout(dims);
+  let width: number;
+  let height: number;
+  if (layout === 'nchw') {
+    height = dims[2];
+    width = dims[3];
+  } else {
+    height = dims[1];
+    width = dims[2];
+  }
+  const outPixels = width * height;
+  const rgba = new Float32Array(outPixels * 4);
+
+  if (layout === 'nchw') {
+    for (let i = 0; i < outPixels; i++) {
+      rgba[i * 4] = data[i];
+      rgba[i * 4 + 1] = data[outPixels + i];
+      rgba[i * 4 + 2] = data[2 * outPixels + i];
+      rgba[i * 4 + 3] = 1;
+    }
+  } else {
+    for (let i = 0; i < outPixels; i++) {
+      rgba[i * 4] = data[i * 3];
+      rgba[i * 4 + 1] = data[i * 3 + 1];
+      rgba[i * 4 + 2] = data[i * 3 + 2];
+      rgba[i * 4 + 3] = 1;
+    }
+  }
+  return { rgba, width, height };
+}
+
 // ─── Output Range Detection ──────────────────────────────────────────────────
 
 /**

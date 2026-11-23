@@ -18,7 +18,14 @@
  */
 
 /**
- * exportEncode.ts — the terminal TRC encode for the Readback export path.
+ * readback-utils.ts — the terminal colour conversion for GPU readback pixels.
+ *
+ * NAME: historically `export-utils` (the export encoder was the first
+ * consumer), but the consumers today are THREE readback surfaces — export
+ * encode, internal-composite ROI readback (CompositeDispatcher) and the
+ * WebGPU colour sampler (sample-utils) — so the file is named for the
+ * common contract: converting GPU-readback pixels (premultiplied, linear
+ * light) into target-gamut, target-TRC-encoded rasters.
  *
  * WHY THIS EXISTS
  * ---------------
@@ -48,7 +55,7 @@
  * Pure + dependency-free (only `trc.ts`), so it runs identically in the browser
  * and under Node (vitest).
  *
- * @module core/engine/utils/export-utils
+ * @module core/engine/utils/readback-utils
  */
 
 import { linearToSrgb, linearToGamma, linearToRec2020 } from '@opengpex/editor/core/engine/color/trc';

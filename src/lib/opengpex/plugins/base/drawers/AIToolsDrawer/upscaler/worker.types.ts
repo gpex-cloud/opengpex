@@ -44,6 +44,12 @@ export interface UpscaleRequest extends WorkerRequest {
   scale?: 2 | 4;
   /** Tile size in pixels (default 128). */
   tileSize?: number;
+  /**
+   * f32 precision input (16-bit source): interleaved RGBA f32 [0, 1] decoded
+   * from the `dec:` truth. When present, inference runs through the session's
+   * f32 entry and the base `imageData` should be omitted alongside this.
+   */
+  f32ImageData?: { data: ArrayBuffer; width: number; height: number };
 }
 
 // ─── Worker → Main ───────────────────────────────────────────────────────────
@@ -60,6 +66,11 @@ export interface UpscaleResult {
   reqId: number;
   /** Output RGBA buffer (scaled size) — Transferable. */
   imageData?: { data: ArrayBuffer; width: number; height: number };
+  /**
+   * f32 precision truth of the upscaled output (present iff the request
+   * carried `f32ImageData`); `imageData` then carries the 8-bit display proxy.
+   */
+  f32ImageData?: { data: ArrayBuffer; width: number; height: number };
   debug?: {
     deviceUsed: 'webgpu' | 'wasm';
     totalMs: number;

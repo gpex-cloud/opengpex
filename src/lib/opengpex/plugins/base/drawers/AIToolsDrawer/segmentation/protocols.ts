@@ -107,15 +107,6 @@ export const DEFAULT_SEG_CONFIG: SegConfig = {
 // ─── Model Files (download manifest) ─────────────────────────────────────────
 
 /**
- * Legacy constant — kept for backwards compatibility.
- * @deprecated Use `getSegModelFiles(model)` instead.
- */
-export const SEG_MODEL_FILES = [
-  { filename: 'encoder.with_runtime_opt.ort' },
-  { filename: 'decoder.onnx' },
-] as const;
-
-/**
  * Get the download manifest for a segmentation model.
  *
  * For transformers.js models (onnx-community/sam2.1-*), returns:

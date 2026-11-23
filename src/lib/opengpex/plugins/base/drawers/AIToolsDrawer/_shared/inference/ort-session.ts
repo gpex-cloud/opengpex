@@ -39,7 +39,7 @@
  */
 
 import type { InferenceSession, InferenceInput, InferenceOutput, InferenceArgs } from './types';
-import { rgbaToNchw, tensorToRgba } from './tensor-utils';
+import { rgbaToNchw, tensorToRgba, nchwFromRasterF32, rasterFromNchwF32 } from './tensor-utils';
 
 // ─── ORT CDN Config (single source of truth) ────────────────────────────────
 
@@ -51,7 +51,17 @@ export const ORT_CDN_BASE = `https://cdn.jsdelivr.net/npm/onnxruntime-web@${ORT_
 
 /** Full CDN URL for the all-in-one ORT module (used by workers that import a single entry). */
 export const ORT_CDN_MODULE = `${ORT_CDN_BASE}ort.all.min.mjs`;
-import { computeTiles, extractTile, padTile, unpadTile, pasteTileBlend } from './tile-utils';
+import {
+  computeTiles,
+  extractTile,
+  padTile,
+  unpadTile,
+  pasteTileBlend,
+  extractTileF32,
+  padTileF32,
+  unpadTileF32,
+  pasteTileBlendF32,
+} from './tile-utils';
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -216,6 +226,126 @@ export class OrtSession implements InferenceSession {
       }
     }
     return output;
+  }
+
+  /**
+   * Precision-preserving image inference: interleaved RGBA float32 [0, 1] in,
+   * interleaved RGBA float32 [0, 1] out.
+   *
+   * Mirrors the 8-bit image paths ({@link runWithTiles} / {@link runImageDirect})
+   * — same tile → pad → infer → unpad → blend skeleton — but swaps the
+   * conversion layer: {@link nchwFromRasterF32} / {@link rasterFromNchwF32}
+   * keep the [0, 1] domain untouched end to end (no ÷255 quantization in, no
+   * ×255 rounding out), so a 16-bit source survives the round trip at full
+   * depth. Tensor domain is UNCHANGED vs the 8-bit path; only the pipeline-end
+   * quantization is removed.
+   */
+  async runImageF32(
+    input: { data: Float32Array; width: number; height: number },
+    onTileProgress?: (done: number, total: number) => void,
+  ): Promise<{ data: Float32Array; width: number; height: number }> {
+    if (!this.session || !this.ort) {
+      throw new Error('[OrtSession] Session not initialized. Call load() first.');
+    }
+
+    if (this.tileConfig) {
+      return this.runImageF32WithTiles(input, onTileProgress);
+    }
+    return this.runImageF32Direct(input);
+  }
+
+  /** Tile-based f32 path (see {@link runWithTiles} for the 8-bit skeleton). */
+  private async runImageF32WithTiles(
+    input: { data: Float32Array; width: number; height: number },
+    onTileProgress?: (done: number, total: number) => void,
+  ): Promise<{ data: Float32Array; width: number; height: number }> {
+    const { data, width, height } = input;
+    const { size: tileSize, overlap, modelScale } = this.tileConfig!;
+
+    const tiles = computeTiles(width, height, tileSize, overlap);
+    const totalTiles = tiles.length;
+
+    const outWidth = width * modelScale;
+    const outHeight = height * modelScale;
+    const output = new Float32Array(outWidth * outHeight * 4);
+
+    const overlapPx = overlap * modelScale;
+
+    for (let i = 0; i < tiles.length; i++) {
+      const tile = tiles[i];
+      const isFirstCol = tile.sx === 0;
+      const isFirstRow = tile.sy === 0;
+
+      const tileInput = extractTileF32(data, width, tile.sx, tile.sy, tile.sw, tile.sh);
+
+      const needsPad = tile.sw !== tileSize || tile.sh !== tileSize;
+      const paddedInput = needsPad ? padTileF32(tileInput, tile.sw, tile.sh, tileSize) : tileInput;
+
+      const inputF32 = nchwFromRasterF32(paddedInput, tileSize, tileSize);
+
+      const tileOutput = await this.runTensor({
+        type: 'tensor',
+        data: inputF32,
+        dims: [1, 3, tileSize, tileSize],
+      });
+
+      if (tileOutput.type !== 'tensor') {
+        throw new Error('[OrtSession] Unexpected output type from tensor inference');
+      }
+
+      const { rgba: tileRgba } = rasterFromNchwF32(tileOutput.data, tileOutput.dims);
+
+      const paddedOutW = tileSize * modelScale;
+      const validOutW = tile.sw * modelScale;
+      const validOutH = tile.sh * modelScale;
+
+      let tileData: Float32Array;
+      if (needsPad) {
+        tileData = unpadTileF32(tileRgba, paddedOutW, validOutW, validOutH);
+      } else {
+        tileData = tileRgba;
+      }
+
+      const dx = tile.sx * modelScale;
+      const dy = tile.sy * modelScale;
+
+      pasteTileBlendF32(
+        output, outWidth, outHeight,
+        tileData, validOutW, validOutH,
+        dx, dy,
+        overlapPx,
+        isFirstCol,
+        isFirstRow,
+      );
+
+      if (onTileProgress) {
+        onTileProgress(i + 1, totalTiles);
+      }
+    }
+
+    return { data: output, width: outWidth, height: outHeight };
+  }
+
+  /** Single-pass f32 path (no tiling; see {@link runImageDirect} for the 8-bit skeleton). */
+  private async runImageF32Direct(
+    input: { data: Float32Array; width: number; height: number },
+  ): Promise<{ data: Float32Array; width: number; height: number }> {
+    const { data, width, height } = input;
+
+    const inputF32 = nchwFromRasterF32(data, width, height);
+
+    const tensorOutput = await this.runTensor({
+      type: 'tensor',
+      data: inputF32,
+      dims: [1, 3, height, width],
+    });
+
+    if (tensorOutput.type !== 'tensor') {
+      throw new Error('[OrtSession] Unexpected output type from tensor inference');
+    }
+
+    const { rgba, width: outW, height: outH } = rasterFromNchwF32(tensorOutput.data, tensorOutput.dims);
+    return { data: rgba, width: outW, height: outH };
   }
 
   async release(): Promise<void> {

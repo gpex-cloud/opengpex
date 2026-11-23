@@ -101,14 +101,28 @@ const bakeWorkerClient = new BakeWorkerClient();
  * Executes the bake process for a completed mosaic stroke.
  */
 export async function executeBake(request: BakeRequest, e: InteractionEvent): Promise<void> {
-  await executePaintBake(request, e);
+  await finalizePaintBake(e, request);
 }
 
 // ─── Paint Bake ────────────────────────────────────────────────────────────────
 
-async function executePaintBake(request: PaintBakeRequest, e: InteractionEvent): Promise<void> {
+/**
+ * Editor services the bake finalization reads. Structurally satisfied by an
+ * InteractionEvent (gesture path) AND by the React editor context
+ * (programmatic path — Remove Dust builds its PaintBakeRequest without a
+ * stroke session and finalizes through the same pipeline here).
+ */
+export type PaintBakeDeps = Pick<InteractionEvent, 'pixels' | 'assets' | 'actions' | 'layers' | 'activeFrame'>;
+
+/**
+ * Finalizes a PaintBakeRequest: merge stroke pixels with the target layer in
+ * the plugin worker, register the product asset, and commit through CMD_BAKE.
+ * Shared by the gesture path (executeBake) and the programmatic path (Remove
+ * Dust) so both produce byte-identical bake semantics.
+ */
+export async function finalizePaintBake(deps: PaintBakeDeps, request: PaintBakeRequest): Promise<void> {
   const { strokeBitmap, targetLayer, isNewLayer, canvasSize, strokeDirtyRect } = request;
-  const frame = e.activeFrame;
+  const frame = deps.activeFrame;
 
   // ── Phase 1: Prepare transferables (main thread, <2ms) ──
   let existingBitmap: ImageBitmap | null = null;
@@ -117,7 +131,7 @@ async function executePaintBake(request: PaintBakeRequest, e: InteractionEvent):
 
   if (targetLayer.src && !isNewLayer) {
     try {
-      existingBitmap = await e.pixels.image.acquireOwned(targetLayer.src);
+      existingBitmap = await deps.pixels.image.acquireOwned(targetLayer.src);
       if (existingBitmap) {
         const drawX = canvasSize.w / 2 + targetLayer.cx - targetLayer.bounding.w / 2;
         const drawY = canvasSize.h / 2 + targetLayer.cy - targetLayer.bounding.h / 2;
@@ -141,13 +155,13 @@ async function executePaintBake(request: PaintBakeRequest, e: InteractionEvent):
   });
 
   // ── Phase 3: Finalize on main thread (<2ms) ──
-  const asset = await e.assets.register({
+  const asset = await deps.assets.register({
     displayBlob: result.blob,
     width: result.cropW,
     height: result.cropH,
     precomputedHash: result.hash,
   });
-  e.pixels.image.writeBitmap(asset.url, result.bitmap);
+  deps.pixels.image.writeBitmap(asset.url, result.bitmap);
 
   const cropCenterLocalX = result.cropX + result.cropW / 2;
   const cropCenterLocalY = result.cropY + result.cropH / 2;
@@ -158,7 +172,7 @@ async function executePaintBake(request: PaintBakeRequest, e: InteractionEvent):
     ...targetLayer,
     assetId: asset.assetId,
     src: asset.url,
-    ...e.layers.factory.rebaseToBounds({
+    ...deps.layers.factory.rebaseToBounds({
       x: cropCenterLocalX - result.cropW / 2 - canvasSize.w / 2,
       y: cropCenterLocalY - result.cropH / 2 - canvasSize.h / 2,
       w: result.cropW,
@@ -166,7 +180,7 @@ async function executePaintBake(request: PaintBakeRequest, e: InteractionEvent):
     }),
   };
 
-  e.actions.executeCommand(CMD_BAKE_UID, {
+  deps.actions.executeCommand(CMD_BAKE_UID, {
     frameId: frame.id,
     layer: completeLayer,
     isNew: isNewLayer,

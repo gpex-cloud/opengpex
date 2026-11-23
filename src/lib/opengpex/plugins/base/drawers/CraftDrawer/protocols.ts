@@ -230,6 +230,13 @@ export interface CraftDrawerConfig {
    */
   retouchHardness?: number;
   /**
+   * Remove Dust detection sensitivity in [0,100] (Retouch panel, heal zone).
+   * Only relaxes the detector's residual threshold — the size/compactness
+   * caps stay fixed so even maximum sensitivity cannot mark large real
+   * content. Omitted = 25 (conservative default).
+   */
+  retouchDustSensitivity?: number;
+  /**
    * Custom stamp diameter override (px, canvas space). When set (>0) it
    * replaces the size preset's brushDiameter for every retouch mode; any
    * preset tab click clears it (back to the preset value). Omitted = preset.

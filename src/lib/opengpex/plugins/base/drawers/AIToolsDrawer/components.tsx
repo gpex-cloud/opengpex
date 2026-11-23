@@ -28,10 +28,12 @@ import { initBusySync } from './_shared';
 import { bgRemoverStore } from './bgremover/store';
 import { segStore } from './segmentation/store';
 import { upscaleStore } from './upscaler/store';
+import { denoiserStore } from './denoiser/store';
 import { inpaintEraserStore } from './inpaint/eraser/store';
 import { AIToolsIcon } from './icon';
 import { BgRemoverPanel } from './bgremover/components/panel';
 import { UpscalerPanel } from './upscaler/components/panel';
+import { DenoisePanel } from './denoiser/components/panel';
 import { SegmentationPanel } from './segmentation/components/panel';
 import { InpaintEraserPanel } from './inpaint/eraser/components/panel';
 import type { AIToolsDrawerCommandsMap } from './commands.d';
@@ -40,10 +42,11 @@ import { ClipOptionsAPI } from '../../options/ClipOptions/protocols';
 
 // ─── Tool definitions ────────────────────────────────────────────────────────
 
-type AITool = 'upscaler' | 'bg-removal' | 'segmentation' | 'inpaint-eraser';
+type AITool = 'upscaler' | 'denoiser' | 'bg-removal' | 'segmentation' | 'inpaint-eraser';
 
 const AI_TOOLS: { value: AITool; label: string; description: string }[] = [
   { value: 'upscaler', label: 'Upscaler', description: 'Enhance image resolution with AI' },
+  { value: 'denoiser', label: 'Denoiser', description: 'Remove noise from images with AI' },
   { value: 'bg-removal', label: 'BG Remover', description: 'Remove image backgrounds using AI' },
   { value: 'segmentation', label: 'Segmentation', description: 'Click to select objects using SAM' },
   { value: 'inpaint-eraser', label: 'Smart Eraser', description: 'Remove objects and fill with AI' },
@@ -93,6 +96,7 @@ export function AIToolsDrawerContent() {
         bgRemoverStore.getState().task !== null ||
         segStore.getState().task !== null ||
         upscaleStore.getState().task !== null ||
+        denoiserStore.getState().task !== null ||
         inpaintEraserStore.getState().task !== null;
       plugins.setBusy(uid, isBusy);
       setAnyToolBusy(isBusy);
@@ -102,6 +106,7 @@ export function AIToolsDrawerContent() {
       bgRemoverStore.subscribe(syncBusy),
       segStore.subscribe(syncBusy),
       upscaleStore.subscribe(syncBusy),
+      denoiserStore.subscribe(syncBusy),
       inpaintEraserStore.subscribe(syncBusy),
     ];
 
@@ -168,6 +173,7 @@ export function AIToolsDrawerContent() {
       {/* ─── Active Tool Panel ──────────────────────────────────── */}
       {activeTool === 'bg-removal' && <BgRemoverPanel />}
       {activeTool === 'upscaler' && <UpscalerPanel />}
+      {activeTool === 'denoiser' && <DenoisePanel />}
       {activeTool === 'segmentation' && <SegmentationPanel />}
       {activeTool === 'inpaint-eraser' && <InpaintEraserPanel />}
     </div>

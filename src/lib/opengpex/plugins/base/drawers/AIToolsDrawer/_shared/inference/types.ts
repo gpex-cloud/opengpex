@@ -214,4 +214,19 @@ export interface InferenceSession {
 
   /** The device currently in use for inference. */
   device: 'webgpu' | 'wasm' | 'cpu';
+
+  /**
+   * Optional precision-preserving image inference: interleaved RGBA float32
+   * [0, 1] in, interleaved RGBA float32 [0, 1] out. Skips both 8-bit
+   * quantization steps of the `run({ type: 'image' })` path while keeping the
+   * same [0, 1] tensor domain; honors the session's tile config (tile → pad →
+   * infer → unpad → blend) when present.
+   *
+   * Only the ORT backend implements this — callers must feature-detect
+   * (`if (session.runImageF32)`).
+   */
+  runImageF32?(
+    input: { data: Float32Array; width: number; height: number },
+    onTileProgress?: (done: number, total: number) => void,
+  ): Promise<{ data: Float32Array; width: number; height: number }>;
 }

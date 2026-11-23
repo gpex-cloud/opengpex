@@ -50,11 +50,6 @@ import { segStore } from './store';
  */
 let currentEmbeddingAssetId: string | null = null;
 
-/**
- * Module-level AbortController for in-flight segmentation operations.
- * Supports cancellation of encode and segment-all operations.
- */
-let segAbortController: AbortController | null = null;
 
 /**
  * Reset embedding tracking. Called when the Worker is disposed to prevent
@@ -62,18 +57,6 @@ let segAbortController: AbortController | null = null;
  */
 export function resetEmbeddingCache(): void {
   currentEmbeddingAssetId = null;
-}
-
-/**
- * Abort any in-flight segmentation operation.
- * Safe to call even if no operation is in progress (no-op).
- */
-export function abortSegmentation(): void {
-  if (segAbortController) {
-    segAbortController.abort();
-    segAbortController = null;
-  }
-  segStore.reset();
 }
 
 /**

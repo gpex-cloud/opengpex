@@ -21,6 +21,7 @@
 
 import { EditorContextValue } from '@opengpex/editor/core/types';
 import { createToolCommand } from '../_shared/control/createToolCommand';
+import { decodeNakedToF32, narrowRasterToSrgb, quantizeRgbaF32To16 } from '../_shared/inference/highDepthSource';
 import type { ProcessResultOutcome } from '../_shared/control/createToolCommand';
 import { getToolConfig } from '../_shared/useToolConfig';
 import { upscaleClient } from './client';
@@ -87,6 +88,32 @@ const { runCommand, abortCommand } = createToolCommand<
     return null;
   },
 
+  buildRequest: async (ctx, defaultRequest) => {
+    const assetId = ctx.activeLayer?.assetId;
+    if (!assetId) return defaultRequest;
+
+    const record = ctx.assets.get(assetId);
+    if (!record?.dataFormat) return defaultRequest;
+    // Training domain gate — identical to the denoiser's (see that file for
+    // the rationale): sRGB-TRC-encoded sources with a known →sRGB matrix only.
+    if (record.trc !== 'srgb-trc') return defaultRequest;
+    if (record.gamut !== 'srgb' && record.gamut !== 'display-p3' && record.gamut !== 'adobe-rgb') {
+      return defaultRequest;
+    }
+
+    const dec = await ctx.assets.getDec(assetId);
+    if (!dec) return defaultRequest;
+
+    let raster = decodeNakedToF32(dec, record.dataFormat);
+    raster = narrowRasterToSrgb(raster, record.gamut as 'srgb' | 'display-p3' | 'adobe-rgb');
+
+    return {
+      ...defaultRequest,
+      imageData: undefined,
+      f32ImageData: { data: raster.buffer as ArrayBuffer, width: record.width, height: record.height },
+    };
+  },
+
   setRequest: (entry, imageData, ctx) => {
     const upConfig = getUpscaleConfig(ctx);
     const scale = upConfig.targetScale ?? 4;
@@ -132,14 +159,30 @@ const { runCommand, abortCommand } = createToolCommand<
       ? Math.round(sourceDpi * effectiveScale)
       : sourceDpi;
 
-    // Convert raw pixels to PNG file
-    const outCanvas = new OffscreenCanvas(outW, outH);
-    const outCtx2d = outCanvas.getContext('2d')!;
-    const outImgData = new ImageData(new Uint8ClampedArray(resultBuffer), outW, outH);
-    outCtx2d.putImageData(outImgData, 0, 0);
-    const blob = await outCanvas.convertToBlob({ type: 'image/png' });
-    const frameName = targetFrame.name || 'Untitled';
-    const file = new File([blob], `${frameName}_upscaled_${scale}x.png`, { type: 'image/png' });
+    // Convert raw pixels to the output file. When the run rode the f32
+    // precision path (16-bit source), encode a 16-bit PNG (raw-16 → vips) so
+    // the new frame's ingest restores the high-depth `dec:` truth; 8-bit
+    // sources take the plain canvas-PNG path.
+    let file: File;
+    if (workerResult.f32ImageData) {
+      const truth = new Float32Array(workerResult.f32ImageData.data);
+      const u16 = quantizeRgbaF32To16(truth);
+      const blob16 = await ctx.files.encode(
+        { width: outW, height: outH, data: u16, bitDepth: 16, colorSpace: 'srgb' },
+        'image/png',
+        { exportConfig: { targetGamut: 'srgb' } },
+      );
+      const frameName = targetFrame.name || 'Untitled';
+      file = new File([blob16], `${frameName}_upscaled_${scale}x.png`, { type: 'image/png' });
+    } else {
+      const outCanvas = new OffscreenCanvas(outW, outH);
+      const outCtx2d = outCanvas.getContext('2d')!;
+      const outImgData = new ImageData(new Uint8ClampedArray(resultBuffer), outW, outH);
+      outCtx2d.putImageData(outImgData, 0, 0);
+      const blob = await outCanvas.convertToBlob({ type: 'image/png' });
+      const frameName = targetFrame.name || 'Untitled';
+      file = new File([blob], `${frameName}_upscaled_${scale}x.png`, { type: 'image/png' });
+    }
 
     // Create new frame or replace current
     if (outputMode === 'new-frame') {

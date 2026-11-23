@@ -52,6 +52,7 @@ export function useRetouchPanel() {
   const blurRadius = selfConfig.mosaicBlurRadius ?? 8;
   const blurStrength = selfConfig.mosaicBlurStrength ?? 60;
   const hardness = selfConfig.retouchHardness ?? 75;
+  const dustSensitivity = selfConfig.retouchDustSensitivity ?? 25;
 
   const setSizePreset = useCallback(
     (preset: 'XS' | 'S' | 'M' | 'L' | 'XL') => {
@@ -96,5 +97,12 @@ export function useRetouchPanel() {
     [setSelfConfig]
   );
 
-  return { sizePreset, presetValues, setSizePreset, toolMode, setToolMode, blurRadius, setBlurRadius, blurStrength, setBlurStrength, hardness, setHardness, stampDiameter, blockSize, isCustomDiameter, setStampDiameter };
+  const setDustSensitivity = useCallback(
+    (value: number) => {
+      setSelfConfig({ retouchDustSensitivity: Math.max(0, Math.min(100, Math.round(value) || 0)) } as Partial<CraftDrawerConfig>);
+    },
+    [setSelfConfig]
+  );
+
+  return { sizePreset, presetValues, setSizePreset, toolMode, setToolMode, blurRadius, setBlurRadius, blurStrength, setBlurStrength, hardness, setHardness, dustSensitivity, setDustSensitivity, stampDiameter, blockSize, isCustomDiameter, setStampDiameter };
 }

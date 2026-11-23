@@ -48,7 +48,7 @@ import { WORKING_GAMUT } from '@opengpex/editor/core/engine/color/gamut';
 import {
   unpremultiplyEncodeGamut,
   unpremultiplyEncodeGamutF32,
-} from '@opengpex/editor/core/engine/utils/export-utils';
+} from '@opengpex/editor/core/engine/utils/readback-utils';
 import { toDisplayTrackCanvasColorSpace } from './pixel-utils';
 import type { SampledPixels } from '../types';
 import { Point2D, Layer, StrokeData, PenPathData, PenLayerStyle } from '@opengpex/editor/core/types';

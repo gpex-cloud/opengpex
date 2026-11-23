@@ -295,7 +295,11 @@ function readAdjustments(
   // has min=-180 / max=180) can render it without HTML input clamping. The
   // fold is lossless in render (hue-rotate is modulo-360) and the next
   // pointer drag will commit the normalized value back to state.
-  return { ...src, hueRotate: normalizeHueDeg(src.hueRotate) };
+  // `?? 0`: an arm may be PARTIAL — the updateAdjustments partial-append
+  // baseline writes masks carrying ONLY the fields the user touched (e.g.
+  // `{ blur: 4 }`), so any other field can be absent. normalizeHueDeg
+  // (undefined) would fold to NaN; the hue identity is 0.
+  return { ...src, hueRotate: normalizeHueDeg(src.hueRotate ?? 0) };
 }
 
 

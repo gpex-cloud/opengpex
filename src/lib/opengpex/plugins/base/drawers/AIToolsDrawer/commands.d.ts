@@ -21,6 +21,8 @@ export interface AIToolsDrawerCommandsMap {
   segAllCmd: CommandInstance<void, Promise<void>>;
   upscalerCmd: CommandInstance<void, Promise<void>>;
   upscalerAbortCmd: CommandInstance;
+  denoiserCmd: CommandInstance<void, Promise<void>>;
+  denoiserAbortCmd: CommandInstance;
   inpaintEraserCmd: CommandInstance<void, Promise<void>>;
   inpaintEraserAbortCmd: CommandInstance;
 }

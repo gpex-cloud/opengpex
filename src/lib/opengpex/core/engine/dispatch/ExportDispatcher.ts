@@ -50,7 +50,7 @@ import { SceneAssembler } from '@opengpex/editor/core/engine/pipeline/scene/Scen
 import { highDepthCache } from '@opengpex/editor/core/engine/sources/HighDepthCache';
 import { imageBitmapCache } from '@opengpex/editor/core/engine/sources/ImageBitmapCache';
 import type { HighDepthFetcher } from '@opengpex/editor/core/engine/sources/HighDepthCache';
-import { unpremultiplyEncodeLinearF16, unpremultiplyEncodeGamut, unpremultiplyEncodePq10, unpremultiplyLinearF32 } from '@opengpex/editor/core/engine/utils/export-utils';
+import { unpremultiplyEncodeLinearF16, unpremultiplyEncodeGamut, unpremultiplyEncodePq10, unpremultiplyLinearF32 } from '@opengpex/editor/core/engine/utils/readback-utils';
 import { applyGainToF32, quantizeGainMapPair } from '@opengpex/editor/core/engine/color/hdr/gainMap';
 import { WORKING_GAMUT } from '@opengpex/editor/core/engine/color/gamut';
 import type { EncodeSource, FileService, GainMapData } from '@opengpex/editor/core/files';

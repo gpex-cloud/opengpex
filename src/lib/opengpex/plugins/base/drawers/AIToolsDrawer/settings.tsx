@@ -29,18 +29,20 @@
 
 import { useMemo, useState } from "react";
 import type { ComponentType } from "react";
-import { Cpu, Shapes, ArrowUpRight, Eraser, Info, Loader2 } from "lucide-react";
+import { Cpu, Shapes, ArrowUpRight, Eraser, Sparkles, Info, Loader2 } from "lucide-react";
 import { usePluginSelfConfig } from "@opengpex/editor/core/context";
 import { useDownloadTask } from "./_shared";
 
 // ─── Tool Identity (from each tool's protocols) ──────────────────────────────
 import { MODEL_TYPE_KEY as UPSCALER_KEY, MODEL_TYPE_NAME as UPSCALER_NAME, BUILTIN_UPSCALE_MODELS } from "./upscaler/protocols";
+import { MODEL_TYPE_KEY as DENOISE_KEY, MODEL_TYPE_NAME as DENOISE_NAME, BUILTIN_DENOISE_MODELS } from "./denoiser/protocols";
 import { MODEL_TYPE_KEY as BGREMOVER_KEY, MODEL_TYPE_NAME as BGREMOVER_NAME, BUILTIN_MODELS } from "./bgremover/protocols";
 import { MODEL_TYPE_KEY as SEG_KEY, MODEL_TYPE_NAME as SEG_NAME, BUILTIN_SEG_MODELS } from "./segmentation/protocols";
 import { MODEL_TYPE_KEY as ERASER_KEY, MODEL_TYPE_NAME as ERASER_NAME, BUILTIN_ERASER_MODELS } from "./inpaint/eraser/protocols";
 
 // ─── Self-contained Settings Sections ────────────────────────────────────────
 import { UpscalerSettingsSection } from "./upscaler/components/settings";
+import { DenoiseSettingsSection } from "./denoiser/components/settings";
 import { BgRemoverSettingsSection } from "./bgremover/components/settings";
 import { SegSettingsSection } from "./segmentation/components/settings";
 import { InpaintEraserSettingsSection } from "./inpaint/eraser/components/settings";
@@ -58,6 +60,7 @@ interface ToolTab {
 
 const TABS: ToolTab[] = [
   { key: UPSCALER_KEY, label: UPSCALER_NAME, icon: ArrowUpRight, Section: UpscalerSettingsSection },
+  { key: DENOISE_KEY, label: DENOISE_NAME, icon: Sparkles, Section: DenoiseSettingsSection },
   { key: BGREMOVER_KEY, label: BGREMOVER_NAME, icon: Cpu, Section: BgRemoverSettingsSection },
   { key: SEG_KEY, label: SEG_NAME, icon: Shapes, Section: SegSettingsSection },
   { key: ERASER_KEY, label: ERASER_NAME, icon: Eraser, Section: InpaintEraserSettingsSection },
@@ -67,6 +70,7 @@ const TABS: ToolTab[] = [
 
 const BUILTINS_BY_KEY: Record<string, { modelId: string; builtin?: boolean }[]> = {
   [UPSCALER_KEY]: BUILTIN_UPSCALE_MODELS,
+  [DENOISE_KEY]: BUILTIN_DENOISE_MODELS,
   [BGREMOVER_KEY]: BUILTIN_MODELS,
   [SEG_KEY]: BUILTIN_SEG_MODELS,
   [ERASER_KEY]: BUILTIN_ERASER_MODELS,
@@ -82,6 +86,7 @@ const BUILTINS_BY_KEY: Record<string, { modelId: string; builtin?: boolean }[]> 
  */
 const ACTIVE_TOOL_TO_TAB: Record<string, string> = {
   'upscaler': UPSCALER_KEY,
+  'denoiser': DENOISE_KEY,
   'bg-removal': BGREMOVER_KEY,
   'segmentation': SEG_KEY,
   'inpaint-eraser': ERASER_KEY,

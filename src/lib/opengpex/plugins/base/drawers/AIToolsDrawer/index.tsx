@@ -24,12 +24,14 @@ import { AIToolsSettings } from "./settings";
 import { BG_REMOVAL_COMMANDS } from "./bgremover/commands";
 import { SEG_COMMANDS } from "./segmentation/commands";
 import { UPSCALER_COMMANDS } from "./upscaler/commands";
+import { DENOISE_COMMANDS } from "./denoiser/commands";
 import { INPAINT_ERASER_COMMANDS } from "./inpaint/eraser/commands";
 import { AIToolsIcon } from "./icon";
 
 import * as P from "./protocols";
 import { MODEL_TYPE_KEY as BGREMOVER_KEY, DEFAULT_BG_REMOVAL_CONFIG } from './bgremover/protocols';
 import { MODEL_TYPE_KEY as UPSCALER_KEY, DEFAULT_UPSCALE_CONFIG } from './upscaler/protocols';
+import { MODEL_TYPE_KEY as DENOISE_KEY, DEFAULT_DENOISE_CONFIG } from './denoiser/protocols';
 import { MODEL_TYPE_KEY as SEG_KEY, DEFAULT_SEG_CONFIG } from './segmentation/protocols';
 import { MODEL_TYPE_KEY as ERASER_KEY, DEFAULT_INPAINT_ERASER_CONFIG } from './inpaint/eraser/protocols';
 
@@ -97,6 +99,7 @@ export const plugin: EditorPlugin = {
     // Namespaced sub-keys for each tool (consistent with useToolConfig reads)
     [BGREMOVER_KEY]: DEFAULT_BG_REMOVAL_CONFIG,
     [UPSCALER_KEY]: DEFAULT_UPSCALE_CONFIG,
+    [DENOISE_KEY]: DEFAULT_DENOISE_CONFIG,
     [SEG_KEY]: DEFAULT_SEG_CONFIG,
     [ERASER_KEY]: DEFAULT_INPAINT_ERASER_CONFIG,
     // Persisted UI state
@@ -104,7 +107,7 @@ export const plugin: EditorPlugin = {
   },
 
   // --- 6. Commands ---
-  commands: [...Object.values(BG_REMOVAL_COMMANDS), ...Object.values(SEG_COMMANDS), ...Object.values(UPSCALER_COMMANDS), ...Object.values(INPAINT_ERASER_COMMANDS)],
+  commands: [...Object.values(BG_REMOVAL_COMMANDS), ...Object.values(SEG_COMMANDS), ...Object.values(UPSCALER_COMMANDS), ...Object.values(DENOISE_COMMANDS), ...Object.values(INPAINT_ERASER_COMMANDS)],
 
   // --- 7. Signals ---
   signals: [],

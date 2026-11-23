@@ -128,6 +128,19 @@ export interface ToolCommandConfig<
   ) => TRequest;
 
   /**
+   * Optional async post-processing of the built request. Runs AFTER
+   * `setRequest` with the default request in hand; the return value replaces
+   * it wholesale. Use when a tool needs extra pixel acquisition the generic
+   * 8-bit `imageData` fetch cannot express (e.g. the denoiser's 16-bit
+   * naked-truth path swaps the payload for an f32 raster and DROPS
+   * `imageData`). Return `defaultRequest` unchanged for the legacy path.
+   */
+  buildRequest?: (
+    ctx: EditorContextValue,
+    defaultRequest: TRequest,
+  ) => Promise<TRequest>;
+
+  /**
    * Process the raw worker result into the store result type.
    * Return `null` to indicate "no useful result" (e.g. no subject detected).
    *
@@ -239,6 +252,7 @@ export function createToolCommand<
     builtins,
     toolName,
     setRequest,
+    buildRequest,
     getResult,
     preCheck,
     noResultMessage = 'No result from inference',
@@ -341,7 +355,10 @@ export function createToolCommand<
       // ── Execute inference ────────────────────────────────────────────────
 
       try {
-        const request = setRequest(modelEntry, imageData, ctx);
+        let request = setRequest(modelEntry, imageData, ctx);
+        if (buildRequest) {
+          request = await buildRequest(ctx, request);
+        }
         const workerResult = await client.run(request, { timeoutMs, onProgress, signal });
 
         const elapsedMs = performance.now() - inferenceStart;

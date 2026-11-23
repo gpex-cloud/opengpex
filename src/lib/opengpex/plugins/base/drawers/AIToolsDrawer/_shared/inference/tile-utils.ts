@@ -179,6 +179,127 @@ export function unpadTile(
 
 // ─── Paste Tile with Blending ────────────────────────────────────────────────
 
+// ─── Float32 Tile Variants (precision-preserving path) ──────────────────────
+
+/**
+ * Float32 counterparts of the tile primitives above, used by the f32
+ * inference path where pixels are interleaved RGBA float32 [0, 1]. Identical
+ * geometry semantics (reflect padding, linear overlap blending); the only
+ * differences are the element type and NO rounding — blending keeps full
+ * float precision.
+ */
+
+/** {@link extractTile} for interleaved RGBA float32 pixels. */
+export function extractTileF32(
+  srcData: Float32Array, srcWidth: number,
+  sx: number, sy: number, sw: number, sh: number,
+): Float32Array {
+  const tile = new Float32Array(sw * sh * 4);
+  for (let y = 0; y < sh; y++) {
+    const srcOffset = ((sy + y) * srcWidth + sx) * 4;
+    const dstOffset = y * sw * 4;
+    tile.set(srcData.subarray(srcOffset, srcOffset + sw * 4), dstOffset);
+  }
+  return tile;
+}
+
+/** {@link padTile} for interleaved RGBA float32 pixels. */
+export function padTileF32(
+  tile: Float32Array, tileW: number, tileH: number, targetSize: number,
+): Float32Array {
+  if (tileW === targetSize && tileH === targetSize) return tile;
+
+  const padded = new Float32Array(targetSize * targetSize * 4);
+  for (let y = 0; y < targetSize; y++) {
+    for (let x = 0; x < targetSize; x++) {
+      // Reflect-pad: mirror at boundaries
+      let sy = y;
+      if (sy >= tileH) {
+        sy = 2 * tileH - sy - 2;
+        if (sy < 0) sy = 0;
+      }
+      let sx = x;
+      if (sx >= tileW) {
+        sx = 2 * tileW - sx - 2;
+        if (sx < 0) sx = 0;
+      }
+      const srcIdx = (sy * tileW + sx) * 4;
+      const dstIdx = (y * targetSize + x) * 4;
+      padded[dstIdx] = tile[srcIdx];
+      padded[dstIdx + 1] = tile[srcIdx + 1];
+      padded[dstIdx + 2] = tile[srcIdx + 2];
+      padded[dstIdx + 3] = tile[srcIdx + 3];
+    }
+  }
+  return padded;
+}
+
+/** {@link unpadTile} for interleaved RGBA float32 pixels. */
+export function unpadTileF32(
+  paddedOutput: Float32Array, paddedW: number,
+  validW: number, validH: number,
+): Float32Array {
+  if (validW === paddedW) {
+    return new Float32Array(paddedOutput.buffer, paddedOutput.byteOffset, validW * validH * 4);
+  }
+  const out = new Float32Array(validW * validH * 4);
+  for (let y = 0; y < validH; y++) {
+    const srcOffset = y * paddedW * 4;
+    const dstOffset = y * validW * 4;
+    out.set(paddedOutput.subarray(srcOffset, srcOffset + validW * 4), dstOffset);
+  }
+  return out;
+}
+
+/** {@link pasteTileBlend} for interleaved RGBA float32 pixels — blend keeps float precision (no rounding). */
+export function pasteTileBlendF32(
+  output: Float32Array, outWidth: number, outHeight: number,
+  tileData: Float32Array, tileWidth: number, tileHeight: number,
+  dx: number, dy: number,
+  overlapPx: number,
+  isFirstCol: boolean,
+  isFirstRow: boolean,
+): void {
+  for (let y = 0; y < tileHeight; y++) {
+    const outY = dy + y;
+    if (outY < 0 || outY >= outHeight) continue;
+
+    for (let x = 0; x < tileWidth; x++) {
+      const outX = dx + x;
+      if (outX < 0 || outX >= outWidth) continue;
+
+      const srcIdx = (y * tileWidth + x) * 4;
+      const dstIdx = (outY * outWidth + outX) * 4;
+
+      // Compute blend weight for overlap regions
+      let weight = 1.0;
+
+      // Left overlap blend (only if not first column)
+      if (!isFirstCol && x < overlapPx) {
+        weight *= x / overlapPx;
+      }
+      // Top overlap blend (only if not first row)
+      if (!isFirstRow && y < overlapPx) {
+        weight *= y / overlapPx;
+      }
+
+      if (weight >= 1.0) {
+        output[dstIdx] = tileData[srcIdx];
+        output[dstIdx + 1] = tileData[srcIdx + 1];
+        output[dstIdx + 2] = tileData[srcIdx + 2];
+        output[dstIdx + 3] = tileData[srcIdx + 3];
+      } else {
+        // Linear blend with existing pixel — float precision, no rounding
+        const invWeight = 1.0 - weight;
+        output[dstIdx] = output[dstIdx] * invWeight + tileData[srcIdx] * weight;
+        output[dstIdx + 1] = output[dstIdx + 1] * invWeight + tileData[srcIdx + 1] * weight;
+        output[dstIdx + 2] = output[dstIdx + 2] * invWeight + tileData[srcIdx + 2] * weight;
+        output[dstIdx + 3] = output[dstIdx + 3] * invWeight + tileData[srcIdx + 3] * weight;
+      }
+    }
+  }
+}
+
 /**
  * Paste a processed tile into the output buffer with overlap linear blending.
  *

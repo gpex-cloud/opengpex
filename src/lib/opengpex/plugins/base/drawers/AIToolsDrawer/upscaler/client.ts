@@ -33,5 +33,13 @@ export const upscaleClient = createWorkerClient<UpscaleRequest, UpscaleResult, U
   {
     toolName: 'Upscale',
     defaultTimeoutMs: 0,
+    // Zero-copy both pixel channels: the default only transfers
+    // `imageData.data`; the f32 precision path rides its own buffer.
+    getTransferables: (req) => {
+      const buffers: Transferable[] = [];
+      if (req.imageData?.data) buffers.push(req.imageData.data);
+      if (req.f32ImageData?.data) buffers.push(req.f32ImageData.data);
+      return buffers;
+    },
   },
 );
