@@ -18,13 +18,13 @@
  */
 
 import { EditorPlugin } from '@opengpex/editor/core/types';
-import { MosaicOverlayMain } from './components';
-import { createMosaicStrokeHandler } from './interactions';
-import { MOSAIC_OVERLAY_COMMANDS } from './commands';
+import { RetouchOverlayMain } from './components';
+import { createRetouchStrokeHandler } from './interactions';
+import { RETOUCH_OVERLAY_COMMANDS } from './commands';
 import * as P from './protocols';
 
 /**
- * MosaicOverlay Plugin: Mosaic cursor + real-time pixelation stroke overlay
+ * RetouchOverlay Plugin: Mosaic cursor + real-time pixelation stroke overlay
  *
  * Render in STAGE_OVERLAY layer:
  * - Double-layer circular cursor with mosaic badge (follows mouse at 60fps)
@@ -50,13 +50,13 @@ export const plugin: EditorPlugin = {
   },
 
   slot: 'STAGE_OVERLAY',
-  component: MosaicOverlayMain,
+  component: RetouchOverlayMain,
 
   interactions: [
-    createMosaicStrokeHandler(),  // Priority 150 - Mosaic stroke interaction
+    createRetouchStrokeHandler(),  // Priority 150 - Mosaic stroke interaction
   ],
 
-  commands: MOSAIC_OVERLAY_COMMANDS,
+  commands: RETOUCH_OVERLAY_COMMANDS,
 
   signals: [
     {

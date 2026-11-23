@@ -23,6 +23,8 @@ export interface CraftDrawerCommandsMap {
   setCraftPenCmd: CommandInstance;
   cycleMarkerForwardCmd: CommandInstance;
   cycleMarkerBackwardCmd: CommandInstance;
+  cycleRetouchModeForwardCmd: CommandInstance;
+  cycleRetouchModeBackwardCmd: CommandInstance;
   setMarkerKindCmd: CommandInstance<{ kind: MarkerKind }>;
   deactivateCraftCmd: CommandInstance;
   brushSizeUpCmd: CommandInstance;

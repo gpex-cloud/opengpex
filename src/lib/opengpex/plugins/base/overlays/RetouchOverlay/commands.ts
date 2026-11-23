@@ -55,6 +55,6 @@ const bakeCommand: EditorCommand<{ frameId: string; layer: Layer; isNew: boolean
 
 // ─── Export ────────────────────────────────────────────────────────────────────
 
-export const MOSAIC_OVERLAY_COMMANDS = [
+export const RETOUCH_OVERLAY_COMMANDS = [
   bakeCommand,
 ];

@@ -19,6 +19,8 @@
 
 "use client";
 
+import { Sparkle, Stamp } from "lucide-react";
+
 /**
  * MosaicIcon: Custom icon — 2×2 grid with diagonal cells filled.
  *
@@ -124,3 +126,69 @@ export function CraftDrawerIcon({ size = 20, className }: { size?: number; class
     </svg>
   );
 }
+
+// ─── Retouch mode icons (mosaic craft button sub-modes) ────────────────────────
+
+/**
+ * Retouch mode icons: one glyph per mosaic-overlay sub-mode, drawn in the
+ * same lucide idiom as MosaicIcon (24×24 viewBox, currentColor, 2px stroke).
+ * They label the panel's mode switch and drive the toolbar's dynamic
+ * retouch trigger icon (the toolbar shows the LAST USED mode, not a fixed
+ * mosaic glyph).
+ */
+
+/** HealIcon: spot-heal — a rounded patch (band-aid) with suture dots. */
+export function HealIcon({ size = 20, className }: { size?: number; className?: string } = {}) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} aria-hidden="true">
+      <g transform="rotate(45 12 12)">
+        <rect x="3" y="8" width="18" height="8" rx="4" stroke="currentColor" strokeWidth="2" />
+        <line x1="12" y1="8" x2="12" y2="16" stroke="currentColor" strokeWidth="2" strokeDasharray="1.5 2" />
+        <circle cx="7.5" cy="12" r="0.8" fill="currentColor" />
+        <circle cx="16.5" cy="12" r="0.8" fill="currentColor" />
+      </g>
+    </svg>
+  );
+}
+
+/** DoubleSquareIcon: a solid square doubled by a dashed twin — previously the
+ * clone glyph, now the blur glyph (source run repeated elsewhere). */
+export function DoubleSquareIcon({ size = 20, className }: { size?: number; className?: string } = {}) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} aria-hidden="true">
+      <rect x="9" y="9" width="12" height="12" rx="2" stroke="currentColor" strokeWidth="2" />
+      <rect x="3" y="3" width="9" height="9" rx="2" stroke="currentColor" strokeWidth="2" strokeDasharray="3 2.5" />
+    </svg>
+  );
+}
+
+/** BlurIcon: blur — a circle dissolving into scattered dots (soft focus). */
+export function BlurIcon({ size = 20, className }: { size?: number; className?: string } = {}) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg" className={className} aria-hidden="true">
+      <circle cx="10" cy="12" r="6" stroke="currentColor" strokeWidth="2" strokeDasharray="2 2.5" />
+      <circle cx="18" cy="6" r="1.2" fill="currentColor" />
+      <circle cx="20" cy="12" r="1" fill="currentColor" opacity="0.7" />
+      <circle cx="18.5" cy="17.5" r="0.8" fill="currentColor" opacity="0.45" />
+    </svg>
+  );
+}
+
+/** SharpenIcon: sharpen — the lucide Sparkle glyph (crisp highlight). */
+export function SharpenIcon({ size = 20, className }: { size?: number; className?: string } = {}) {
+  return <Sparkle size={size} className={className} aria-hidden="true" />;
+}
+
+/** StampIcon: clone stamp — the lucide Stamp glyph (rubber stamp). */
+export function StampIcon({ size = 20, className }: { size?: number; className?: string } = {}) {
+  return <Stamp size={size} className={className} aria-hidden="true" />;
+}
+
+/** Map of every retouch mode to its glyph, shared by the panel switch and the dynamic toolbar trigger. */
+export const RETOUCH_MODE_ICONS = {
+  mosaic: MosaicIcon,
+  heal: HealIcon,
+  blur: DoubleSquareIcon,
+  sharpen: SharpenIcon,
+  clone: StampIcon,
+} as const;

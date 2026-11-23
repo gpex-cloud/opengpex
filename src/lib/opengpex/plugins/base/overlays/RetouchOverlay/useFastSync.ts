@@ -93,12 +93,12 @@ export function useStrokePreviewFastSync(
 }
 
 /**
- * useMosaicCursorFastSync: Mosaic cursor size synchronization with camera.k.
+ * useRetouchCursorFastSync: Mosaic cursor size synchronization with camera.k.
  *
  * Resizes cursor DOM elements when camera zoom changes.
  * [Perf] Throttled to ~60Hz during interaction.
  */
-export function useMosaicCursorFastSync(
+export function useRetouchCursorFastSync(
   cursorRef: React.RefObject<HTMLDivElement | null>,
   isActive: boolean,
   brushDiameter: number,
@@ -154,12 +154,12 @@ export function useMosaicCursorFastSync(
       toolBadge.style.top = `${badgeOffset}px`;
     }
 
-    // Mode indicator badge (right of tool badge): "+" new layer badge
-    const modeBadge = el.querySelector('[data-badge="new-layer"]') as HTMLElement;
-    if (modeBadge) {
+    // Clone pick-source badge (right of tool badge; only rendered in clone mode)
+    const cloneBadge = el.querySelector('[data-badge="clone-source"]') as HTMLElement;
+    if (cloneBadge) {
       const badgeOffset = Math.max(screenDiameter - 1, halfSize + 2);
-      modeBadge.style.left = `${badgeOffset + 17}px`;
-      modeBadge.style.top = `${badgeOffset + 1}px`;
+      cloneBadge.style.left = `${badgeOffset + 17}px`;
+      cloneBadge.style.top = `${badgeOffset + 1}px`;
     }
   }, { throttleHz: 60 });
 }

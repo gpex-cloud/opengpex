@@ -20,6 +20,7 @@
 'use client';
 
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
+import { RETOUCH_SESSION_MODES, normalizeMosaicMode } from '@opengpex/editor/plugins/base/overlays/RetouchOverlay/stroke/types';
 import * as P from './protocols';
 import { getDynamicTextSizeMax } from './protocols';
 import type { CraftType, CraftDrawerConfig } from './protocols';
@@ -72,6 +73,22 @@ function deactivate(ctx: EditorContextValue) {
  * same Tab key is free for other modes (e.g. Clip's own Tab cycling — its
  * guard is interactionMode === 'clip', which never overlaps craft mode).
  */
+function cycleRetouchMode(ctx: EditorContextValue, step: 1 | -1): void {
+  const craft = ctx.scoped!.getSignal<P.ActiveCraft>(P.SIGNAL_ACTIVE_CRAFT, null);
+  if (craft !== 'mosaic') return;
+
+  const order = RETOUCH_SESSION_MODES;
+  const config = ctx.scoped!.selfConfig as CraftDrawerConfig;
+  const current = normalizeMosaicMode(config.mosaicToolMode);
+  const idx = order.indexOf(current);
+  // `(idx + step + len) % len` keeps the modulo non-negative even for step=-1.
+  const next = order[(idx + step + order.length) % order.length];
+
+  ctx.scoped!.setSelfConfig({ mosaicToolMode: next } as Partial<CraftDrawerConfig>);
+  // No HUD: the panel tabs / toolbar glyph / cursor badge already announce
+  // the switch visually — a toast on every Tab press is noise.
+}
+
 function cycleMarkerKind(ctx: EditorContextValue, step: 1 | -1): void {
   const craft = ctx.scoped!.getSignal<P.ActiveCraft>(P.SIGNAL_ACTIVE_CRAFT, null);
   if (craft !== 'marker') return;
@@ -183,6 +200,23 @@ export const CRAFT_COMMANDS = {
     name: 'Previous Marker Type',
     category: 'Drawing',
     execute: (ctx: EditorContextValue) => cycleMarkerKind(ctx, -1),
+  } as EditorCommand<void, void>,
+
+  // Retouch sub-mode cycling (Tab / Shift+Tab while the retouch tool is
+  // active) — mirrors the marker kind cycle; the mode is config-driven, so
+  // the panel tabs / toolbar glyph / cursor badge all follow the write.
+  cycleRetouchForward: {
+    id: P.CMD_CYCLE_RETOUCH_MODE_FORWARD,
+    name: 'Next Retouch Mode',
+    category: 'Drawing',
+    execute: (ctx: EditorContextValue) => cycleRetouchMode(ctx, +1),
+  } as EditorCommand<void, void>,
+
+  cycleRetouchBackward: {
+    id: P.CMD_CYCLE_RETOUCH_MODE_BACKWARD,
+    name: 'Previous Retouch Mode',
+    category: 'Drawing',
+    execute: (ctx: EditorContextValue) => cycleRetouchMode(ctx, -1),
   } as EditorCommand<void, void>,
 
   // Direct sub-type selection, used when the marker tool is entered FROM an

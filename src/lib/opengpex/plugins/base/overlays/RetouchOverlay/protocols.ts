@@ -18,10 +18,10 @@
  */
 
 /**
- * MosaicOverlay Plugin Protocols
+ * RetouchOverlay Plugin Protocols
  *
  * Defines constants and signals for mosaic overlay plugin.
- * MosaicOverlay renders mosaic cursor and stroke preview in STAGE_OVERLAY layer.
+ * RetouchOverlay renders mosaic cursor and stroke preview in STAGE_OVERLAY layer.
  */
 
 export const PLUGIN_ID = 'overlays.mosaic_overlay';

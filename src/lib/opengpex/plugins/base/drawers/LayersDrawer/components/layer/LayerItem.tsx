@@ -24,7 +24,7 @@
 import { getLayerKind } from '@opengpex/editor/core/layer/kinds';
 import React, { useRef, useEffect } from "react";
 import { Eye, EyeOff, Lock, Unlock, Star, Paintbrush, PenTool, Image as ImageIcon, Folder } from "lucide-react";
-import { MosaicIcon } from "@opengpex/editor/plugins/base/drawers/CraftDrawer/icon";
+import { DoubleSquareIcon, HealIcon, MosaicIcon, SharpenIcon, StampIcon } from "@opengpex/editor/plugins/base/drawers/CraftDrawer/icon";
 import { Motion } from "@opengpex/editor/core/motion";
 import {
   Reorder,
@@ -287,6 +287,14 @@ export const LayerItem = React.memo(
                     );
                   case "mosaic":
                     return glyph(<MosaicIcon size={13} />);
+                  case "heal":
+                    return glyph(<HealIcon size={13} />);
+                  case "clone":
+                    return glyph(<StampIcon size={13} />);
+                  case "blur":
+                    return glyph(<DoubleSquareIcon size={13} />);
+                  case "sharpen":
+                    return glyph(<SharpenIcon size={13} />);
                   case "brush":
                     return glyph(<Paintbrush size={13} strokeWidth={2} />);
                   case "marker":

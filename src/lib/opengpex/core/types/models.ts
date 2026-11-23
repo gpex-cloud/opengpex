@@ -492,6 +492,9 @@ export type LayerSourceTool =
   | 'restore'  // Legacy restore bake
   | 'mosaic'   // Mosaic bake
   | 'heal'     // Spot-heal bake (mosaic-overlay heal variant)
+  | 'blur'     // Blur brush bake (retouch family, convolution stamp)
+  | 'sharpen'  // Sharpen brush bake (retouch family, unsharp stamp)
+  | 'clone'    // Clone stamp bake (retouch family, source-patch copy)
   | 'pen'      // Pen shape layer (Phase 3 face renderer)
   | 'misc';    // Fallback: tag missing or unrecognised
 

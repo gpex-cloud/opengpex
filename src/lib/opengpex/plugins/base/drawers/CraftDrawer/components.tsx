@@ -29,7 +29,7 @@ import {
   Star,
   PenTool,
 } from "lucide-react";
-import { MosaicIcon } from "./icon";
+import { MosaicIcon, RETOUCH_MODE_ICONS } from "./icon";
 import { motion } from "framer-motion";
 import { useEditorServices } from "@opengpex/editor/core/context";
 import { SettingsPanelAPI } from "../../panels/SettingsPanel/protocols";
@@ -43,12 +43,16 @@ import ActionGroup, {
 } from "@opengpex/editor/widgets/ActionGroup";
 import { TextPanel } from "./panels/text";
 import { BrushPanel } from "./panels/brush";
-import { MosaicPanel } from "./panels/mosaic";
+import { RetouchPanel } from "./panels/retouch";
 import { MarkerPanel } from "./panels/marker";
 import { PenPanel } from "./panels/pen";
 import { useCraftDrawer, useCraftTrigger, useCraftButtonGroup } from "./hooks";
 import { CraftDrawerIcon } from "./icon";
 import type { CraftType } from "./protocols";
+import { usePluginConfig } from "@opengpex/editor/core/context";
+import { normalizeMosaicMode } from "@opengpex/editor/plugins/base/overlays/RetouchOverlay/stroke/types";
+import { CraftDrawerAPI } from "./protocols";
+import type { CraftDrawerConfig } from "./protocols";
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
 
@@ -62,7 +66,7 @@ const CRAFT_BUTTONS: {
     type: "mosaic",
     icon: <MosaicIcon size={13} />,
     iconSmall: <MosaicIcon size={10} />,
-    label: "Mosaic Tool (O)",
+    label: "Retouch Tools (O)",
   },
   {
     type: "marker",
@@ -109,6 +113,14 @@ const CRAFT_BUTTONS: {
 export const CraftTriggerButtons = React.memo(function CraftTriggerButtons() {
   const { activeCraft, selectCraft } = useCraftTrigger();
 
+  // The retouch trigger shows the LAST USED retouch mode's glyph instead of a
+  // fixed mosaic one — the mosaic craft button fronts five sub-modes, and the
+  // persisted mode IS the last-used marker (the panel writes it on every
+  // switch). Omitted config falls back to 'mosaic' (historical behavior).
+  const [craftConfig] = usePluginConfig<CraftDrawerConfig>(CraftDrawerAPI.configKey);
+  const lastRetouchMode = normalizeMosaicMode(craftConfig?.mosaicToolMode);
+  const LastRetouchIcon = RETOUCH_MODE_ICONS[lastRetouchMode];
+
   const tipContent =
     activeCraft === "text"
       ? "Drag empty canvas to place text\nClick text to edit · Cmd+drag to move\nEsc to exit"
@@ -131,7 +143,9 @@ export const CraftTriggerButtons = React.memo(function CraftTriggerButtons() {
       (btn.type === "eraser" && activeCraft === "restore");
     const isRestoreOnEraser =
       btn.type === "eraser" && activeCraft === "restore";
-    const displayIcon = isRestoreOnEraser ? <Undo2 size={13} /> : btn.icon;
+    // Retouch trigger icon follows the last-used retouch mode (see above).
+    const displayIcon =
+      btn.type === "mosaic" ? <LastRetouchIcon size={13} /> : isRestoreOnEraser ? <Undo2 size={13} /> : btn.icon;
     const tooltipText = isRestoreOnEraser ? "Restore Mode (Tab)" : btn.label;
 
     return {
@@ -201,6 +215,11 @@ export const CraftTriggerButtons = React.memo(function CraftTriggerButtons() {
 const CraftPanelButtonGroup = React.memo(function CraftPanelButtonGroup() {
   const { activeCraft, handleButtonClick } = useCraftButtonGroup();
   const { inferredCraft } = useCraftDrawer();
+  // The retouch entry follows the LAST USED retouch mode's glyph (same rule
+  // as the toolbar trigger above): the persisted mode IS the last-used
+  // marker; omitted config falls back to 'mosaic'.
+  const [craftConfig] = usePluginConfig<CraftDrawerConfig>(CraftDrawerAPI.configKey);
+  const LastRetouchIconSmall = RETOUCH_MODE_ICONS[normalizeMosaicMode(craftConfig?.mosaicToolMode)];
 
   // Assemble items per render. Cheap (a few entries) and the icon/label swap
   // for eraser-in-restore-mode is a pure function of activeCraft, so any
@@ -217,9 +236,12 @@ const CraftPanelButtonGroup = React.memo(function CraftPanelButtonGroup() {
     const inferred = !active && inferredCraft === btn.type;
     return {
       key: btn.type,
-      // Dynamic icon: swap Eraser → Undo2 when we're in restore sub-mode.
+      // Dynamic icon: swap Eraser → Undo2 when we're in restore sub-mode,
+      // and the retouch entry → the last-used retouch mode's glyph.
       // ActionGroup takes any ReactNode, so we build the node here.
-      icon: isRestoreOnEraser ? <Undo2 size={10} /> : btn.iconSmall,
+      icon: btn.type === "mosaic"
+        ? <LastRetouchIconSmall size={10} />
+        : isRestoreOnEraser ? <Undo2 size={10} /> : btn.iconSmall,
       // Dynamic label: mirror the icon swap so the tooltip stays truthful.
       label: isRestoreOnEraser ? "Restore Mode (Tab)" : btn.label,
       active,
@@ -241,7 +263,7 @@ const CraftPanelButtonGroup = React.memo(function CraftPanelButtonGroup() {
  * - activeCraft='text' → TextPanel
  * - activeCraft='brush'|'eraser' → BrushPanel
  * - activeCraft=null && layer.type='text' -> TextPanel (inferred)
- * - activeCraft=null && mosaic-stamped paint layer -> MosaicPanel (inferred)
+ * - activeCraft=null && mosaic-stamped paint layer -> RetouchPanel (inferred)
  * - activeCraft=null && brush-stamped paint layer -> BrushPanel (inferred)
  * - activeCraft=null && unstamped paint layer (e.g. baked text) -> generic tip
  * - activeCraft=null && marker layer selected -> MarkerPanel (inferred)
@@ -265,7 +287,7 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
   const PANEL_FOR_CRAFT: Partial<Record<CraftType, React.ComponentType>> = {
     text: TextPanel,
     marker: MarkerPanel,
-    mosaic: MosaicPanel,
+    mosaic: RetouchPanel,
     pen: PenPanel,
     brush: BrushPanel,
     eraser: BrushPanel,

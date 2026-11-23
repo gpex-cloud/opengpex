@@ -9,6 +9,6 @@
 export { useCraftDrawer } from './inference';
 export { useCraftTrigger, useCraftButtonGroup } from './trigger';
 export { useTextPanel } from './panels/text';
-export { useMosaicPanel } from './panels/mosaic';
+export { useRetouchPanel } from './panels/retouch';
 export { useBrushPanel } from './panels/brush';
 export { useMarkerPanel } from './panels/marker';

@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.65
+
+- Retouch: the Mosaic tool expands into a five-tool retouch set — Heal, Clone, Mosaic, Blur and Sharpen — switchable with Tab, each with its own layer icon
+- Retouch: free-entry stamp size alongside the XS–XL presets, plus an edge hardness slider from fully soft to razor sharp
+- Adjustments: adjustment masks whose grade returns to neutral are now removed automatically instead of piling up as empty entries
+
 ## 2.0.64
 
 - Edge Feather: feathering an irregular cut-out or lasso fragment no longer clips flat against the fragment's bounding box — the soft fade now extends fully around the shape, including where the contour touches the fragment edges

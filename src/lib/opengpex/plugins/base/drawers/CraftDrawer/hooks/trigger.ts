@@ -31,7 +31,7 @@ import { CraftDrawerCommandsMap, CraftDrawerSignalsMap } from '../commands.d';
  * Encapsulates states and commands required for tool button group.
  */
 export function useCraftTrigger() {
-  const { setCraftCmd, cycleMarkerForwardCmd, cycleMarkerBackwardCmd } = usePluginCommands<CraftDrawerCommandsMap>();
+  const { setCraftCmd, cycleMarkerForwardCmd, cycleMarkerBackwardCmd, cycleRetouchModeForwardCmd, cycleRetouchModeBackwardCmd } = usePluginCommands<CraftDrawerCommandsMap>();
   const { activeCraftSignal } = usePluginSignals<CraftDrawerSignalsMap>();
 
   const activeCraft = (activeCraftSignal?.value ?? null) as ActiveCraft;
@@ -43,9 +43,10 @@ export function useCraftTrigger() {
     [setCraftCmd]
   );
 
-  // Tab / Shift+Tab cycling over marker kinds while in marker craft mode
+  // Tab / Shift+Tab cycling over marker kinds while in marker craft mode,
+  // and over retouch modes while in the (mosaic) retouch craft mode.
   useEffect(() => {
-    if (activeCraft !== 'marker') return;
+    if (activeCraft !== 'marker' && activeCraft !== 'mosaic') return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key !== 'Tab') return;
 
@@ -58,15 +59,18 @@ export function useCraftTrigger() {
 
       e.preventDefault();
       e.stopPropagation();
-      if (e.shiftKey) {
-        cycleMarkerBackwardCmd?.execute();
+      const shift = e.shiftKey;
+      if (activeCraft === 'marker') {
+        if (shift) cycleMarkerBackwardCmd?.execute();
+        else cycleMarkerForwardCmd?.execute();
       } else {
-        cycleMarkerForwardCmd?.execute();
+        if (shift) cycleRetouchModeBackwardCmd?.execute();
+        else cycleRetouchModeForwardCmd?.execute();
       }
     };
     document.addEventListener('keydown', handleKeyDown, true);
     return () => document.removeEventListener('keydown', handleKeyDown, true);
-  }, [activeCraft, cycleMarkerForwardCmd, cycleMarkerBackwardCmd]);
+  }, [activeCraft, cycleMarkerForwardCmd, cycleMarkerBackwardCmd, cycleRetouchModeForwardCmd, cycleRetouchModeBackwardCmd]);
 
   return { activeCraft, selectCraft };
 }

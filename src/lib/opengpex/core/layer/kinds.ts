@@ -90,6 +90,10 @@ export type LayerIconToken =
   | 'gradient'    // color fill: rainbow gradient swatch
   | 'thumbnail'   // real pixels (imported photos, baked bitmaps)
   | 'mosaic'      // mosaic canvas (image stamped sourceTool:'mosaic')
+  | 'heal'        // spot-heal canvas (sourceTool:'heal')
+  | 'clone'       // clone stamp canvas (sourceTool:'clone')
+  | 'blur'        // blur brush canvas (sourceTool:'blur')
+  | 'sharpen'     // sharpen brush canvas (sourceTool:'sharpen')
   | 'brush'       // brush canvas (image/vector stamped sourceTool:'brush')
   | 'image'       // plain image glyph
   | 'text'        // text glyph
@@ -234,18 +238,24 @@ export const LAYER_KINDS: Readonly<Record<Layer['type'], LayerKind>> = {
     clippable: 'logical',
     /**
      * Stamp routing (P5: the paint kind merged into image): a mosaic canvas
-     * is an image stamped `sourceTool:'mosaic'` (spot-heal canvases mirror
-     * it with `sourceTool:'heal'`) and infers the MosaicPanel; UNSTAMPED
-     * image layers are plain pixels/photos — no owning tool, no panel (so
-     * mosaic/heal can never hijack a photo's panel).
+     * is an image stamped `sourceTool:'mosaic'`; every retouch-family mode
+     * mirrors it with its own stamp ('heal', 'blur', 'sharpen', 'clone') and
+     * infers the shared RetouchPanel; UNSTAMPED image layers are plain
+     * pixels/photos — no owning tool, no panel (so retouch stamps can never
+     * hijack a photo's panel).
      */
     icon: (layer) => {
       const tool = layer.metadata?.sourceTool;
-      return tool === 'mosaic' || tool === 'heal' ? 'mosaic' : 'thumbnail';
+      // Per-mode glyph tokens — each retouch mode shows its own stamp icon.
+      return tool === 'mosaic' || tool === 'heal' || tool === 'blur' || tool === 'sharpen' || tool === 'clone'
+        ? (tool as 'mosaic' | 'heal' | 'clone' | 'blur' | 'sharpen')
+        : 'thumbnail';
     },
     ui: (layer) => {
       const tool = layer.metadata?.sourceTool;
-      return tool === 'mosaic' || tool === 'heal' ? 'mosaic' : null;
+      return tool === 'mosaic' || tool === 'heal' || tool === 'blur' || tool === 'sharpen' || tool === 'clone'
+        ? 'mosaic'
+        : null;
     },
     // Image layers may be blank (canvas-sized host layers) — no payload gate.
     normalize: normalizePatch,

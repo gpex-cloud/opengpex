@@ -18,7 +18,7 @@
  */
 
 /**
- * MosaicOverlay Interaction Handler — Pure Orchestration
+ * RetouchOverlay Interaction Handler — Pure Orchestration
  *
  * Delegates stroke lifecycle to StrokeSession abstraction:
  * - onStart: create session via factory, begin stroke
@@ -31,14 +31,23 @@
 
 import type { InteractionHandler } from '@opengpex/editor/core/types';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
+import type { CraftDrawerConfig } from '../../drawers/CraftDrawer/protocols';
 import { MOSAIC_OVERLAY_SIGNAL_IS_STROKING } from './protocols';
-import { createMosaicSession } from './stroke/factory';
+import { createRetouchSession } from './stroke/factory';
 import { executeBake } from './stroke/bake';
+import { normalizeMosaicMode } from './stroke/types';
+import { pickCloneSource } from './stroke/clone/cloneSource';
 import type { StrokeSession } from './stroke/types';
 
 /** Shared signal keys */
 const ACTIVE_CRAFT_KEY = CraftDrawerAPI.signals.activeCraft;
 const IS_STROKING_KEY = MOSAIC_OVERLAY_SIGNAL_IS_STROKING;
+
+/** Reads the persisted retouch mode from plugin config (whitelist-normalized). */
+function currentMode(e: { state: { pluginConfig: Record<string, unknown> } }): string {
+  const config = e.state.pluginConfig[CraftDrawerAPI.configKey] as unknown as CraftDrawerConfig | undefined;
+  return normalizeMosaicMode(config?.mosaicToolMode);
+}
 
 /** Single module-level mutable state: the active stroke session */
 let session: StrokeSession | null = null;
@@ -57,7 +66,7 @@ let pendingBake: Promise<void> | null = null;
  */
 let previewHold: OffscreenCanvas | null = null;
 
-// ─── createMosaicStrokeHandler ─────────────────────────────────────────────────
+// ─── createRetouchStrokeHandler ─────────────────────────────────────────────────
 
 /**
  * MosaicStrokeHandler: Mosaic stroke interaction handler
@@ -65,15 +74,27 @@ let previewHold: OffscreenCanvas | null = null;
  * In mosaic craft mode, handles pointerdown -> pointermove -> pointerup
  * complete stroke lifecycle.
  */
-export const createMosaicStrokeHandler = (): InteractionHandler => ({
+export const createRetouchStrokeHandler = (): InteractionHandler => ({
   id: 'mosaic-stroke',
   priority: 150,
+  // Alt is a ROUTING spring channel (the Dispatcher filters every handler
+  // that does not declare an override on an engaged channel). Clone needs
+  // Alt+Click for source picking, so this handler declares the override to
+  // stay consultable while Alt is held; the test below yields the press back
+  // to layer-move whenever Alt is engaged outside clone mode (the clip
+  // creation tools' declare-and-yield precedent). Non-clone modes keep the
+  // global temporary-move semantics on Alt.
+  springOverride: ['alt'],
 
   test: (e) => {
     // Only active in craft mode when activeCraft === 'mosaic'
     if (e.state.interaction.interactionMode !== 'craft') return false;
     const craft = e.state.interaction.signals[ACTIVE_CRAFT_KEY];
     if (craft !== 'mosaic') return false;
+
+    // Alt held outside clone mode: yield the press to the global layer-move
+    // spring (bare spring fallback, mirroring the clip tools' yield branch).
+    if (e.spring.alt && currentMode(e) !== 'clone') return false;
 
     // Block new strokes while a previous bake is in-flight.
     if (pendingBake) return false;
@@ -92,7 +113,14 @@ export const createMosaicStrokeHandler = (): InteractionHandler => ({
   },
 
   onStart: (e) => {
-    session = createMosaicSession(e);
+    // Clone mode's Alt+Click is the explicit source pick: record the anchor
+    // and end the gesture without starting a stroke session.
+    if (currentMode(e) === 'clone' && e.keys.alt) {
+      pickCloneSource(e.activeFrame.id, e.point.canvas);
+      return;
+    }
+
+    session = createRetouchSession(e);
     if (!session) return;
 
     session.begin(e.point.canvas, e.pointer.pressure || 0.5);
@@ -121,7 +149,7 @@ export const createMosaicStrokeHandler = (): InteractionHandler => ({
           await executeBake(request, e);
         }
       } catch (err) {
-        console.error('[MosaicOverlay] Bake failed:', err);
+        console.error('[RetouchOverlay] Bake failed:', err);
       } finally {
         pendingBake = null;
 

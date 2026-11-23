@@ -312,6 +312,18 @@ if (typeof document !== 'undefined') {
   //
   // Instead, pointermove only wakes when a button is held (e.buttons > 0),
   // meaning an actual drag/pan/zoom interaction is in progress.
+  //
+  // Consequence for POINTER-FOLLOWING UI (hover ghost cursors, crosshair
+  // previews — e.g. the clone stamp's sample-position ring): such indicators
+  // must NOT wait for ticker ticks, or they crawl at 4fps after the idle
+  // window. They must update in their own pointermove handler (event-side
+  // direct DOM writes, camera read from the ticker's cached value — which
+  // stays fresh because camera changes only come from wheel/drag, events
+  // that DO wake). This is deliberately NOT a job for
+  // setTickerActivityLock: that lock is for CONTENT that animates on its
+  // own (playback); holding it for a hover indicator would pin the ticker
+  // at full rate whenever the tool is merely active, reintroducing the GPU
+  // cost this tier exists to prevent (2026-11-23, clone stamp ghost cursor).
   const INPUT_EVENTS = ['pointerdown', 'pointerup', 'wheel', 'keydown', 'keyup', 'touchstart', 'touchmove'] as const;
   for (const evt of INPUT_EVENTS) {
     document.addEventListener(evt, wakeFromIdle, { passive: true, capture: true });

@@ -48,6 +48,7 @@ import { LayerFactory } from '@opengpex/editor/core/layer/factory';
 import type { EditorContextValue } from '@opengpex/editor/core/types';
 import type { CurveChannel } from '../protocols';
 import { resolveEditableTail, projectSelectionToLayer } from '../utils-hotTail';
+import { isIdentityGrade } from '@opengpex/editor/core/helpers/adjustments';
 
 /**
  * The grade value a panel should display: the EDITABLE hot tail's arm when one
@@ -98,20 +99,30 @@ export function nextMasksForArm(
   const masks = layer.adjustMasks ?? [];
   const tail = resolveEditableTail(ctx.geometry, frame, layer, category);
   const key = GRADE_ARM_KEY[category];
+  let next: AdjustmentMask[];
   if (tail) {
-    return masks.map((m) => (m.id === tail.id ? { ...m, grade: { ...m.grade, [key]: arm } } : m));
+    next = masks.map((m) => (m.id === tail.id ? { ...m, grade: { ...m.grade, [key]: arm } } : m));
+  } else {
+    if (masks.length >= MAX_ADJUSTMENT_MASKS_PER_LAYER) {
+      capBlocked(ctx);
+      return undefined;
+    }
+    const shape = projectSelectionToLayer(ctx.geometry, frame, layer);
+    const mask = createAdjustMask(category, arm as GradeState);
+    // Manual write path: no `origin` tag — absence means user-owned, so preset
+    // applications and presets-panel resets never delete hand-written grades.
+    mask.id = LayerFactory.newAdjustMaskId();
+    if (shape) mask.shape = shape;
+    next = [...masks, mask];
   }
-  if (masks.length >= MAX_ADJUSTMENT_MASKS_PER_LAYER) {
-    capBlocked(ctx);
-    return undefined;
-  }
-  const shape = projectSelectionToLayer(ctx.geometry, frame, layer);
-  const mask = createAdjustMask(category, arm as GradeState);
-  // Manual write path: no `origin` tag — absence means user-owned, so preset
-  // applications and presets-panel resets never delete hand-written grades.
-  mask.id = LayerFactory.newAdjustMaskId();
-  if (shape) mask.shape = shape;
-  return [...masks, mask];
+  // Identity sweep — the generic residue cleanup: ANY mask whose grade has
+  // become entirely identity and which carries no selection snapshot is pure
+  // noise (a slider dragged back to neutral must not leave an empty mask
+  // behind). Selection-scoped identity masks are kept: their frozen shape is
+  // user state even when the grade does nothing. Pure visual no-op — the
+  // renderer's identity fast path already skipped these grades.
+  const pruned = next.filter((m) => !(isIdentityGrade(m.grade) && !m.shape));
+  return pruned;
 }
 
 /**

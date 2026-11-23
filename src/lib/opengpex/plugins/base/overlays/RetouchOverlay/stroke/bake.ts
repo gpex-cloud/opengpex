@@ -125,7 +125,7 @@ async function executePaintBake(request: PaintBakeRequest, e: InteractionEvent):
         existingLayerBounding = { w: targetLayer.bounding.w, h: targetLayer.bounding.h, cx: targetLayer.cx, cy: targetLayer.cy };
       }
     } catch (loadErr) {
-      console.warn('[MosaicOverlay] Failed to acquireOwned existing layer bitmap:', loadErr);
+      console.warn('[RetouchOverlay] Failed to acquireOwned existing layer bitmap:', loadErr);
     }
   }
 

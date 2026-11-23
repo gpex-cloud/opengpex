@@ -20,15 +20,17 @@
 /**
  * Mosaic Stroke Session Factory
  *
- * Creates a MosaicStrokeSession based on current interaction context.
+ * Creates a RetouchStrokeSession based on current interaction context.
  */
 
 import type { InteractionEvent, Frame } from '@opengpex/editor/core/types';
 import { sampleImageData } from '@opengpex/editor/core/engine/utils/sample-utils';
 import { CraftDrawerAPI, MOSAIC_SIZE_PRESETS } from '../../../drawers/CraftDrawer/protocols';
 import type { CraftDrawerConfig } from '../../../drawers/CraftDrawer/protocols';
-import { MosaicStrokeSession } from './MosaicStrokeSession';
-import type { MosaicSessionMode, StrokeSession } from './types';
+import { RetouchStrokeSession } from './session';
+import { normalizeMosaicMode, RETOUCH_SPACING_RATIO } from './types';
+import { getCloneSourceFor } from './clone/cloneSource';
+import type { StrokeSession } from './types';
 
 /**
  * Capture downsample target for the heal variant. The heal kernel does real
@@ -39,19 +41,10 @@ import type { MosaicSessionMode, StrokeSession } from './types';
  */
 const HEAL_SAMPLE_TARGET_DIM = 1280;
 
-/**
- * Sampling margin for heal, as a fraction of the brush radius. The kernel
- * samples the ring band r..1.5r OUTSIDE the stamp, so the composited source
- * must be trusted at least half a brush diameter beyond every stamp edge.
- * The capture itself is canvas-wide; this only documents the effective
- * range contract (and guards degenerate presets below).
- */
-export const HEAL_SAMPLE_MARGIN_FACTOR = 0.5;
-
 // ─── Mosaic Session Creation ───────────────────────────────────────────────────
 
 /**
- * Creates a MosaicStrokeSession using compositeFrame as pixel source.
+ * Creates a RetouchStrokeSession using compositeFrame as pixel source.
  *
  * Source pixel strategy — "What You See Is What Gets Pixelated":
  *   Instead of reading pixels from a single source layer, we composite ALL
@@ -60,17 +53,14 @@ export const HEAL_SAMPLE_MARGIN_FACTOR = 0.5;
  *   - Paint strokes overlaid on images
  *   - Text layers, adjustment effects, masks, blend modes, etc.
  *
- *   The composite is async (~5-15ms). MosaicStrokeSession buffers early
+ *   The composite is async (~5-15ms). RetouchStrokeSession buffers early
  *   pointer events and replays them once the composite resolves.
  *
  * Guard: we still require at least one visible image/paint layer exists
  *   so that mosaic on a blank canvas / pure text doesn't silently do nothing.
  */
-export function createMosaicSession(e: InteractionEvent): StrokeSession | null {
+export function createRetouchSession(e: InteractionEvent): StrokeSession | null {
   const frame: Frame = e.activeFrame;
-  // Alt (Option) = force this stroke into a NEW mosaic layer (since
-  // 2026-10-26; Cmd was reassigned to the global move-layer spring key).
-  const forceNewLayer = e.keys.alt;
   const activeLayerId = frame.activeLayerId;
   const activeLayer = activeLayerId ? frame.layers.byId[activeLayerId] : null;
 
@@ -89,34 +79,64 @@ export function createMosaicSession(e: InteractionEvent): StrokeSession | null {
     return null;
   }
 
-  // Read preset size + active variant from CraftDrawer config. Heal is a
-  // sub-mode of the single mosaic Craft button; the size presets table is
-  // shared (for heal, `brushDiameter` is the stamp diameter and `blockSize`
-  // is unused by the kernel).
+  // Read preset size + active variant from CraftDrawer config. Every mode is
+  // a sub-mode of the single mosaic Craft button; the size presets table is
+  // shared (brushDiameter is the stamp diameter everywhere; blockSize is
+  // only meaningful to the mosaic kernel). Mode normalization goes through
+  // the shared whitelist so stale/partial config can never route a stroke to
+  // the wrong kernel.
   const craftConfig = e.state.pluginConfig[CraftDrawerAPI.configKey] as unknown as CraftDrawerConfig | undefined;
-  const mode: MosaicSessionMode = craftConfig?.mosaicToolMode === 'heal' ? 'heal' : 'mosaic';
+  const mode = normalizeMosaicMode(craftConfig?.mosaicToolMode);
   const preset = craftConfig?.mosaicSizePreset ?? 'M';
   const presetData = MOSAIC_SIZE_PRESETS[preset as keyof typeof MOSAIC_SIZE_PRESETS] ?? MOSAIC_SIZE_PRESETS['M'];
-  const { brushDiameter, blockSize } = presetData;
+  // Custom diameter override (typed into the panel's Diameter row) wins over
+  // the preset; the mosaic block grid follows at the presets' ratio (d/2.5).
+  const customDiameter = craftConfig?.mosaicStampDiameter;
+  const isCustomDiameter = customDiameter != null && customDiameter > 0;
+  const brushDiameter = isCustomDiameter ? customDiameter : presetData.brushDiameter;
+  const blockSize = isCustomDiameter
+    ? Math.max(2, Math.round(brushDiameter / 2.5))
+    : presetData.blockSize;
 
-  // Downsample large canvases for mosaic/heal source readback.
+  // Convolution parameters for blur/sharpen (panel sliders; canvas-space
+  // radius px, strength in [0,100] → [0,1]. The kernels re-scale the radius
+  // into sample space).
+  const blurRadius = craftConfig?.mosaicBlurRadius ?? 8;
+  const strength = (craftConfig?.mosaicBlurStrength ?? 60) / 100;
+  const hardness = craftConfig?.retouchHardness ?? 75;
+
+  // Downsample large canvases for source readback.
   // The mosaic stroke session only needs average block colors (≤640 target);
-  // heal does patch matching on a ring band around each stamp, so it needs
-  // finer source detail — its composite target is relaxed to 1280px, which
-  // still bounds the GPU readback buffer to a few MB and keeps the sRGB
-  // encode within a frame.
+  // every other mode does real per-pixel work on the stamp neighborhood
+  // (heal's ring band matching, blur/sharpen convolutions, clone's patch
+  // copy), so they share the finer 1280px composite target — it still bounds
+  // the GPU readback buffer to a few MB and keeps the sRGB encode within a
+  // frame.
   const maxDim = Math.max(frame.canvas.w, frame.canvas.h);
   let sampleScale = 1;
-  const targetDim = mode === 'heal' ? HEAL_SAMPLE_TARGET_DIM : 640;
+  const targetDim = mode === 'mosaic' ? 640 : HEAL_SAMPLE_TARGET_DIM;
   if (maxDim > targetDim) {
     const targetScale = targetDim / maxDim;
-    // Mosaic floor: blockSize maps to at least 1 sample pixel. Heal has no
-    // block grid; its floor is the patch size, so patch matching never
-    // degenerates below its minimum working scale.
-    const minScale = mode === 'heal'
-      ? Math.min(1, Math.max(0.25, 6 / brushDiameter))
-      : (blockSize > 0 ? Math.min(1, 1 / blockSize) : targetScale);
+    // Per-mode sampling floors (same rationale as the historical heal floor):
+    // mosaic needs blockSize to survive as ≥1 sample pixel; blur/sharpen
+    // need the box blur kernel at least 2 sample pixels wide so the
+    // convolution never degenerates to a point lookup; heal/clone do patch
+    // work sized by the stamp diameter, so the patch floor applies.
+    const minScale = mode === 'mosaic'
+      ? (blockSize > 0 ? Math.min(1, 1 / blockSize) : targetScale)
+      : mode === 'blur' || mode === 'sharpen'
+        ? Math.min(1, Math.max(0.25, 2 / Math.max(1, blurRadius)))
+        : Math.min(1, Math.max(0.25, 6 / brushDiameter));
     sampleScale = Math.min(1, Math.max(targetScale, minScale));
+  }
+
+  // Clone needs a picked source anchor before any stroke can run (the
+  // interaction handler enforces the Alt+Click pick and the not-set guard;
+  // this is the belt-and-suspenders re-check at session level).
+  const cloneSource = mode === 'clone' ? getCloneSourceFor(frame.id)?.anchor ?? null : null;
+  if (mode === 'clone' && !cloneSource) {
+    e.actions.notifyHUD('Clone needs a source: Alt+Click to pick one', 'error');
+    return null;
   }
 
   // Composite all visible layers into ImageData via the pure-memory capture channel.
@@ -124,10 +144,21 @@ export function createMosaicSession(e: InteractionEvent): StrokeSession | null {
     .then(sampleImageData);
 
   try {
-    return new MosaicStrokeSession(
-      { brushDiameter, blockSize, mode, canvasSize: { w: frame.canvas.w, h: frame.canvas.h }, sampleScale, layers: e.layers },
+    return new RetouchStrokeSession(
+      {
+        stamp: { brushDiameter, spacingRatio: RETOUCH_SPACING_RATIO },
+        blockSize,
+        mode,
+        canvasSize: { w: frame.canvas.w, h: frame.canvas.h },
+        sampleScale,
+        layers: e.layers,
+        blurRadius,
+        strength,
+        hardness,
+        cloneSource,
+        cloneFrameId: frame.id,
+      },
       compositePromise,
-      forceNewLayer,
       // Gesture-start selection snapshot (factory runs at gesture start).
       // Same contract as the eraser factory: deep copy (the live object gets
       // replaced during the stroke) and degenerate (zero-area) selections
@@ -137,7 +168,7 @@ export function createMosaicSession(e: InteractionEvent): StrokeSession | null {
         : null,
     );
   } catch (err) {
-    console.warn('[MosaicOverlay] MosaicStrokeSession creation failed:', err);
+    console.warn('[RetouchOverlay] RetouchStrokeSession creation failed:', err);
     return null;
   }
 }

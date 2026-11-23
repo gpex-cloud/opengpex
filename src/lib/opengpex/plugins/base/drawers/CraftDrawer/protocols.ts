@@ -44,6 +44,8 @@ export const CMD_DEACTIVATE_CRAFT = 'cmd.deactivate_craft';
 /** Marker sub-type cycling (Tab / Shift+Tab, mirrors ClipOptions.cycleToolForward/Backward) */
 export const CMD_CYCLE_MARKER_FORWARD = 'cmd.cycle_marker_forward';
 export const CMD_CYCLE_MARKER_BACKWARD = 'cmd.cycle_marker_backward';
+export const CMD_CYCLE_RETOUCH_MODE_FORWARD = 'cmd.cycle_retouch_mode_forward';
+export const CMD_CYCLE_RETOUCH_MODE_BACKWARD = 'cmd.cycle_retouch_mode_backward';
 /** Set the active marker sub-type directly (used when entering the tool from an existing marker layer). */
 export const CMD_SET_MARKER_KIND = 'cmd.set_marker_kind';
 
@@ -85,6 +87,9 @@ export const CraftDrawerAPI = {
     setMarkerKind: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_SET_MARKER_KIND}` } as { uid: string; _payload: { kind: MarkerKind } },
     /** Activate the pen tool (same toggle semantics as activateText: guard against already-active) */
     activatePen: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_SET_CRAFT_PEN}` } as { uid: string; _payload: void },
+    /** Cycle the retouch sub-mode (Tab / Shift+Tab while the retouch tool is active) */
+    cycleRetouchForward: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_CYCLE_RETOUCH_MODE_FORWARD}` } as { uid: string; _payload: void },
+    cycleRetouchBackward: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_CYCLE_RETOUCH_MODE_BACKWARD}` } as { uid: string; _payload: void },
   },
   /** pluginConfig storage key */
   configKey: `${PLUGIN_AUTHOR}.${PLUGIN_ID}` as const,
@@ -200,11 +205,43 @@ export interface CraftDrawerConfig {
   /** Mosaic brush size preset */
   mosaicSizePreset: 'XS' | 'S' | 'M' | 'L' | 'XL';
   /**
-   * Active variant under the single Mosaic craft button: 'mosaic' pixelates
-   * blocks, 'heal' runs the spot-heal patch kernel (stamp diameter = preset
-   * brushDiameter). Omitted = 'mosaic' (historical behaviour).
+   * Active variant under the single Mosaic craft button (the retouch family):
+   * 'mosaic' pixelates blocks, 'heal' spot-heals, 'blur'/'sharpen' run
+   * convolution stamps (radius/strength below), 'clone' copies from a
+   * user-picked source. Omitted = 'mosaic' (historical behaviour). Consumers
+   * MUST normalize through `normalizeMosaicMode` — unknown values fall back
+   * to 'mosaic' so a stale persisted value can never route the wrong kernel.
    */
-  mosaicToolMode?: 'mosaic' | 'heal';
+  mosaicToolMode?: 'mosaic' | 'heal' | 'blur' | 'sharpen' | 'clone';
+  /**
+   * Box blur radius (px, canvas space) for the blur/sharpen convolution
+   * stamps. Omitted = 8.
+   */
+  mosaicBlurRadius?: number;
+  /**
+   * Effect strength for blur/sharpen in [0,100] (blur = mix toward blurred;
+   * sharpen = unsharp coefficient ×100). Omitted = 60.
+   */
+  mosaicBlurStrength?: number;
+  /**
+   * Clone edge hardness in [0,100]: fraction of the brush radius that stays
+   * fully opaque before the feather ramp to the rim (100 = hard edge).
+   * Omitted = 75.
+   */
+  retouchHardness?: number;
+  /**
+   * Custom stamp diameter override (px, canvas space). When set (>0) it
+   * replaces the size preset's brushDiameter for every retouch mode; any
+   * preset tab click clears it (back to the preset value). Omitted = preset.
+   */
+  mosaicStampDiameter?: number;
+  /**
+   * Per-frame clone sources (frameId → anchor + aligned offset reference),
+   * mirrored from the retouch overlay's in-memory registry so picked sources
+   * survive page refreshes and frame switches. Capped/pruned by the registry
+   * (oldest entries dropped beyond 20 frames).
+   */
+  retouchCloneSources?: Record<string, { anchor: { x: number; y: number }; origin: { x: number; y: number } | null }>;
   /** Active marker sub-type (persisted across tool switches; default resolves to first registered kind) */
   activeMarkerKind?: MarkerKind;
   /**
