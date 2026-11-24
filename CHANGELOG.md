@@ -2,6 +2,10 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.69
+
+- Storage panel: the topology tree becomes searchable and gains an integrity audit, so storage problems can be diagnosed directly from the panel instead of cryptic console warnings.
+
 ## 2.0.68
 
 - Workspace: selection outlines (marching ants) now follow the Straighten preview in real time while you drag — they used to stay put and jump to the new position only after you released.

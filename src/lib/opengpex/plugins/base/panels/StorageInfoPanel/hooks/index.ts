@@ -18,3 +18,5 @@ export { useModelCacheMetrics, purgeModelCacheStorage } from './useModelCache';
 export type { ModelCacheFileEntry, ModelCacheGroup, ModelCacheInfo } from './useModelCache';
 export { useStorageMetrics } from './useStorageSummary';
 export { useStoreAudit } from './useStoreAudit';
+export { useIntegrityAudit } from './useIntegrityAudit';
+export type { IntegrityReport, IntegrityFinding } from './useIntegrityAudit';

@@ -18,7 +18,7 @@ import {
   FileCode,
   Monitor,
   Layers,
-  Check,
+  ArrowUpRight,
   Eye,
   EyeOff,
   Lock,
@@ -143,13 +143,13 @@ interface FrameTreeNodesProps {
   selectedNodeId: string | null;
   toggleNode: (key: string) => void;
   handleSelectFrame: (frameId: string) => void;
-  handleSelectLayer: (frameId: string, layerId: string) => void;
   setSelectedNode: (node: { type: "frame" | "layer" | "asset" | "history"; id: string; data: unknown } | null) => void;
   setHoveredAsset: (asset: Prot.AssetMetric | null) => void;
 }
 
 /**
- * Frame tree nodes for expanded dashboard mode
+ * Frame tree nodes for expanded dashboard mode. Layer rows only inspect —
+ * canvas activation lives in the workspace, not in the storage tree.
  */
 export function FrameTreeNodes({
   frames,
@@ -157,7 +157,6 @@ export function FrameTreeNodes({
   selectedNodeId,
   toggleNode,
   handleSelectFrame,
-  handleSelectLayer,
   setSelectedNode,
   setHoveredAsset,
 }: FrameTreeNodesProps) {
@@ -193,10 +192,10 @@ export function FrameTreeNodes({
                     handleSelectFrame(frame.id);
                     setSelectedNode({ type: "frame", id: frame.id, data: frame });
                   }}
-                  className="p-0.5 rounded bg-[var(--bg-stage)] text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-stage)] "
-                  title="Activate frame in workspace"
+                  className="p-0.5 rounded bg-[var(--bg-stage)] text-[var(--text-muted)] transition-transform hover:scale-125 hover:text-[var(--text-main)] hover:bg-[var(--bg-stage)]"
+                  title="Go to this frame in the workspace"
                 >
-                  <Check size={8} />
+                  <ArrowUpRight size={9} />
                 </button>
               </div>
             </div>
@@ -255,7 +254,7 @@ export function FrameTreeNodes({
                             <span className="text-[var(--text-muted)] ">•</span>
                             <span className="truncate">{layer.name}</span>
                           </div>
-                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <div className="flex items-center gap-2 flex-shrink-0">
                             <div className="flex items-center gap-1">
                               {layer.visible ? (
                                 <Eye size={9} className="text-[var(--text-muted)] " />
@@ -263,22 +262,11 @@ export function FrameTreeNodes({
                                 <EyeOff size={9} className="text-rose-500" />
                               )}
                               {layer.locked ? (
-                                <Lock size={9} className="text-[var(--text-muted)] " />
+                                <Lock size={9} className="text-rose-500" />
                               ) : (
                                 <Unlock size={9} className="text-[var(--text-muted)] " />
                               )}
                             </div>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleSelectLayer(frame.id, layer.id);
-                                setSelectedNode({ type: "layer", id: layer.id, data: { ...layer, frameId: frame.id } });
-                              }}
-                              className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-[var(--bg-stage)] "
-                              title="Select layer on canvas"
-                            >
-                              <Check size={8} />
-                            </button>
                           </div>
                         </div>
                       ))}

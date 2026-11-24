@@ -19,7 +19,7 @@
 
 "use client";
 
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   Database,
   History,
@@ -30,8 +30,8 @@ import {
   RefreshCw,
   ChevronRight,
   ChevronDown,
-  Folder,
-  FolderOpen,
+  Search,
+  Monitor,
   Cpu,
   AlertCircle,
   Package,
@@ -51,6 +51,10 @@ import {
   useStorageConfig,
   useModelCacheMetrics,
   purgeModelCacheStorage,
+  useIntegrityAudit,
+  type IntegrityReport,
+  type ModelCacheGroup,
+  type ModelCacheInfo,
 } from "./hooks";
 import * as Prot from "./protocols";
 import { formatBytes } from "./components/shared";
@@ -59,7 +63,55 @@ import { AssetSectionHUD, AssetTreeNode } from "./components/AssetSection";
 import { HistoryTreeNode } from "./components/HistorySection";
 import { ShardSection } from "./components/ShardSection";
 import { ModelCacheTreeNode } from "./components/ModelCacheSection";
-import { StoreAuditHUD, StoreAuditTreeNode, StoreAuditDetails } from "./components/StoreAuditSection";
+import { StoreAuditHUD, StoreAuditTreeNode, StoreAuditDetails, dayOf } from "./components/StoreAuditSection";
+import { IntegritySection } from "./components/IntegritySection";
+
+/**
+ * Case-insensitive id/name filter over the topology tree inputs. A frame
+ * matches on its own id/name (keeping ALL its layers) or through any layer
+ * match (keeping only the matched subtree with its ancestors). History and
+ * detached entries match on id/label.
+ */
+function filterTreeMetrics(
+  metrics: Prot.StorageSummary,
+  query: string,
+): Prot.StorageSummary {
+  const q = query.trim().toLowerCase();
+  if (!q) return metrics;
+
+  const matchLayer = (l: Prot.LayerMetric): boolean =>
+    l.id.toLowerCase().includes(q) || l.name.toLowerCase().includes(q);
+
+  // Depth-first keep: a node survives when it matches, or when any descendant
+  // survives (descendants then carry the filtered subtree).
+  const filterLayers = (layers: Prot.LayerMetric[]): Prot.LayerMetric[] =>
+    layers.reduce<Prot.LayerMetric[]>((acc, l) => {
+      if (matchLayer(l)) {
+        acc.push(l);
+      } else if (l.subLayers && l.subLayers.length > 0) {
+        const subs = filterLayers(l.subLayers);
+        if (subs.length > 0) acc.push({ ...l, subLayers: subs });
+      }
+      return acc;
+    }, []);
+
+  const frames = metrics.frames.reduce<Prot.FrameMetric[]>((acc, f) => {
+    if (f.id.toLowerCase().includes(q) || f.name.toLowerCase().includes(q)) {
+      acc.push(f);
+    } else {
+      const layers = filterLayers(f.layers);
+      if (layers.length > 0) acc.push({ ...f, layers });
+    }
+    return acc;
+  }, []);
+
+  const history = metrics.history.filter(
+    (h) => h.id.toLowerCase().includes(q) || h.label.toLowerCase().includes(q),
+  );
+  const detached = metrics.detached.filter((a) => a.id.toLowerCase().includes(q));
+
+  return { ...metrics, frames, history, detached };
+}
 
 /**
  * StorageInfoComponent (Outer Controller):
@@ -72,6 +124,7 @@ export function StorageInfoComponent() {
   const { actions, assets, storage } = useEditorServices();
   const { summary: metrics, refresh, isRefreshing } = useStorageMetrics();
   const { isEnabled, toggleCmd } = useStorageConfig();
+  const integrity = useIntegrityAudit();
 
   // Create a mutable ref to store the latest state to keep callbacks stable
   const stateRef = useRef(state);
@@ -131,6 +184,7 @@ export function StorageInfoComponent() {
   return (
     <StorageAuditPanel
       metrics={metrics}
+      integrity={integrity}
       isRefreshing={isRefreshing}
       refresh={refresh}
       triggerGC={triggerGC}
@@ -146,6 +200,7 @@ export function StorageInfoComponent() {
 
 interface InnerPanelProps {
   metrics: Prot.StorageSummary;
+  integrity: IntegrityReport;
   isRefreshing: boolean;
   refresh: () => void;
   triggerGC: () => void;
@@ -165,6 +220,7 @@ interface InnerPanelProps {
  */
 const StorageAuditPanel = React.memo(function StorageAuditPanel({
   metrics,
+  integrity,
   isRefreshing,
   refresh,
   triggerGC,
@@ -185,10 +241,13 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
 
   // Tree nodes expanded state
   const [expandedNodes, setExpandedNodes] = useState<Record<string, boolean>>({
-    project: true,
+    frames: true,
     history: false,
     detached: false,
   });
+
+  // Live id/name filter for the topology tree (empty = unfiltered).
+  const [treeQuery, setTreeQuery] = useState("");
 
   // Selected item details in tree explorer
   const [selectedNode, setSelectedNode] = useState<{
@@ -209,6 +268,89 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
       [nodeKey]: prev[nodeKey] === undefined ? true : !prev[nodeKey],
     }));
   };
+
+  // Filtered tree inputs + effective expansion while a query is active:
+  // matched frames auto-expand (frame + its layers), and non-empty history /
+  // detached matches force their group node open so results stay visible.
+  const filteredMetrics = useMemo(() => filterTreeMetrics(metrics, treeQuery), [metrics, treeQuery]);
+
+  // Store audit filter: subset entries/orphans by key or source file name and
+  // recompute every aggregate so the node header stays truthful for the
+  // filtered subset.
+  const filteredStoreAudit = useMemo<Prot.StoreAuditSummary | null>(() => {
+    const q = treeQuery.trim().toLowerCase();
+    const audit = metrics.storeAudit;
+    if (!q || !audit) return audit;
+    const match = (e: Prot.StoreAuditEntryView) =>
+      e.key.toLowerCase().includes(q) || (e.sourceFileName ?? "").toLowerCase().includes(q);
+    const entries = audit.entries.filter(match);
+    const orphans = audit.orphans.filter(match);
+    const sum = (list: Prot.StoreAuditEntryView[]) => list.reduce((s, e) => s + Math.max(0, e.size), 0);
+    return {
+      ...audit,
+      entries,
+      orphans,
+      totalBytes: sum(entries),
+      aliveBytes: sum(entries.filter((e) => e.alive)),
+      orphanBytes: sum(orphans),
+      orphanCount: orphans.length,
+      displayCount: entries.filter((e) => e.kind === "display").length,
+      rawCount: entries.filter((e) => e.kind === "raw").length,
+      decCount: entries.filter((e) => e.kind === "dec").length,
+    };
+  }, [metrics.storeAudit, treeQuery]);
+
+  // Downloaded models filter: keep a group wholesale on model-id match,
+  // otherwise subset its files by name/url; aggregates recompute from the
+  // surviving groups.
+  const filteredModelCache = useMemo<ModelCacheInfo>(() => {
+    const q = treeQuery.trim().toLowerCase();
+    if (!q) return modelCache;
+    const groups = modelCache.groups.reduce<ModelCacheGroup[]>((acc, g) => {
+      if (g.modelId.toLowerCase().includes(q)) {
+        acc.push(g);
+      } else {
+        const files = g.files.filter(
+          (f) => f.name.toLowerCase().includes(q) || f.url.toLowerCase().includes(q),
+        );
+        if (files.length > 0) acc.push({ ...g, files, totalBytes: files.reduce((s, f) => s + f.size, 0) });
+      }
+      return acc;
+    }, []);
+    const files = groups.flatMap((g) => g.files);
+    return {
+      ...modelCache,
+      groups,
+      files,
+      fileCount: files.length,
+      totalBytes: files.reduce((s, f) => s + f.size, 0),
+    };
+  }, [modelCache, treeQuery]);
+
+  const effectiveExpanded = useMemo<Record<string, boolean>>(() => {
+    if (!treeQuery.trim()) return expandedNodes;
+    const next: Record<string, boolean> = {
+      ...expandedNodes,
+      history: filteredMetrics.history.length > 0,
+      detached: filteredMetrics.detached.length > 0,
+      store: filteredStoreAudit !== null,
+      "store-alive": filteredStoreAudit !== null,
+      models: filteredModelCache.groups.length > 0,
+      frames: filteredMetrics.frames.length > 0,
+    };
+    for (const f of filteredMetrics.frames) {
+      next[`frame:${f.id}`] = true;
+      next[`frame:${f.id}:layers`] = true;
+    }
+    // Open every surviving orphan-day bucket (same day key the node uses).
+    if (filteredStoreAudit) {
+      for (const day of new Set(filteredStoreAudit.orphans.map((e) => dayOf(e.timestamp)))) {
+        next[`store-day-${day}`] = true;
+      }
+    }
+    for (const g of filteredModelCache.groups) next[`model:${g.modelId}`] = true;
+    return next;
+  }, [expandedNodes, filteredMetrics, filteredStoreAudit, filteredModelCache, treeQuery]);
 
   // 1. Data Classification calculations
   const activeSize = metrics.frames.reduce((sum, f) => {
@@ -633,75 +775,92 @@ const StorageAuditPanel = React.memo(function StorageAuditPanel({
                     </button>
                   </div>
 
-                  {/* Dynamic Interactive Tree Outline */}
+                  {/* Live id/name filter over the tree outline */}
+                  <div className="flex items-center gap-1.5 px-2 h-6 rounded-full border border-[var(--border-subtle)] dark:border-white/[0.08] bg-[var(--bg-stage)]">
+                    <Search size={10} className="text-[var(--text-muted)] flex-shrink-0" />
+                    <input
+                      value={treeQuery}
+                      onChange={(e) => setTreeQuery(e.target.value)}
+                      placeholder="filter by id or name…"
+                      spellCheck={false}
+                      className="flex-1 min-w-0 bg-transparent text-[10px] font-mono text-[var(--text-main)] placeholder:text-[var(--text-muted)] placeholder:opacity-60 outline-none"
+                    />
+                    {treeQuery && (
+                      <button
+                        onClick={() => setTreeQuery("")}
+                        title="Clear filter"
+                        className="p-0.5 rounded text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                      >
+                        <X size={10} />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Structural integrity audit (diagnostics only) */}
+                  <IntegritySection
+                    report={integrity}
+                    onInvestigate={(id) => setTreeQuery(id)}
+                  />
+
+                  {/* Dynamic Interactive Tree Outline — one collapsible family
+                      node per resource kind, frames included. */}
                   <div className="space-y-1 select-none font-mono text-[10px] -mx-2">
-                    {/* 1. Root: Project Node */}
+                    {/* Frames family node — frames nest here instead of
+                        sprawling flat across the tree root. */}
                     <div className="flex flex-col">
                       <div
-                        onClick={() => toggleNode("project")}
+                        onClick={() => toggleNode("frames")}
                         className="flex items-center gap-2 py-1 px-2 rounded-lg hover cursor-pointer text-[var(--text-main)] font-bold transition-colors"
                       >
-                        {expandedNodes.project ? (
-                          <ChevronDown
-                            size={12}
-                            className="text-[var(--text-muted)]"
-                          />
+                        {effectiveExpanded.frames ? (
+                          <ChevronDown size={11} className="text-[var(--text-muted)]" />
                         ) : (
-                          <ChevronRight
-                            size={12}
-                            className="text-[var(--text-muted)]"
-                          />
+                          <ChevronRight size={11} className="text-[var(--text-muted)]" />
                         )}
-                        {expandedNodes.project ? (
-                          <FolderOpen size={12} className="text-indigo-500 " />
-                        ) : (
-                          <Folder size={12} className="text-indigo-500 " />
-                        )}
-                        <span>OpenGPEX</span>
+                        <Monitor size={11} className="text-emerald-500" />
+                        <span>opened-frames ({filteredMetrics.frames.length})</span>
                       </div>
-
-                      {expandedNodes.project && (
+                      {effectiveExpanded.frames && (
                         <div className="pl-2 border-l border-[var(--border-subtle)] dark:border-l-white/[0.06] ml-2.5 mt-0.5 space-y-1">
                           <FrameTreeNodes
-                            frames={metrics.frames}
-                            expandedNodes={expandedNodes}
+                            frames={filteredMetrics.frames}
+                            expandedNodes={effectiveExpanded}
                             selectedNodeId={selectedNode?.id || null}
                             toggleNode={toggleNode}
                             handleSelectFrame={handleSelectFrame}
-                            handleSelectLayer={handleSelectLayer}
                             setSelectedNode={setSelectedNode}
                             setHoveredAsset={setHoveredAsset}
-                          />
-                          <HistoryTreeNode
-                            history={metrics.history}
-                            expandedNodes={expandedNodes}
-                            selectedNodeId={selectedNode?.id || null}
-                            toggleNode={toggleNode}
-                            setSelectedNode={setSelectedNode}
-                          />
-                          <AssetTreeNode
-                            detached={metrics.detached}
-                            expandedNodes={expandedNodes}
-                            selectedNodeId={selectedNode?.id || null}
-                            toggleNode={toggleNode}
-                            setSelectedNode={setSelectedNode}
-                            setHoveredAsset={setHoveredAsset}
-                          />
-                          <StoreAuditTreeNode
-                            storeAudit={metrics.storeAudit}
-                            expandedNodes={expandedNodes}
-                            selectedNodeId={selectedNode?.id || null}
-                            toggleNode={toggleNode}
-                            setSelectedNode={setSelectedNode}
-                          />
-                          <ModelCacheTreeNode
-                            modelCache={modelCache}
-                            expandedNodes={expandedNodes}
-                            toggleNode={toggleNode}
                           />
                         </div>
                       )}
                     </div>
+                    <HistoryTreeNode
+                      history={filteredMetrics.history}
+                      expandedNodes={effectiveExpanded}
+                      selectedNodeId={selectedNode?.id || null}
+                      toggleNode={toggleNode}
+                      setSelectedNode={setSelectedNode}
+                    />
+                    <AssetTreeNode
+                      detached={filteredMetrics.detached}
+                      expandedNodes={effectiveExpanded}
+                      selectedNodeId={selectedNode?.id || null}
+                      toggleNode={toggleNode}
+                      setSelectedNode={setSelectedNode}
+                      setHoveredAsset={setHoveredAsset}
+                    />
+                    <StoreAuditTreeNode
+                      storeAudit={filteredStoreAudit}
+                      expandedNodes={effectiveExpanded}
+                      selectedNodeId={selectedNode?.id || null}
+                      toggleNode={toggleNode}
+                      setSelectedNode={setSelectedNode}
+                    />
+                    <ModelCacheTreeNode
+                      modelCache={filteredModelCache}
+                      expandedNodes={effectiveExpanded}
+                      toggleNode={toggleNode}
+                    />
                   </div>
                 </div>
 

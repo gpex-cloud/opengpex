@@ -18,7 +18,14 @@ export {
   useStorageMetrics,
   useModelCacheMetrics,
   purgeModelCacheStorage,
+  useIntegrityAudit,
 } from './hooks/index';
-export type { ModelCacheFileEntry, ModelCacheGroup, ModelCacheInfo } from './hooks/index';
+export type {
+  ModelCacheFileEntry,
+  ModelCacheGroup,
+  ModelCacheInfo,
+  IntegrityReport,
+  IntegrityFinding,
+} from './hooks/index';
 
 

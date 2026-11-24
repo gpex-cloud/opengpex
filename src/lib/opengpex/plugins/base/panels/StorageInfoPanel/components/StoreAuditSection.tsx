@@ -13,7 +13,8 @@ import { Database, ChevronRight, ChevronDown, HardDrive } from "lucide-react";
 import * as Prot from "../protocols";
 import { formatBytes } from "./shared";
 
-const dayOf = (ts?: number): string =>
+/** Shared ISO-day bucketing so the tree filter can target the same day keys. */
+export const dayOf = (ts?: number): string =>
   ts ? new Date(ts).toISOString().slice(0, 10) : "unknown";
 
 interface StoreAuditHUDProps {
