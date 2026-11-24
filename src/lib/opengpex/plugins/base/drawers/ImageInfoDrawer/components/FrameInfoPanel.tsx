@@ -232,11 +232,17 @@ const CanvasDimensionCard = React.memo(function CanvasDimensionCard({
   isClipMode,
   baseW,
   baseH,
+  angleDeg,
 }: {
   isClipMode: boolean;
   baseW: number;
   baseH: number;
+  angleDeg: number;
 }) {
+  // Tilt annotation: a tilted selection's dims only make sense together
+  // with the angle they were measured at. Axis-aligned (0°) shows none.
+  const shownDeg = Math.round(angleDeg * 10) / 10;
+  const angleLabel = shownDeg !== 0 ? ` @ ${shownDeg}°` : '';
   return (
     <div className="flex flex-col bg-[var(--bg-stage)] px-2.5 pt-1.5 pb-2 rounded-xl border border-[var(--border-subtle)]">
       <div className="flex justify-between items-center h-3.5 mb-0.5">
@@ -245,7 +251,7 @@ const CanvasDimensionCard = React.memo(function CanvasDimensionCard({
         </span>
       </div>
       <span className="text-[10px] font-bold text-[var(--text-main)] tabular-nums uppercase">
-        {baseW} × {baseH}
+        {baseW} × {baseH}{angleLabel}
       </span>
     </div>
   );
@@ -516,6 +522,8 @@ interface FrameInfoPanelProps {
   baseW: number;
   /** Canvas or clip box height */
   baseH: number;
+  /** Rotation of the rectangular selection in degrees (0 = axis-aligned). */
+  selectionAngle: number;
   /** Image metadata (EXIF, ICC, color space etc.) */
   imageMetadata?: ImageMetadata;
   /**
@@ -545,6 +553,7 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
   isClipMode,
   baseW,
   baseH,
+  selectionAngle,
   imageMetadata,
   hdrAvailable,
   hdrEnabled,
@@ -573,7 +582,7 @@ export const FrameInfoPanel = React.memo(function FrameInfoPanel({
           fixed-height header row (so the layer card's badge cannot inflate
           only one card's interior) + tightened vertical padding. */}
       <div className="grid grid-cols-2 gap-2">
-        <CanvasDimensionCard isClipMode={isClipMode} baseW={baseW} baseH={baseH} />
+        <CanvasDimensionCard isClipMode={isClipMode} baseW={baseW} baseH={baseH} angleDeg={selectionAngle} />
         <LayerDimensionCard activeFrame={activeFrame} baseW={baseW} baseH={baseH} />
       </div>
     </div>

@@ -58,6 +58,8 @@ import {
   computeLayerMovePose,
   isRotatedPose,
   rotatePoseAboutPivot,
+  circumscribedRectSize,
+  inscribedRectSize,
   transformFrame
 } from './operators/transform';
 import {
@@ -153,6 +155,8 @@ export function createGeometryService(): GeometryService {
         remapDrafts?: (drafts: Record<string, unknown> | undefined, canvas: { w: number; h: number }) => Record<string, unknown> | undefined,
       ) => transformFrame(frame, operation, remapDrafts),
       rotatePoseAboutPivot: (layer: Pick<Layer, 'cx' | 'cy' | 'rotation'>, pivot: Point2D, canvas: Dimensions, thetaDeg: number) => rotatePoseAboutPivot(layer, pivot, canvas, thetaDeg),
+      circumscribedRectSize: (w: number, h: number, thetaDeg: number) => circumscribedRectSize(w, h, thetaDeg),
+      inscribedRectSize: (w: number, h: number, thetaDeg: number) => inscribedRectSize(w, h, thetaDeg),
       computeFragmentCenter: (worldCenter: Point2D, visibleOffset: Point2D, rotation: number, flip: { h: boolean; v: boolean }) => computeFragmentCenter(worldCenter, visibleOffset, rotation, flip),
       computeLayerMovePose: (layer: Layer) => computeLayerMovePose(layer),
       normalizeAngle: (deg: number) => normalizeAngle(deg),

@@ -78,6 +78,22 @@ export function straightenPreviewPose(
 }
 
 /**
+ * Reads the raw live content-transform drag payload (angle + pivot), or
+ * undefined when no straighten drag is in flight (or the payload is
+ * malformed). For consumers that need the ANGLE itself — e.g. an overlay
+ * feeding the committed selection polygon through the same rotate primitive
+ * the materializer uses — rather than a per-point or per-pose map.
+ */
+export function straightenPreviewRotation(
+  transient: Record<string, unknown> | undefined,
+): StraightenPreviewPayload | undefined {
+  const t = transient?.[STRAIGHTEN_TRANSIENT_KEY] as Partial<StraightenPreviewPayload> | undefined;
+  if (!t || typeof t.thetaDeg !== 'number' || !t.pivot
+    || typeof t.pivot.x !== 'number' || typeof t.pivot.y !== 'number') return undefined;
+  return { thetaDeg: t.thetaDeg, pivot: t.pivot };
+}
+
+/**
  * Reads the live content-transform drag transient and returns a map for
  * CANVAS-LOCAL points (top-left-origin space: pen work-path drafts, rubber
  * tips — anything that is not a layer pose), or undefined when no straighten

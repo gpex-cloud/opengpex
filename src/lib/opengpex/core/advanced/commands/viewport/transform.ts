@@ -231,9 +231,13 @@ export const ViewportTransformCommands = {
 
       // Display-only history accumulator (frame.extra.straightenTotalDeg):
       // sums every materialized θ so the UI can show the total rotation since
-      // the original orientation. NO geometry consumer may read it — the
-      // poses rewritten above are the only geometric truth. Undo reverts it
-      // for free (it rides the same undoable updateFrame).
+      // the original orientation. The RENDER chain must never read it — the
+      // poses rewritten above are the only geometric truth. Two sanctioned
+      // UI consumers exist: the total-rotation readout, and the Re-Canvas
+      // fit presets (Fit Inside / Fit All) whose θ input sizes a crop-box
+      // SUGGESTION the user confirms by adjusting + applying the box — so a
+      // stale value can never silently falsify pixels. Undo reverts the
+      // accumulator for free (it rides the same undoable updateFrame).
       const historyDeg = Number(activeFrame.extra?.straightenTotalDeg ?? 0) + thetaDeg;
       actions.updateFrame(activeFrame.id, {
         layers: { byId: nextById, order: activeFrame.layers.order },

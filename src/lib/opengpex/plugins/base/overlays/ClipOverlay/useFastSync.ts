@@ -20,8 +20,9 @@
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useEditorServices, useEditorState } from '@opengpex/editor/core/context';
 import { useFastSync, useFastRectSync, useFastSvgGroupSync, useFastMarchingAntsSync } from '@opengpex/editor/core/state/volatile';
+import { straightenPreviewRotation } from '@opengpex/editor/core/state/volatile/straighten';
 import { LocalShape, LocalPolygon, Frame, CameraState } from '@opengpex/editor/core/types';
-import { resolveAntsPath, simplifyPolygonForAnts, type AntsPathCache } from './helpers/antsPath';
+import { resolveAntsPath, simplifyPolygonForAnts, type AntsPathCache } from './ants/antsPath';
 
 /** Grid phase identity: the target layer's origin fraction, 0 or 0.5 (see GeometryService.quantizeGridOffset). */
 type GridOffset = { readonly x: number; readonly y: number };
@@ -37,26 +38,6 @@ type GridOffset = { readonly x: number; readonly y: number };
 // change, dash animation frame) at O(visible arc) instead of O(full perimeter
 // × device zoom), which is what burned energy on 4K selections at high
 // magnification.
-
-// ─── useCropDimSync ────────────────────────────────────────────────────────────
-
-/**
- * Fast-track hook for the Re-Canvas dimension label (e.g. "400 × 300 px").
- * Re-Canvas-exclusive: the selection chips live in the affordances
- * framework (TransformHud), so this reads only the canvas-resize box.
- */
-export function useCropDimSync(isActive: boolean) {
-  const dimLabelRef = useRef<HTMLSpanElement>(null);
-
-  useFastSync(dimLabelRef, isActive, (_v, f) => {
-    const rect = f.canvasClipBox.rect;
-    if (dimLabelRef.current) {
-      dimLabelRef.current.textContent = `${Math.round(rect.w)} × ${Math.round(rect.h)}`;
-    }
-  });
-
-  return { dimLabelRef };
-}
 
 // ─── useReCanvasBoxSync ────────────────────────────────────────────────────────
 
@@ -92,6 +73,30 @@ export function useReCanvasBoxSync(
   return {};
 }
 
+// ─── Straighten preview fold ───────────────────────────────────────────────
+
+/**
+ * The committed selection entity folded through the live straighten drag
+ * transient. During a content-transform drag the rendered pixels rotate via
+ * the engine's pose-override seam, but `frame.confinement` is only rewritten
+ * at materialization — reading it raw would leave the ants pinned while the
+ * image turns, then snap at hand-over. Folding the polygon through the SAME
+ * rotate primitive (`geometry.polygon.rotatePolygon`) with the SAME pivot +
+ * angle the materializer uses makes the preview ≡ materialized by
+ * construction. No drag in flight → the committed entity unchanged.
+ */
+function previewConfinement(
+  v: { transient?: Record<string, unknown> } | undefined,
+  f: Frame,
+  geometry: { polygon: { rotatePolygon: (poly: LocalPolygon, center: { x: number; y: number }, angleRad: number) => LocalPolygon } },
+): LocalPolygon | null {
+  const entry = f.confinement as LocalPolygon | null;
+  if (!entry) return null;
+  const rot = straightenPreviewRotation(v?.transient);
+  if (!rot) return entry;
+  return geometry.polygon.rotatePolygon(entry, rot.pivot, (rot.thetaDeg * Math.PI) / 180);
+}
+
 // ─── useThirdsGridSync ──────────────────────────────────────────────────────
 
 /**
@@ -102,7 +107,10 @@ export function useReCanvasBoxSync(
  * independent box pinned to the selection's own rect by this hook, so the
  * guides stay up while dragging, hovering, or doing nothing at all.
  *
- * Reads only the frame-level selection entity (`frame.confinement.rect`).
+ * Reads only the frame-level selection entity (`frame.confinement.rect`),
+ * folded through the live straighten drag transient when one is in flight
+ * (the grid tracks the preview like the ants do; the rotated selection's
+ * AABB is the honest axis-aligned box for a DOM-rect guide).
  * The caller gates the mount to rectangle-shaped selections; for any other
  * shape the rect still exists (its bounding box) but this hook simply pins
  * whatever rect it is given — the compositional-meaning gate is the
@@ -112,9 +120,10 @@ export function useThirdsGridSync(
   ref: React.RefObject<HTMLElement | null>,
   isActive: boolean
 ) {
+  const { geometry } = useEditorServices();
   // Grid position (fast-track CSS left/top/width/height)
   useFastRectSync(ref, isActive, {
-    selector: (_v, f) => f.confinement?.rect ?? { x: 0, y: 0, w: 0, h: 0 },
+    selector: (v, f) => previewConfinement(v, f, geometry)?.rect ?? { x: 0, y: 0, w: 0, h: 0 },
     space: 'local'
   });
 
@@ -183,7 +192,7 @@ export function useSelectionAntsSync(
 
   // ─── [Perf A] Derivation cache ───────────────────────────────────────────
   // Four-key cache (rings ref + mode + grid phase + visible window) with the
-  // integer-translation drag fast path — rules in `./antsPath`.
+  // integer-translation drag fast path — rules in `./ants/antsPath`.
   const antsCacheRef = useRef<AntsPathCache | null>(null);
 
   // ─── [Perf C] Per-tick selector memo ─────────────────────────────────────
@@ -192,15 +201,15 @@ export function useSelectionAntsSync(
   // so matching identities ⇒ identical inputs ⇒ reuse the computed path
   // instead of resolving window + cache twice per tick.
   const antsMemoRef = useRef<{
-    frame: Frame; cam: CameraState; gridOffsetKey: string;
+    frame: Frame; cam: CameraState; gridOffsetKey: string; thetaKey: string;
     vw: number; vh: number; d: string;
   } | null>(null);
 
   // SVG group positioning (at bounding rect origin, frame-local space)
   useFastSvgGroupSync(groupRef, isActive, {
-    selector: (_v, f) => {
+    selector: (v, f) => {
       if (isReCanvas) return f.canvasClipBox.rect;
-      const entry = f.confinement as LocalPolygon | null;
+      const entry = previewConfinement(v, f, geometry);
       if (!entry) return null;
       return entry.rect.w > 0 ? entry.rect : null;
     },
@@ -208,16 +217,23 @@ export function useSelectionAntsSync(
   });
 
   // Shared selector for both paths (bg + fg share the same geometry).
-  const antsSelector = (_v: unknown, f: Frame, cam: CameraState): LocalShape | string | null => {
+  const antsSelector = (v: { transient?: Record<string, unknown> }, f: Frame, cam: CameraState): LocalShape | string | null => {
     if (isReCanvas) return f.canvasClipBox;
-    const entry = f.confinement as LocalPolygon | null;
+    const rot = straightenPreviewRotation(v?.transient);
+    const entry = previewConfinement(v, f, geometry);
     if (!entry) return null;
 
+    // The straighten angle is part of the geometry identity: the committed
+    // frame snapshot does NOT change while a drag rides the transient, so
+    // without this key the memo below would serve the pre-rotation path for
+    // the whole drag.
+    const thetaKey = rot ? String(rot.thetaDeg) : '';
     const gridOffsetKey = `${gridOffset.x}_${gridOffset.y}`;
     const viewportDim = viewportDimRef.current;
 
     const memo = antsMemoRef.current;
     if (memo && memo.frame === f && memo.cam === cam && memo.gridOffsetKey === gridOffsetKey &&
+        memo.thetaKey === thetaKey &&
         memo.vw === viewportDim.w && memo.vh === viewportDim.h) {
       return memo.d;
     }
@@ -242,7 +258,7 @@ export function useSelectionAntsSync(
     });
 
     antsCacheRef.current = cache;
-    antsMemoRef.current = { frame: f, cam, gridOffsetKey, vw: viewportDim.w, vh: viewportDim.h, d: pathD };
+    antsMemoRef.current = { frame: f, cam, gridOffsetKey, thetaKey, vw: viewportDim.w, vh: viewportDim.h, d: pathD };
     return pathD;
   };
 

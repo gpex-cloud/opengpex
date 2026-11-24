@@ -308,6 +308,10 @@ export interface GeometryService {
       canvas: { w: number; h: number },
       thetaDeg: number,
     ) => { cx: number; cy: number; rotation: number };
+    /** Axis-aligned bounding-box size of a W×H rect rotated by thetaDeg (straighten "fit all" preset). */
+    circumscribedRectSize: (w: number, h: number, thetaDeg: number) => { w: number; h: number };
+    /** Largest axis-aligned rect inscribed in a W×H rect rotated by thetaDeg (straighten "fit inside" preset). */
+    inscribedRectSize: (w: number, h: number, thetaDeg: number) => { w: number; h: number };
     /** Computes correct (cx, cy) world anchor for a fragment layer accounting for orientation */
     computeFragmentCenter: (worldCenter: Point2D, visibleOffset: Point2D, rotation: number, flip: { h: boolean; v: boolean }) => Point2D;
     /** Computes rotation-aware pose info (AABB size, center offset) for layer move operations */

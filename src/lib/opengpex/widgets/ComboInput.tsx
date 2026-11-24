@@ -45,6 +45,12 @@ interface ComboInputProps<T extends string | number> {
    */
   bare?: boolean;
   /**
+   * Dense variant: tighter padding and radius for in-canvas chrome where
+   * vertical space is tight (box bars, chips). Framed like the default,
+   * just shorter.
+   */
+  dense?: boolean;
+  /**
    * Commit-on-blur mode: when provided, typing only updates internal local state.
    * The value is committed (onCommit called) only on Enter, blur, or Tab — matching
    * Photoshop/Figma numeric input behavior. Escape reverts to the original value.
@@ -82,6 +88,7 @@ export default function ComboInput<T extends string | number>({
   readOnly = false,
   inputStyle,
   byPortal = true,
+  dense = false,
   onCommit,
   suffix,
   bare = false,
@@ -161,7 +168,9 @@ export default function ComboInput<T extends string | number>({
   return (
     <div ref={containerRef} className={`relative flex items-center ${bare
       ? "gap-0.5 px-1"
-      : "bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2.5 py-1.5 gap-1.5"
+      : dense
+        ? "bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-md px-1.5 py-0.5 gap-1"
+        : "bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg px-2.5 py-1.5 gap-1.5"
     } transition-all ${bare ? "" : "focus-within:border-indigo-500/50 focus-within:ring-1 focus-within:ring-indigo-500/20"} ${disabled ? 'opacity-50 pointer-events-none' : ''} ${className}`}>
       {label && (
         <span className="text-[9px] font-black text-zinc-400 dark:text-zinc-600 shrink-0 select-none uppercase tracking-tighter">

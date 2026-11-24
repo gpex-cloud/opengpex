@@ -61,6 +61,36 @@ export function getClipBox(frame: Frame): LocalPolygon | null {
   return frame.confinement ?? null;
 }
 
+/**
+ * getClipSelectionDims: The display dimensions of the active selection.
+ *
+ * For a RECTANGULAR selection (a 4-corner single ring) the TRUE edge
+ * lengths are the adjacent-vertex distances — exact integers whenever the
+ * user drew integer dims, at ANY rotation. This is the semantically right
+ * "Selection size" readout: the rect the user drew, not the axis-aligned
+ * bounding box (which is fractional and inflated for every tilted
+ * selection).
+ *
+ * Any other shape (freeform, wand, ellipse approximations, multi-ring)
+ * falls back to the polygon's bounding rect — the only size notion those
+ * have, fractional when tilted. `orientationDeg` rides along for readouts
+ * that annotate the tilt (0 = axis-aligned, nothing to annotate).
+ */
+export function getClipSelectionDims(
+  box: LocalPolygon,
+): { w: number; h: number; orientationDeg: number } {
+  const ring = box.rings[0];
+  if (box.rings.length === 1 && ring && ring.length === 4) {
+    const d = (a: { x: number; y: number }, b: { x: number; y: number }) =>
+      Math.hypot(b.x - a.x, b.y - a.y);
+    // Adjacent-corner distances: ring order traces the rect perimeter.
+    const w = Math.round(d(ring[0], ring[1]));
+    const h = Math.round(d(ring[1], ring[2]));
+    return { w, h, orientationDeg: box.orientationDeg ?? 0 };
+  }
+  return { w: box.rect.w, h: box.rect.h, orientationDeg: 0 };
+}
+
 // ─── Re-Canvas Default ClipBox ──────────────────────────────────────────────────
 
 /**

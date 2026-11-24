@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { useCallback, useMemo, useRef } from "react";
+import { useMemo, useRef } from "react";
 import {
   useOverlayRotationSync,
   useEditorState,
@@ -29,23 +29,15 @@ import { isPeelSettleInFlight } from "../peel/controller";
 import { useClipOverlayCommands, useClipCursor, useSelectionHudAnchor } from "../hooks";
 import { TransformHud } from "@opengpex/editor/widgets/affordances";
 import { RuleOfThirdsGrid } from "./ThirdsGrid";
+import { ReCanvasBar } from "./ReCanvasBar";
+import { AntsLayer } from "../ants/AntsLayer";
 import {
-  useCropDimSync,
   useReCanvasBoxSync,
-  useSelectionAntsSync,
   useThirdsGridSync,
 } from "../useFastSync";
 import { PeelActionButtons } from "../peel/actions";
-import { lassoPreviewPathRef } from "../interactions";
-import { MARCHING_ANTS_DURATION_S, ClipOverlayAPI } from "../protocols";
+import { ClipOverlayAPI } from "../protocols";
 import type { ClipOverlayConfig } from "../protocols";
-
-/* ─── Inline keyframes for marching ants (plugin-internal, no global CSS) ─── */
-const CLIP_ANTS_STYLE = `
-  @keyframes clip-ants-flow {
-    to { stroke-dashoffset: -12; }
-  }
-`;
 
 /**
  * ClipOverlayMain: UI layer for the cropping / selection tool.
@@ -71,7 +63,6 @@ const CLIP_ANTS_STYLE = `
 export function ClipOverlayMain() {
   const {
     activeFrame,
-    clipBox,
     isReCanvas,
     isClipActive,
     boxRef,
@@ -161,12 +152,6 @@ export function ClipOverlayMain() {
 
   // ─── Fast-track hooks ────────────────────────────────────────────────────
 
-  // Unified marching ants (dual-path: black base + white/red foreground)
-  const groupRef = useRef<SVGGElement>(null);
-  const pathBgRef = useRef<SVGPathElement>(null);
-  const pathRef = useRef<SVGPathElement>(null);
-  useSelectionAntsSync(groupRef, pathBgRef, pathRef, isOverlayActive, isReCanvas, antsGridOffset);
-
   // Re-Canvas box (DECOUPLED): the canvas-resize rect keeps the flat box
   // container for itself — it is pinned to rect, carries no gizmo, no
   // selection dim and no action bar, so it no longer shares the selection
@@ -199,16 +184,6 @@ export function ClipOverlayMain() {
   const selectionMoveSurface = isClipActive && !isReCanvas
     && isRegularTool && clipTool !== "pathellipse" && clipType !== "path";
 
-  // Re-Canvas dimension label (the canvas-resize rect keeps its in-box chip)
-  const { dimLabelRef } = useCropDimSync(isReCanvas);
-
-  // ─── Lasso preview path ref callback ─────────────────────────────────────
-  const previewPathRef = useRef<SVGPathElement | null>(null);
-  const setPreviewPathRef = useCallback((el: SVGPathElement | null) => {
-    previewPathRef.current = el;
-    lassoPreviewPathRef.current = el;
-  }, []);
-
   if (!activeFrame || !isOverlayActive) return null;
 
   return (
@@ -217,60 +192,13 @@ export function ClipOverlayMain() {
       className="absolute inset-0 pointer-events-none"
       style={{ zIndex: EDITOR_Z_INDEX.STAGE.OVERLAY }}
     >
-      {/* Plugin-internal keyframes for marching ants animation */}
-      <style dangerouslySetInnerHTML={{ __html: CLIP_ANTS_STYLE }} />
-
-      {/* SVG layer: marching ants + lasso preview */}
-      <div className="absolute inset-0 pointer-events-none overflow-visible">
-        <svg className="absolute inset-0 w-full h-full overflow-visible">
-          {/* Dual-path marching ants: black base fills white gaps for max contrast.
-              This is the Photoshop/GIMP industry standard technique — ensures
-              selection edges are visible against ANY background color. */}
-          <g ref={groupRef}>
-            {/* Base layer: solid black/dark-red line (always visible, provides contrast) */}
-            <path
-              ref={pathBgRef}
-              fill="none"
-              fillRule="evenodd"
-              stroke={isReCanvas ? "#7f1d1d" : "black"}
-              strokeWidth="1"
-              vectorEffect="non-scaling-stroke"
-            />
-            {/* Foreground layer: dashes (animated or static based on MARCHING_ANTS_ANIMATED) */}
-            <path
-              ref={pathRef}
-              fill="none"
-              fillRule="evenodd"
-              stroke={isReCanvas ? "#ef4444" : "white"}
-              strokeWidth="1"
-              vectorEffect="non-scaling-stroke"
-              style={{
-                strokeDasharray: '6, 6',
-                ...(marchingAntsAnimated && isEditing
-                  ? { animation: `clip-ants-flow ${MARCHING_ANTS_DURATION_S}s linear infinite` }
-                  : {}),
-              }}
-            />
-          </g>
-
-          {/* Lasso preview (screen-space, during pointer drag) */}
-          <path
-            ref={setPreviewPathRef}
-            fill="none"
-            fillRule="evenodd"
-            stroke="#f0e6ff"
-            strokeWidth="1"
-            vectorEffect="non-scaling-stroke"
-            pointerEvents="none"
-            style={{
-              strokeDasharray: '4, 4',
-              ...(marchingAntsAnimated
-                ? { animation: 'clip-ants-flow 0.4s linear infinite' }
-                : {}),
-            }}
-          />
-        </svg>
-      </div>
+      <AntsLayer
+        isOverlayActive={isOverlayActive}
+        isReCanvas={isReCanvas}
+        isEditing={isEditing}
+        marchingAntsAnimated={marchingAntsAnimated}
+        gridOffset={antsGridOffset}
+      />
 
       {/* Rule-of-thirds grid (clip mode, rect selection): ALWAYS visible —
           an independent box pinned to the selection rect by useThirdsGridSync,
@@ -284,7 +212,8 @@ export function ClipOverlayMain() {
       {/* Re-Canvas box (DECOUPLED): the canvas-resize rect's own flat
           container — pinned to rect, no gizmo, no selection chips. Presses
           are claimed by the Re-Canvas handlers through the data-handle
-          attribute; the selection-gizmo scope does not apply here. */}
+          attribute; the selection-gizmo scope does not apply here. The
+          dimensions / presets / APPLY chrome lives in ReCanvasBar. */}
       {isReCanvas && (
         <div
           ref={boxRef}
@@ -295,23 +224,7 @@ export function ClipOverlayMain() {
               axis-aligned rectangle, so the grid mounts as a direct child
               and tracks the box without any extra sync. */}
           <RuleOfThirdsGrid />
-          <div
-            className="absolute left-0 bg-zinc-900/90 backdrop-blur-md border border-white/10 rounded flex items-center shadow-2xl pointer-events-none whitespace-nowrap"
-            style={{
-              top: "calc(100% + 6px)",
-              padding: "1px 5px",
-              gap: "2px",
-              transformOrigin: "top left",
-            }}
-          >
-            <span
-              ref={dimLabelRef}
-              className="text-[11px] font-black text-white tabular-nums tracking-tighter"
-            >
-              {Math.round(clipBox.w)} × {Math.round(clipBox.h)}
-            </span>
-            <span className="text-[11px] font-bold text-white/40 ml-0.5">px</span>
-          </div>
+          <ReCanvasBar />
         </div>
       )}
 

@@ -25,7 +25,6 @@ import {
   ChevronDown,
   Maximize,
   SquareDashed,
-  Check,
   X,
   Hand,
   Move,
@@ -40,11 +39,9 @@ import {
   useEditorServices,
   usePluginSignals,
 } from "@opengpex/editor/core/context";
-import { getRegularClipShape } from "@opengpex/editor/core/helpers/selection";
 import { asLocalPolygon } from "@opengpex/editor/core/types";
 
 import { PenOverlayAPI } from "@opengpex/editor/plugins/base/overlays/PenOverlay/protocols";
-import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
 import FancyGroup from "@opengpex/editor/widgets/FancyGroup";
 import ComboInput from "@opengpex/editor/widgets/ComboInput";
 import Popover from "@opengpex/editor/widgets/Popover";
@@ -59,7 +56,7 @@ import { ASPECT_RATIOS, AspectGrid } from "./AspectGrid";
 
 export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
   const { state, activeFrame } = useEditorState();
-  const { actions, volatileRef } = useEditorServices();
+  const { actions } = useEditorServices();
 
   // Live feather edits: BOTH writes are debounced into one trailing call —
   // the undoable selection update AND the pluginConfig persistence. The
@@ -80,11 +77,8 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
     toggleModeCmd,
     exitClipModeCmd,
     reCanvasToggleCmd,
-    reCanvasApplyCmd,
     setAspectCmd,
     branchCreateCmd,
-    updateClipBox,
-    closeReCanvas,
     clipToolSetCmd,
     clipToolCycleForwardCmd,
     clipToolCycleBackwardCmd,
@@ -118,26 +112,6 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
 
   // ─── Re-Canvas live W/H: poll volatile fast-track during drag ────────────
   // During drag the canvasClipBox only lives in the volatile buffer (60 fps);
-  // Redux is updated on pointerup. This rAF loop feeds the Popover W/H inputs.
-  const [liveReCanvasRect, setLiveReCanvasRect] = useState<{ w: number; h: number } | null>(null);
-
-  useEffect(() => {
-    if (!reCanvasActiveSignal?.value || !state.interaction.isInteracting || !activeFrame) {
-      return;
-    }
-    let rafId: number;
-    const tick = () => {
-      const draft = volatileRef.current.buffered.frames[activeFrame.id];
-      const rect = (draft?.canvasClipBox as { rect?: { w: number; h: number } } | undefined)?.rect;
-      if (rect) {
-        const w = Math.round(rect.w), h = Math.round(rect.h);
-        setLiveReCanvasRect(prev => (prev?.w === w && prev?.h === h) ? prev : { w, h });
-      }
-      rafId = requestAnimationFrame(tick);
-    };
-    rafId = requestAnimationFrame(tick);
-    return () => { cancelAnimationFrame(rafId); setLiveReCanvasRect(null); };
-  }, [reCanvasActiveSignal?.value, state.interaction.isInteracting, activeFrame, volatileRef]);
 
   const handleDropdownClick = () => {
     if (!activeFrame || isPanMode || isIrregularTool) return;
@@ -200,17 +174,6 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
 
   if (!activeFrame) return null;
 
-  const clipShape = isReCanvas
-    ? activeFrame.canvasClipBox
-    : getRegularClipShape(activeFrame) || activeFrame.canvasClipBox;
-  const clipRect = clipShape.rect;
-  // A box EQUAL TO the canvas (the session's default - the clip box is
-  // born at 1.0x canvas) is a no-op APPLY: the resize would only reset
-  // confinement while changing nothing. The button disables; the command
-  // keeps its own backstop.
-  const reCanvasBoxEqualsCanvas = isReCanvas
-    && Math.round(clipRect.w) === activeFrame.canvas.w
-    && Math.round(clipRect.h) === activeFrame.canvas.h;
   const activeAspect = isReCanvas
     ? activeFrame.canvasAspect
     : activeFrame.imageAspect;
@@ -887,143 +850,49 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
          * `toggleReCanvas` command auto-promotes pan → clip when activating
          * the signal, so a single click from pan lands in "clip + re-canvas"
          * directly. The width / height inputs and APPLY button live in a
-         * `Popover` whose lifecycle is bound to `isReCanvas` (mirrors the
-         * tool-strip popover pattern in segment 1) — opening / closing the
-         * Re-Canvas signal directly mounts / unmounts the bubble. Outside
-         * click and Esc are deliberately *not* dismissable: closing must go
-         * through `closeReCanvas` (which also clears the signal) or
-         * `reCanvasApplyCmd` (which commits + closes), so we don't get into
-         * a "popover hidden but signal still on" zombie state.
+         * The W/H inputs and APPLY live on the on-canvas box bar now
+         * (ClipOverlay's Re-Canvas chip) — this group is just the toolbar:
+         * the Re-Canvas toggle (highlighted while active) and the branch
+         * shortcut. Exit paths: the toggle itself, and Esc (exit_clip_mode
+         * atomically clears the Re-Canvas signal).
          */}
-        <Popover
-          isOpen={isReCanvas}
-          onClose={() => {
-            /* lifecycle bound to isReCanvas — outside click & Esc must NOT dismiss */
-          }}
-          position="bottom"
-          align="center"
-          offset={8}
-          dismissOnOutsideClick={false}
-          dismissOnEscape={false}
-          display="inline-flex"
-          content={
-            // Padding rationale: the bubble (`popover-bubble` in
-            // `widgets/Popover.tsx`) carries **no** intrinsic padding, so
-            // each consumer's content `div` is solely responsible for the
-            // gap between text/controls and the rounded border. The
-            // aspect-ratio popover sets `p-1.5` (6px) on a grid whose
-            // tiles already have `p-2` of their own → ~14px effective
-            // gap, which reads as airy. Re-Canvas previously had `p-1`
-            // (4px) with `<input>` borders sitting almost flush against
-            // the bubble edge, giving it a noticeably tighter visual.
-            // Bumping to `p-2.5` (10px) brings it in line with the
-            // aspect popover's optical weight while keeping the bubble
-            // compact (we don't need `p-3+` because the W/H inputs
-            // themselves are only 24px tall).
-            <div className="flex flex-col gap-2.5 p-2.5 min-w-[160px]">
-              <div className="flex justify-between items-center px-0.5">
-                <span className="text-[10px] font-black text-[var(--text-main)] uppercase tracking-wider">
-                  Re-Size Canvas
-                </span>
-                <button
-                  onClick={closeReCanvas}
-                  className="flex items-center justify-center w-5 h-5 text-[var(--text-muted)] hover:text-rose-500 hover:bg-[var(--bg-stage)] rounded-md transition-colors"
-                >
-                  <X size={12} />
-                </button>
-              </div>
-
-              <div className="flex items-center gap-1.5">
-                <ComboInput
-                  label="W"
-                  value={liveReCanvasRect?.w ?? Math.round(clipRect.w)}
-                  type="number"
-                  className="w-[64px]"
-                  onChange={() => {}}
-                  onCommit={(val) => {
-                    const parsedVal = Math.max(1, Number(val));
-                    const patch: { w?: number; h?: number } = {
-                      w: parsedVal,
-                    };
-                    if (activeFrame.canvasAspect) {
-                      patch.h = Math.round(
-                        parsedVal / activeFrame.canvasAspect,
-                      );
-                    }
-                    updateClipBox(patch);
-                  }}
-                />
-                <span className="text-zinc-500 text-[10px]">×</span>
-                <ComboInput
-                  label="H"
-                  value={liveReCanvasRect?.h ?? Math.round(clipRect.h)}
-                  type="number"
-                  className="w-[64px]"
-                  onChange={() => {}}
-                  onCommit={(val) => {
-                    const parsedVal = Math.max(1, Number(val));
-                    const patch: { w?: number; h?: number } = {
-                      h: parsedVal,
-                    };
-                    if (activeFrame.canvasAspect) {
-                      patch.w = Math.round(
-                        parsedVal * activeFrame.canvasAspect,
-                      );
-                    }
-                    updateClipBox(patch);
-                  }}
-                />
-                <FancyButton shape="rect"
-                  onClick={() => reCanvasApplyCmd?.execute()}
-                  disabled={reCanvasBoxEqualsCanvas}
-                  variant="ghost"
-                  className={`h-6 w-auto px-2 text-[10px] gap-1 ml-1.5 ${reCanvasBoxEqualsCanvas ? "!bg-rose-500/40 !text-white/50" : "!bg-rose-500 hover:!bg-rose-600 !text-white"}`}
-                >
-                  <Check size={11} strokeWidth={3} />
-                  APPLY
-                </FancyButton>
-              </div>
-            </div>
-          }
-        >
-          <FancyGroup
-            size="xs"
-            highlighted={isReCanvas}
-            items={[
-              {
-                key: "branch",
-                tooltip: branchCreateCmd?.shortcutLabel ? `Create Branch (${branchCreateCmd.shortcutLabel})` : "Create Branch",
-                onClick: (e) => {
-                  if (isPanMode || isReCanvas) {
-                    actions.notifyHUD(
-                      isPanMode ? "Enter Clip mode first to create a branch" : "Exit Re-Canvas before creating a branch",
-                      "info",
-                    );
-                    return;
+        <FancyGroup
+          size="xs"
+          highlighted={isReCanvas}
+          items={[
+            {
+              key: "branch",
+              tooltip: branchCreateCmd?.shortcutLabel ? `Create Branch (${branchCreateCmd.shortcutLabel})` : "Create Branch",
+              onClick: (e) => {
+                if (isPanMode || isReCanvas) {
+                  actions.notifyHUD(
+                    isPanMode ? "Enter Clip mode first to create a branch" : "Exit Re-Canvas before creating a branch",
+                    "info",
+                  );
+                  return;
+                }
+                const rect = e.currentTarget.getBoundingClientRect();
+                branchCreateCmd?.execute({ rect });
+              },
+              icon: (
+                <Split size={13} className="text-emerald-500 group-hover:text-emerald-600 dark:text-emerald-400 dark:group-hover:text-emerald-300 transition-colors" />
+              ),
+            },
+            {
+              key: "resize",
+              tooltip: "Resize Canvas",
+              onClick: () => reCanvasToggleCmd?.execute(),
+              icon: (
+                <ImageUpscale
+                  size={13}
+                  className={
+                    isReCanvas ? "text-white" : "text-rose-500 group-hover:text-rose-600 dark:text-rose-400 dark:group-hover:text-rose-300 transition-colors"
                   }
-                  const rect = e.currentTarget.getBoundingClientRect();
-                  branchCreateCmd?.execute({ rect });
-                },
-                icon: (
-                  <Split size={13} className="text-emerald-500 group-hover:text-emerald-600 dark:text-emerald-400 dark:group-hover:text-emerald-300 transition-colors" />
-                ),
-              },
-              {
-                key: "resize",
-                tooltip: "Resize Canvas",
-                onClick: () => reCanvasToggleCmd?.execute(),
-                icon: (
-                  <ImageUpscale
-                    size={13}
-                    className={
-                      isReCanvas ? "text-white" : "text-rose-500 group-hover:text-rose-600 dark:text-rose-400 dark:group-hover:text-rose-300 transition-colors"
-                    }
-                  />
-                ),
-              },
-            ]}
-          />
-        </Popover>
+                />
+              ),
+            },
+          ]}
+        />
       </div>
     </div>
   );

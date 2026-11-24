@@ -22,7 +22,7 @@
 import React from "react";
 import { Info } from "lucide-react";
 import { useEditorServices } from "@opengpex/editor/core/context";
-import { getClipBox } from "@opengpex/editor/core/helpers/selection";
+import { getClipBox, getClipSelectionDims } from "@opengpex/editor/core/helpers/selection";
 
 import { useImageInfoMetadata, useExportConfig, useClipMode } from "./hooks";
 import { isComfyUiWorkflow, fileCarriesHdr } from "@opengpex/editor/core/files";
@@ -79,8 +79,13 @@ export function ImageInfoComponent() {
 
   // Compute clip/canvas dimensions (single source of truth)
   const box = getClipBox(activeFrame);
-  const baseW = isClipMode && box ? box.rect.w : activeFrame.canvas.w;
-  const baseH = isClipMode && box ? box.rect.h : activeFrame.canvas.h;
+  // "Selection" shows the rect the user DREW: true edge lengths for a
+  // rotated rectangular selection (the AABB would be fractional and
+  // inflated), bounds for every other shape.
+  const dims = box ? getClipSelectionDims(box) : { w: 0, h: 0, orientationDeg: 0 };
+  const baseW = isClipMode && box ? dims.w : activeFrame.canvas.w;
+  const baseH = isClipMode && box ? dims.h : activeFrame.canvas.h;
+  const baseAngle = isClipMode && box ? dims.orientationDeg : 0;
 
    // Layer dimension for the hovered or active layer now computes inside
    // LayerDimensionCard (FrameInfoPanel.tsx) — the only hover consumer.
@@ -139,6 +144,7 @@ export function ImageInfoComponent() {
           isClipMode={isClipMode}
           baseW={baseW}
           baseH={baseH}
+          selectionAngle={baseAngle}
           imageMetadata={meta.imageMetadata}
           hdrAvailable={hdrAvailable}
           hdrEnabled={hdrEnabled}

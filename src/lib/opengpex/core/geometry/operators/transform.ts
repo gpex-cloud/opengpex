@@ -509,3 +509,67 @@ export function computeLayerMovePose(layer: Layer): LayerMovePose {
     visibleOffset
   };
 }
+
+// ─── Canvas fit rects (straighten crop presets) ──────────────────────────────
+
+/** Size of the axis-aligned bounding box of a W×H rect rotated by thetaDeg. */
+export function circumscribedRectSize(
+  w: number, h: number, thetaDeg: number,
+): { w: number; h: number } {
+  const r = (thetaDeg * Math.PI) / 180;
+  const c = Math.abs(Math.cos(r));
+  const s = Math.abs(Math.sin(r));
+  return { w: w * c + h * s, h: w * s + h * c };
+}
+
+/**
+ * Size of the LARGEST axis-aligned rectangle inscribed in a W×H rect rotated
+ * by thetaDeg about its center (the straighten crop "fit inside" preset).
+ *
+ * Closed-form KKT solution. A centered candidate with half-extents (x, y)
+ * fits the rotated original iff, for its WORST corners (all four, x/y ≥ 0):
+ *   x·cosθ + y·sinθ ≤ W/2      (max |un-rotated lx| over the corner signs)
+ *   x·sinθ + y·cosθ ≤ H/2      (max |un-rotated ly|)
+ * Maximizing xy:
+ *   - both constraints active  →  x = (W·c − H·s)/(2·cos2θ),
+ *                                 y = (H·c − W·s)/(2·cos2θ),
+ *     admissible only while both numerators stay ≥ 0;
+ *   - exactly one active (the Lagrange condition x/y = c/s or s/c) gives the
+ *     single-side solutions  x = H/(4s), y = H/(4c)  and  x = W/(4c),
+ *     y = W/(4s).
+ * The true optimum is the largest-area member of this candidate set; each
+ * candidate is re-verified against the exact containment test before it may
+ * win, so the operator can never emit a box that pokes out of the rotated
+ * original (a UI crop-box PRESET must not lie). At θ = 0 the degenerate
+ * answer is the rect itself.
+ */
+export function inscribedRectSize(
+  w: number, h: number, thetaDeg: number,
+): { w: number; h: number } {
+  // Fold into [0, 90) — the inscribed problem is symmetric under the
+  // complementary angle with the dims swapped.
+  const t = ((thetaDeg % 90) + 90) % 90;
+  const r = (t * Math.PI) / 180;
+  const c = Math.cos(r), s = Math.sin(r);
+  if (t < 1e-9) return { w, h };
+
+  const fits = (x: number, y: number): boolean =>
+    x > 0 && y > 0 && isFinite(x) && isFinite(y)
+    && x * c + y * s <= w / 2 + 1e-7
+    && x * s + y * c <= h / 2 + 1e-7;
+
+  const candidates: Array<{ x: number; y: number }> = [];
+  const d = Math.cos(2 * r);
+  if (Math.abs(d) > 1e-9) {
+    candidates.push({ x: (w * c - h * s) / (2 * d), y: (h * c - w * s) / (2 * d) });
+  }
+  candidates.push({ x: h / (4 * s), y: h / (4 * c) });
+  candidates.push({ x: w / (4 * c), y: w / (4 * s) });
+
+  let best = { x: 0, y: 0 };
+  for (const cand of candidates) {
+    if (!fits(cand.x, cand.y)) continue;
+    if (cand.x * cand.y > best.x * best.y) best = cand;
+  }
+  return { w: best.x * 2, h: best.y * 2 };
+}

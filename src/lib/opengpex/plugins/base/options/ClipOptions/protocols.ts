@@ -299,6 +299,10 @@ export const ClipOptionsAPI = {
     resetBox: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_RESET_BOX}` } as { uid: string; _payload: void },
     /** Enter / Cycle Clip Tool */
     toggleMode: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_TOGGLE_MODE}` } as { uid: string; _payload: void },
+    /** Enter / exit Re-Canvas mode */
+    reCanvasToggle: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_RE_CANVAS_TOGGLE}` } as { uid: string; _payload: void },
+    /** Commit the Re-Canvas resize (resize canvas to the crop box) */
+    reCanvasApply: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_RE_CANVAS_APPLY}` } as { uid: string; _payload: void },
     /** Escape — close Re-Canvas if open, else exit clip mode (discard peel) */
     exitClip: { uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_EXIT_CLIP_MODE}` } as { uid: string; _payload: void },
     /** Enter — commit the undecided peel session (mode-agnostic) */

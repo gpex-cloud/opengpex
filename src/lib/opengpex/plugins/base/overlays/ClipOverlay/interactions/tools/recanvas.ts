@@ -126,8 +126,10 @@ export const createReCanvasHandler = (): InteractionHandler => {
       return e.activeFrame.canvasClipBox?.rect || asLocalRect({ x: 0, y: 0, w: 0, h: 0 });
     },
 
-    getConstraints: (e) => ({
-      aspect: e.activeFrame.canvasAspect,
+    getConstraints: () => ({
+      // NO aspect lock: a straightened crop box must be free to take any
+      // shape (Fit Inside / Fit All and the numeric inputs are free too —
+      // one aspect policy across drag, typing and presets).
       clamp: false, // Re-Canvas MUST allow exceeding canvas bounds
     }),
 
