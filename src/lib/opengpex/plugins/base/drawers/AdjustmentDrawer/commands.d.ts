@@ -43,6 +43,7 @@ export interface AdjustmentDrawerCommandsMap {
   updateColorBalanceCmd: CommandInstance<{ patch: ColorBalancePatch }>;
   applyFilterPresetCmd: CommandInstance<{ presetId: string; strength: number }>;
   updateFilterPresetCmd: CommandInstance<{ presetId: string; strength: number }>;
+  openSettingsCmd: CommandInstance;
 }
 
 /** Type map for usePluginSignals<AdjustmentDrawerSignalsMap>() */

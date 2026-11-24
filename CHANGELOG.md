@@ -2,6 +2,14 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.67
+
+- Workspace: new free-angle Straighten control in the View toolbar — drag the compass to level a tilted photo, hold Shift to snap to 15° steps, double-click to snap back to level. The readout keeps a running total of your corrections, and selections, outlines and HUD anchors follow the live preview in real time.
+- Workspace: the ±90 rotate / flip buttons collapse into one compact menu, and the menu now aligns with the toolbar button instead of drifting off it.
+- Adjustments: each adjustment drawer's Reset menu gains a Settings entry that opens a per-drawer settings panel, so you can tailor the drawer's controls to your workflow.
+- Frames: fixed a rare glitch where animated or multi-page imports could create frames with colliding internal ids, producing duplicate-layer UI glitches — ids now carry a unique suffix.
+
+
 ## 2.0.66
 
 - AI Tools: new AI Denoiser — NAFNet / SCUNet models with New Layer / New Frame outputs. Large-image warnings now key off megapixels, so ordinary photos no longer trigger them.

@@ -21,7 +21,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "framer-motion";
-import { ChartSpline, NotebookText, RotateCcw as ResetIcon } from "lucide-react";
+import { ChartSpline, NotebookText, RotateCcw as ResetIcon, Settings } from "lucide-react";
 import { usePluginCommands } from "@opengpex/editor/core/context";
 import type { AdjustmentDrawerCommandsMap } from "./commands.d";
 import SplitButton from "@opengpex/editor/widgets/SplitButton";
@@ -151,7 +151,7 @@ const GradingPanelButtonGroup = React.memo(function GradingPanelButtonGroup() {
  */
 export const AdjustmentDrawerComponent = React.memo(function AdjustmentDrawerComponent() {
   const { activeTool, activeLayer } = useAdjustmentDrawer();
-  const { resetActivePanelCmd, resetAllGradingCmd } = usePluginCommands<AdjustmentDrawerCommandsMap>();
+  const { resetActivePanelCmd, resetAllGradingCmd, openSettingsCmd } = usePluginCommands<AdjustmentDrawerCommandsMap>();
 
   const handleResetPanel = React.useCallback(() => {
     resetActivePanelCmd?.execute();
@@ -160,11 +160,14 @@ export const AdjustmentDrawerComponent = React.memo(function AdjustmentDrawerCom
   const handleResetAllSelect = React.useCallback((value: string) => {
     if (value === 'reset-all') {
       resetAllGradingCmd?.execute();
+    } else if (value === 'open-settings') {
+      openSettingsCmd?.execute();
     }
-  }, [resetAllGradingCmd]);
+  }, [resetAllGradingCmd, openSettingsCmd]);
 
   const resetAllOptions: ActionOption[] = React.useMemo(() => [
     { label: 'Reset All', value: 'reset-all', icon: <ResetIcon size={10} />, variant: 'danger' },
+    { label: 'Settings', value: 'open-settings', icon: <Settings size={10} /> },
   ], []);
 
   const isDisabled = !activeLayer;

@@ -18,4 +18,10 @@ export interface ClipOverlayCommandsMap {
   peelApplyTransformCmd: CommandInstance<{ pose: TransformParams }, Promise<void>>;
   peelResetTransformCmd: CommandInstance;
   peelSettleCmd: CommandInstance<{ mode: 'commit' | 'discard' }, Promise<boolean>>;
+  peelCommitExitCmd: CommandInstance<void, Promise<void>>;
+  peelDiscardExitCmd: CommandInstance<void, Promise<void>>;
+  layerViaCopyCmd: CommandInstance;
+  layerViaCutCmd: CommandInstance;
+  clipboardCopyCmd: CommandInstance;
+  clipboardCutCmd: CommandInstance;
 }

@@ -66,7 +66,7 @@ export const plugin: EditorPlugin = {
       component: OnboardingSettings,
       title: "Onboarding",
       icon: <Lightbulb size={12} />,
-      order: 200,
+      order: 310,
     },
   ] },
 };

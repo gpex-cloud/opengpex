@@ -22,6 +22,7 @@ import { useEditorServices, useEditorState } from '@opengpex/editor/core/context
 import { useFastSync } from '@opengpex/editor/core/state/volatile';
 import { useTicker } from '@opengpex/editor/core/motion/hooks/animation';
 import { Motion } from '@opengpex/editor/core/motion';
+import { straightenPreviewPose } from '@opengpex/editor/core/state/volatile/straighten';
 import { Layer } from '@opengpex/editor/core/types';
 
 /** Internal throttle interval for matrix computation (~30Hz) */
@@ -146,8 +147,12 @@ export function useLayerOverlaySync(
     if (now - lastMatrixTimeRef.current < MATRIX_THROTTLE_MS) return;
     lastMatrixTimeRef.current = now;
 
-    // 1. Execute pure geometric operations
-    const worldMatrix = geometry.transform.getLayerWorldMatrix(latestLayer);
+    // 1. Execute pure geometric operations. A live canvas-straighten drag
+    // rides the volatile transient: fold the preview pose in here so the
+    // outline tracks the GPU preview pixels exactly (the same expressions
+    // the render engine's pose-override seam applies).
+    const straightenPose = straightenPreviewPose(v.transient, latestLayer, f.canvas);
+    const worldMatrix = geometry.transform.getLayerWorldMatrix(latestLayer, straightenPose);
     const viewMatrix = geometry.camera.getCameraMatrix(f, f.camera);
     const screenMatrix = viewMatrix.multiply(worldMatrix);
 
@@ -155,19 +160,31 @@ export function useLayerOverlaySync(
     const rect = latestLayer.visibleShape?.rect || { x: 0, y: 0, w: latestLayer.bounding.w, h: latestLayer.bounding.h };
     const fragmentMatrix = screenMatrix.multiply(geometry.Matrix.translate(rect.x, rect.y));
 
-    // 3. Decompose and sync to DOM (inline useFastMatrixSync logic for full control)
+    // 3. Upright outline protocol: strip the rotation component from the
+    // fragment matrix and replace the box with the rotated rect's screen
+    // AABB. Outlines are passive extent indicators, not manipulation
+    // affordances — an upright box reads the footprint at a glance while a
+    // tilted box forces the eye to re-orient per layer. Translation, scale
+    // and flip all survive (the linear part is consumed as-is); only the net
+    // rotation is cancelled, so mirrored and non-uniformly scaled layers keep
+    // deforming the box exactly as their rendered pixels deform.
     const matrix = { ...fragmentMatrix, w: rect.w, h: rect.h };
-    const { scaleX, scaleY } = geometry.transform.decomposeMatrix(matrix);
-
-    const pureA = matrix.a / (scaleX || 0.001);
-    const pureB = matrix.b / (scaleX || 0.001);
-    const pureC = matrix.c / (scaleY || 0.001);
-    const pureD = matrix.d / (scaleY || 0.001);
+    const a = matrix.a || 0, b = matrix.b || 0, c = matrix.c || 0, d = matrix.d || 0;
+    const w = matrix.w || 0, h = matrix.h || 0;
+    // The four corners of the transformed rect in screen space: the origin
+    // (matrix tx/ty already includes the rect-local translate), plus the two
+    // edge vectors (first matrix column × w, second × h).
+    const x0 = matrix.tx, y0 = matrix.ty;
+    const x1 = x0 + a * w, y1 = y0 + b * w;
+    const x2 = x0 + c * h, y2 = y0 + d * h;
+    const x3 = x1 + c * h, y3 = y1 + d * h;
+    const minX = Math.min(x0, x1, x2, x3);
+    const minY = Math.min(y0, y1, y2, y3);
 
     Motion.set(ref.current, {
-      width: (matrix.w || 0) * scaleX,
-      height: (matrix.h || 0) * scaleY,
-      transform: `matrix(${pureA}, ${pureB}, ${pureC}, ${pureD}, ${matrix.tx}, ${matrix.ty})`,
+      width: Math.max(x0, x1, x2, x3) - minX,
+      height: Math.max(y0, y1, y2, y3) - minY,
+      transform: `matrix(1, 0, 0, 1, ${minX}, ${minY})`,
       overwrite: true
     });
 

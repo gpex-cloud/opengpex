@@ -58,7 +58,7 @@ export const plugin: EditorPlugin = {
       component: SmartGuidesSettings,
       title: 'Smart Guides',
       icon: <Magnet size={12} />,
-      order: 200
+      order: 410
     }
   ] }
 };

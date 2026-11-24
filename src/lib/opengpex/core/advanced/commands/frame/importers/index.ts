@@ -266,7 +266,15 @@ export async function revertGifFrame(ctx: EditorContextValue, frameId: string): 
       canvasClipBox: content.canvasClipBox,
       layers: content.layers,
       activeLayerId: content.activeLayerId,
-      extra: { ...(frame.extra as Record<string, unknown>), gifSequenceId: content.gifSequenceId, gifFrameCount: content.gifFrameCount },
+      // Drafts cleared + straighten history zeroed: revert restores the
+      // original import state (same rationale as revertSingleImage).
+      drafts: {},
+      extra: {
+        ...(frame.extra as Record<string, unknown>),
+        gifSequenceId: content.gifSequenceId,
+        gifFrameCount: content.gifFrameCount,
+        straightenTotalDeg: 0,
+      },
       metadata: content.metadata,
     });
 

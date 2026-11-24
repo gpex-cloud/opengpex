@@ -81,7 +81,17 @@ export interface ContentKey {
    */
   readonly dirty: boolean;
   /** A tween is animating a display value this frame — always rebuild. */
-  readonly animating: boolean;}
+  readonly animating: boolean;
+  /**
+   * Canvas-straighten preview stamp: the serialized live drag angle + pivot
+   * (empty string when no straighten drag is in flight). The pose overrides
+   * the straighten feeds to `SceneAssembler` change per pointermove WITHOUT
+   * touching `layersRef`, so the key must carry the angle itself — a changed
+   * stamp forces a rebuild, and the same stamp on a cam-only frame keeps the
+   * hit path alive during the drag.
+   */
+  readonly straightenKey: string;
+}
 
 
 function keysEqual(a: ContentKey, b: ContentKey): boolean {
@@ -92,7 +102,8 @@ function keysEqual(a: ContentKey, b: ContentKey): boolean {
     a.layersRef === b.layersRef &&
     a.canvasW === b.canvasW &&
     a.canvasH === b.canvasH &&
-    a.colorSpace === b.colorSpace
+    a.colorSpace === b.colorSpace &&
+    a.straightenKey === b.straightenKey
   );
 }
 

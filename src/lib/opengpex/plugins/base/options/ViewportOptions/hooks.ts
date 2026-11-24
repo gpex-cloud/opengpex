@@ -38,6 +38,10 @@ export const useViewportCommands = () => {
     flipHCmd: actions.adv.viewport.transform.flipH,
     flipVCmd: actions.adv.viewport.transform.flipV,
     resetTransformCmd: actions.adv.viewport.transform.reset,
+    // Canvas straighten: committed free-angle materialization (the drag
+    // preview rides the `straighten` transient; this command lands the
+    // materialized records).
+    straightenCmd: actions.adv.viewport.transform.straighten,
 
     // Viewport Translate Commands (AdvCommandRef)
     fitCmd: actions.adv.viewport.translate.fit,

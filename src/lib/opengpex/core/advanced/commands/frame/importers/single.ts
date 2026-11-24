@@ -183,7 +183,11 @@ export async function revertSingleImage(
     });
     const expandedLayers = LayerFactory.expandLayers([baseLayer]);
 
-    // 5. Commit in-place (updateFrame, not addFrame) + reset history
+    // 5. Commit in-place (updateFrame, not addFrame) + reset history.
+    //    A revert restores the ORIGINAL import state wholesale: drafts are
+    //    cleared (the pen work path belongs to the discarded edits), and the
+    //    display-only straighten history counter returns to 0 (the rebuilt
+    //    poses are upright — a stale total would make the readout lie).
     actions.updateFrame(frameId, {
       layers: { byId: Object.fromEntries(expandedLayers.map(l => [l.id, l])), order: expandedLayers.map(l => l.id) },
       activeLayerId: baseLayer.id,
@@ -192,6 +196,8 @@ export async function revertSingleImage(
       canvasClipBox,
       metadata,
       confinement: null,
+      drafts: {},
+      extra: { ...(state.frames.byId[frameId]?.extra as Record<string, unknown> | undefined), straightenTotalDeg: 0 },
     });
     actions.resetHistory();
     // No success HUD on purpose: the revert progress HUD (sys.asset.importing)

@@ -51,9 +51,33 @@
 
 import { useMemo } from 'react';
 import type { Frame } from '../types/models';
+import type { Point2D } from '../types/geometry';
 
-/** Viewport D4 symmetry operations (same set transformFrame applies). */
-export type DraftTransformOperation = 'rotate_r' | 'rotate_l' | 'flip_h' | 'flip_v';
+/**
+ * Viewport transport operations a draft codec can be remapped through.
+ *
+ * The first four are the D4 symmetry group (canvas Rotate Left/Right and
+ * Flip). `rotate_pivot` is the free-angle canvas straighten: an arbitrary
+ * rotation ABOUT a fixed pivot. The pivot rotation is NOT expressible by the
+ * D4 point maps, so it carries its parameters separately — see
+ * {@link DraftPivotRotation}.
+ */
+export type DraftTransformOperation =
+  | 'rotate_r' | 'rotate_l' | 'flip_h' | 'flip_v'
+  | 'rotate_pivot';
+
+/**
+ * Parameters for the `rotate_pivot` transport operation: the rotation angle
+ * (degrees, clockwise-positive in the canvas' y-down convention, matching
+ * `Matrix3x3.rotate`) and the fixed pivot the rotation turns about. Every
+ * frame-local point p maps to `pivot + R(theta) · (p − pivot)` — the same
+ * pivot map the canvas straighten applies to layer poses and selection
+ * rings, so drafts stay glued to the pixels.
+ */
+export interface DraftPivotRotation {
+  readonly pivot: Point2D;
+  readonly thetaDeg: number;
+}
 
 /**
  * The per-tool draft contract. `validate` must be cheap and total: it runs
@@ -78,8 +102,18 @@ export interface DraftCodec<T = unknown> {
    * aligned with the pixels across canvas rotate/flip (same undo step as the
    * pixels). Absent ⇒ the payload is passed through untouched (unknown keys
    * survive a rotation verbatim).
+   *
+   * For D4 operations (`rotate_r` / `rotate_l` / `flip_h` / `flip_v`) the
+   * point map is fully determined by `container` + `operation`. For
+   * `rotate_pivot` the caller MUST supply `pivotRotation` — the hook is
+   * invoked with it and may assume it is present.
    */
-  transform?(payload: T, container: { w: number; h: number }, operation: DraftTransformOperation): T;
+  transform?(
+    payload: T,
+    container: { w: number; h: number },
+    operation: DraftTransformOperation,
+    pivotRotation?: DraftPivotRotation,
+  ): T;
 }
 
 // ─── Codec registry ────────────────────────────────────────────────────────────
@@ -217,4 +251,62 @@ export function sanitizeFrameDrafts(drafts: unknown): Record<string, unknown> | 
  */
 export function useFrameDraft<T = unknown>(frame: Frame | null | undefined, toolId: string): T | null {
   return useMemo(() => readFrameDraft<T>(frame, toolId), [frame, toolId]);
+}
+
+// ─── Viewport-transform draft remap (application glue) ────────────────────────
+
+/**
+ * Draft-side counterpart of the viewport transforms. These closures are what
+ * the COMMAND layer injects into the pure geometry operators
+ * (`transformFrame` / `straightenFrame`) — the geometry layer stays
+ * draft-agnostic, and this module owns both halves of the contract: the
+ * `DraftTransformOperation` vocabulary and its single geometric consumer.
+ *
+ * The point maps mirror the pose maps exactly: the D4 POINT formulas are the
+ * same ones transformFrame applies to layer poses and selection polygons
+ * (expressed against the PRE-transform canvas dimensions); `rotate_pivot`
+ * rotates about the given top-left-origin pivot with the same pivot map the
+ * materialization applies to confinement.
+ */
+
+/** Remaps the draft record through a D4 viewport transport operation. */
+export function remapDraftsForViewportOp(
+  operation: DraftTransformOperation,
+): (drafts: Record<string, unknown> | undefined, canvas: { w: number; h: number }) => Record<string, unknown> | undefined {
+  return (drafts, canvas) => {
+    if (!drafts) return undefined;
+    let next: Record<string, unknown> | null = null;
+    for (const [toolId, payload] of Object.entries(drafts)) {
+      const codec = getFrameDraftCodec(toolId);
+      const transformed = codec?.transform && payload && typeof payload === 'object'
+        ? codec.transform(payload as never, canvas, operation)
+        : payload;
+      if (transformed !== payload) {
+        next ??= { ...drafts };
+        next[toolId] = transformed;
+      }
+    }
+    return next ?? drafts;
+  };
+}
+
+/** Remaps the draft record through a free-angle pivot rotation. */
+export function remapDraftsForPivotRotation(
+  pivotRotation: DraftPivotRotation,
+): (drafts: Record<string, unknown> | undefined, canvas: { w: number; h: number }) => Record<string, unknown> | undefined {
+  return (drafts, canvas) => {
+    if (!drafts) return undefined;
+    let next: Record<string, unknown> | null = null;
+    for (const [toolId, payload] of Object.entries(drafts)) {
+      const codec = getFrameDraftCodec(toolId);
+      const transformed = codec?.transform && payload && typeof payload === 'object'
+        ? codec.transform(payload as never, canvas, 'rotate_pivot', pivotRotation)
+        : payload;
+      if (transformed !== payload) {
+        next ??= { ...drafts };
+        next[toolId] = transformed;
+      }
+    }
+    return next ?? drafts;
+  };
 }

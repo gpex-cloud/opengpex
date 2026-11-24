@@ -20,6 +20,7 @@
 import { useRef } from 'react';
 import { useEditorServices } from '@opengpex/editor/core/context';
 import { useFastSync } from '@opengpex/editor/core/state/volatile';
+import { straightenPreviewPose } from '@opengpex/editor/core/state/volatile/straighten';
 import { VolatileState, Frame, CameraState } from '@opengpex/editor/core/types';
 import { markerToSvg } from './marker/svg';
 import { getMarkerPreview, getMarkerPreviewVersion } from './interactions';
@@ -95,7 +96,7 @@ export function useMarkerSelectionFastSync(
 ) {
   const { geometry } = useEditorServices();
 
-  useFastSync(boxRef, !!layerId, (_v: VolatileState, f: Frame, cam: CameraState) => {
+  useFastSync(boxRef, !!layerId, (v: VolatileState, f: Frame, cam: CameraState) => {
     const el = boxRef.current;
     if (!el || !layerId) return;
 
@@ -111,7 +112,12 @@ export function useMarkerSelectionFastSync(
     // the camera matrix. Same pipeline as LayerOverlay, so the box self-rotates
     // to match the marker. The parent container's useOverlayRotationSync adds the
     // smooth rotation TWEEN on top (LayerOverlay uses both together).
-    const worldMatrix = geometry.transform.getLayerWorldMatrix(layer);
+    // Fold the live canvas-straighten preview pose in, so the box tracks the
+    // GPU preview pixels exactly (same expressions as the engine seam).
+    const worldMatrix = geometry.transform.getLayerWorldMatrix(
+      layer,
+      straightenPreviewPose(v.transient, layer, f.canvas),
+    );
     const viewMatrix = geometry.camera.getCameraMatrix(f, cam);
     const screenMatrix = viewMatrix.multiply(worldMatrix);
 

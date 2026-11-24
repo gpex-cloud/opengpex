@@ -64,7 +64,7 @@ export const plugin: EditorPlugin = {
       component: ComfyBridgeSettings,
       title: 'Comfy Bridge',
       icon: <Link size={12} />,
-      order: 330,
+      order: 533,
     },
   ] },
 };

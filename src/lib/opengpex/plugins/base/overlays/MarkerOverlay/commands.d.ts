@@ -15,6 +15,7 @@ export interface MarkerOverlayCommandsMap {
   [key: string]: { execute: (payload: never) => unknown; readonly name: string; readonly shortcutLabel: string };
   placeCmd: CommandInstance<{ frameId: string; layer: Layer }>;
   updateMarkerCmd: CommandInstance<{ frameId: string; layerId: string; patch: Partial<MarkerData> }>;
+  squareizeMarkerCmd: CommandInstance<{ frameId: string; layerId: string }>;
 }
 
 /** Type map for usePluginSignals<MarkerOverlaySignalsMap>() */

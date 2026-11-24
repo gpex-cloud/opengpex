@@ -66,12 +66,18 @@ export function newBranchSourceFileName(fullName: string, parentSourceFileName?:
 }
 
 /**
- * Generate a new frame id: `f-<base36 timestamp>-<trunk|branch>`.
+ * Generate a new frame id: `f-<base36 timestamp>-<random>-<trunk|branch>`.
+ *
+ * The random suffix is mandatory: batch importers create many frames in one
+ * synchronous loop, so a millisecond timestamp alone collides — duplicate ids
+ * corrupt id-keyed state (layer maps, frame routing) and trip React's
+ * duplicate-key warning. Same discipline as the group/amask/layer generators.
  *
  * @param hasParent - Whether this frame branches off another frame (vs. a fresh trunk import).
  */
 export function newFrameId(hasParent: boolean): string {
-  return `f-${Date.now().toString(36)}-${hasParent ? 'branch' : 'trunk'}`;
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `f-${Date.now().toString(36)}-${rand}-${hasParent ? 'branch' : 'trunk'}`;
 }
 
 /**

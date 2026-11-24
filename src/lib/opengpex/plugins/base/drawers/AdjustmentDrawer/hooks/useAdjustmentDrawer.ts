@@ -74,20 +74,26 @@ export function useHotTailGrade(category: GradeCategory): {
  * from the active layer's grading state. The panel body uses these to decide
  * which sub-panel to render and whether to show "no active layer" placeholders.
  *
- * The active tool is resolved with a three-level fallback (in priority order):
- *   1. The live `activeGradingToolSignal` value (if user has interacted this session)
- *   2. `pluginConfig.lastTool` (persisted across sessions)
- *   3. `DEFAULT_GRADING_TOOL` (`'curves'` — matches Photoshop's Curves default)
+ * The opening panel is resolved as follows:
+ *   1. The live `activeGradingToolSignal` value once the user has explicitly
+ *      picked a panel this session (the signal is seeded null at registration,
+ *      so null/undefined = "no pick yet").
+ *   2. Otherwise the `openWithBasic` preference (`pluginConfig`, editable from
+ *      the drawer's settings): true lands on the Basic panel, false on the
+ *      Presets (filter) wall — `DEFAULT_GRADING_TOOL`.
+ *
+ * Every reload reseeds the signal to null, so the preference governs the
+ * fresh-session opening panel while explicit picks win for the rest of the
+ * session (across drawer open/close).
  */
 export function useAdjustmentDrawer() {
   const { activeGradingToolSignal } = usePluginSignals<AdjustmentDrawerSignalsMap>();
   const [selfConfig] = usePluginSelfConfig<AdjustmentDrawerConfig>();
   const { activeLayer } = useEditorState();
 
+  const signalTool = activeGradingToolSignal?.value as ActiveGradingTool | null | undefined;
   const activeTool: ActiveGradingTool =
-    (activeGradingToolSignal?.value as ActiveGradingTool | undefined) ??
-    selfConfig?.lastTool ??
-    DEFAULT_GRADING_TOOL;
+    signalTool ?? (selfConfig?.openWithBasic ? 'basic' : DEFAULT_GRADING_TOOL);
 
   return {
     activeTool,

@@ -75,24 +75,45 @@ function clonePenDraft(draft: PenDraft): PenDraft {
 }
 
 /**
- * The D4 symmetry POINT map, expressed against the PRE-transform canvas
- * (same formulas transformFrame applies to layer poses and selection
+ * The viewport transport POINT map, expressed against the PRE-transform
+ * canvas (same formulas transformFrame applies to layer poses and selection
  * polygons): rotate 90° maps onto the transposed canvas, flips mirror an
- * axis. Implemented locally because plugin code may not import core
+ * axis, and the free-angle canvas straighten rotates every point about a
+ * fixed pivot. Implemented locally because plugin code may not import core
  * geometry operators directly — the codec hook is the sanctioned seam.
+ * The pivot map replicates `Matrix3x3.rotate`'s convention exactly:
+ * thetaDeg is clockwise-positive in the y-down canvas system.
  * The anchor+handle machinery itself is NOT re-implemented here: handles
  * ride `mapPathAnchors` (the public-whitelist L0 primitive), which maps
  * each handle's absolute endpoint and re-bases it against the mapped
- * anchor — for the affine D4 maps that is exactly the handle vector
- * transformed by the rotation/flip's linear part.
+ * anchor — for the affine maps (D4 and pivot rotation alike) that is
+ * exactly the handle vector transformed by the map's linear part.
  */
-function mapDraftPoint(p: Point2D, container: { w: number; h: number }, op: string): Point2D {
+function mapDraftPoint(
+  p: Point2D,
+  container: { w: number; h: number },
+  op: string,
+  pivot?: { pivot: Point2D; thetaDeg: number },
+): Point2D {
   const { w, h } = container;
   switch (op) {
     case 'rotate_r': return { x: h - p.y, y: p.x };
     case 'rotate_l': return { x: p.y, y: w - p.x };
     case 'flip_h': return { x: w - p.x, y: p.y };
     case 'flip_v': return { x: p.x, y: h - p.y };
+    case 'rotate_pivot': {
+      // Free-angle rotation about a fixed pivot: p → pivot + R(θ)·(p − pivot).
+      if (!pivot) return { x: p.x, y: p.y };
+      const rad = (pivot.thetaDeg * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      const dx = p.x - pivot.pivot.x;
+      const dy = p.y - pivot.pivot.y;
+      return {
+        x: pivot.pivot.x + dx * cos - dy * sin,
+        y: pivot.pivot.y + dx * sin + dy * cos,
+      };
+    }
     default: return { x: p.x, y: p.y };
   }
 }
@@ -101,10 +122,10 @@ export const penDraftCodec: DraftCodec<PenDraft> = {
   toolId: 'pen',
   validate: validatePenDraft,
   clone: clonePenDraft,
-  transform: (draft, container, operation) => ({
+  transform: (draft, container, operation, pivotRotation) => ({
     subpaths: mapPathAnchors(
       { paths: draft.subpaths },
-      (p) => mapDraftPoint(p, container, operation),
+      (p) => mapDraftPoint(p, container, operation, pivotRotation),
     ).paths as PenSubPath[],
   }),
 };

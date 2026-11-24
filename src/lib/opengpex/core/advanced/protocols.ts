@@ -30,6 +30,7 @@ export const ADV_VIEWPORT_ROTATE_RIGHT = 'adv.viewport.rotate_right';
 export const ADV_VIEWPORT_FLIP = 'adv.viewport.flip';
 export const ADV_VIEWPORT_FLIP_H = 'adv.viewport.flip_h';
 export const ADV_VIEWPORT_FLIP_V = 'adv.viewport.flip_v';
+export const ADV_VIEWPORT_STRAIGHTEN = 'adv.viewport.straighten';
 export const ADV_VIEWPORT_FIT = 'adv.viewport.fit';
 export const ADV_VIEWPORT_ACTUAL = 'adv.viewport.actual_size';
 export const ADV_VIEWPORT_ZOOM = 'adv.viewport.zoom';

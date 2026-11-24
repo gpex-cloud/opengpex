@@ -190,6 +190,7 @@ export interface EditorActions {
         flipH: AdvCommandRef;
         flipV: AdvCommandRef;
         reset: AdvCommandRef;
+        straighten: AdvCommandRef<{ thetaDeg: number }>;
       };
       translate: {
         fit: AdvCommandRef;

@@ -111,6 +111,14 @@ export default function SplitButton({
   const [internalValue, setInternalValue] = React.useState<string | undefined>(defaultValue);
   const currentValue = value !== undefined ? value : internalValue;
 
+  // Compound-control alignment anchor. The dropdown lives around the chevron
+  // sub-trigger, so its default anchoring is chevron-relative; the menu must
+  // instead respect the WHOLE pill:
+  //   'left'  → primary button's left edge  = the pill's left edge
+  //   'right' → chevron's right edge        = the pill's right edge (default
+  //             trigger anchoring is already correct)
+  const pillRef = React.useRef<HTMLDivElement>(null);
+
   const activeOption = isMemorized
     ? dropdownOptions.find((opt) => opt.value === currentValue)
     : undefined;
@@ -192,6 +200,7 @@ export default function SplitButton({
 
   const content = (
     <div
+      ref={pillRef}
       className={`
         group/split inline-flex items-center select-none outline-none
         ${outerRadius} ${borderless ? '' : 'overflow-hidden border border-[var(--border-subtle)] hover:border-indigo-500/30'}
@@ -210,6 +219,7 @@ export default function SplitButton({
         options={resolvedOptions}
         onSelect={handleSelect}
         align={dropdownAlign}
+        anchorRef={dropdownAlign === 'left' ? pillRef : undefined}
         disabled={disabled}
       />
     </div>

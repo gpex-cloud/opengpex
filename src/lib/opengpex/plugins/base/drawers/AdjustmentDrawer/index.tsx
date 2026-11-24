@@ -19,8 +19,9 @@
 
 import { EditorPlugin } from "@opengpex/editor/core/types";
 import { AdjustmentDrawerComponent } from "./components";
+import { AdjustmentSettings } from "./settings";
 import { ADJUSTMENT_COMMANDS } from "./commands";
-import { ChartSpline } from "lucide-react";
+import { ChartSpline, Settings } from "lucide-react";
 import * as P from "./protocols";
 
 /**
@@ -84,21 +85,37 @@ export const plugin: EditorPlugin = {
   // would force ternary fallbacks everywhere in the UI layer. Scope is
   // `public` so ColorOptions or a future scripting bridge can drive it.
   //
-  // Legacy `pluginConfig.lastTool` values of `'curves' | 'levels' | 'mixer'`
-  // written before the `'basic'` tool shipped still round-trip through the union — the
-  // new `'basic'` value is additive, no migration needed.
+  // Legacy `pluginConfig.lastTool` values written before the opening-panel
+  // preference shipped are simply ignored — stale config data needs no
+  // migration.
 
   signals: [
     {
       id: P.SIGNAL_ACTIVE_GRADING_TOOL,
       name: "Active Adjustment Tool",
-      defaultValue: P.DEFAULT_GRADING_TOOL,
+      // Seeded as null (= "no explicit pick this session"). The framework
+      // writes defaultValue into the state slot at registration and only
+      // when the slot is undefined, so after every reload the slot reads
+      // null until the user explicitly picks a panel — at which point the
+      // openWithBasic preference no longer overrides their choice. A tool
+      // default here (e.g. 'presets') would be indistinguishable from an
+      // explicit presets pick and break both the preference and the pick.
+      defaultValue: null,
       scope: "public",
     },
   ],
 
   // --- 6. Contributions ---
-  // No cross-plugin contributions yet. A future iteration may add a
-  // curve-preview dot into ColorOptions once the Curves editor is real.
-  contributions: { ui: [] },
+  // A settings tab in the global Settings panel (opened via the gear button
+  // in the drawer header, next to the Reset split button).
+  contributions: { ui: [
+    {
+      slot: "SETTINGS_CONFIG_PANEL",
+      group: "adjustments",
+      component: AdjustmentSettings,
+      title: "Adjustments",
+      icon: <Settings size={12} />,
+      order: 510,
+    },
+  ] },
 };

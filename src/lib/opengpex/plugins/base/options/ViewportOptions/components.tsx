@@ -33,7 +33,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useEditorState } from "@opengpex/editor/core/context";
 import { CameraState } from "@opengpex/editor/core/types";
 import { FancyButton } from "@opengpex/editor/widgets/FancyButton";
+import SplitButton from "@opengpex/editor/widgets/SplitButton";
 import { useViewportCommands } from "./hooks";
+import StraightenControl from "./StraightenControl";
 import { useFastSync } from "@opengpex/editor/core/state/volatile";
 import { presets } from "@opengpex/editor/core/helpers/preferences";
 const VIEWPORT_ZOOM_MIN = presets.get('VIEWPORT_ZOOM_MIN');
@@ -405,44 +407,36 @@ export const ViewportComponent = React.memo(function ViewportComponent() {
         </FancyButton>
       </div>
 
-      <div className="flex items-center">
-        <FancyButton shape="rect" iconOnly
+      {/* Canvas transform group: the ±90 rotation family collapsed into a
+          SplitButton (rotate-left is the one-click primary, right/flips live
+          in the submenu — same mental model as reset / reset-all), with the
+          free-angle straighten control beside it (same canvas-transform
+          family, committed materialization gesture). */}
+      <div className="flex items-center gap-1">
+        <SplitButton
+          icon={<RotateCcw size={13} />}
+          tooltip={`${rotateLeftCmd.name} (${rotateLeftCmd.shortcutLabel})`}
           onClick={() => rotateLeftCmd.execute()}
-          variant="ghost"
-          title={`${rotateLeftCmd.name} (${rotateLeftCmd.shortcutLabel})`}
-          tooltipPosition="bottom"
-          className="w-6 h-6 text-sky-500"
-        >
-          <RotateCcw size={13} />
-        </FancyButton>
-        <FancyButton shape="rect" iconOnly
-          onClick={() => rotateRightCmd.execute()}
-          variant="ghost"
-          title={`${rotateRightCmd.name} (${rotateRightCmd.shortcutLabel})`}
-          tooltipPosition="bottom"
-          className="w-6 h-6 text-sky-500"
-        >
-          <RotateCw size={13} />
-        </FancyButton>
-        <div className="w-px h-3 bg-transparent mx-0.5" />
-        <FancyButton shape="rect" iconOnly
-          onClick={() => flipHCmd.execute()}
-          variant="ghost"
-          title={`${flipHCmd.name} (${flipHCmd.shortcutLabel})`}
-          tooltipPosition="bottom"
-          className="w-6 h-6 text-indigo-500"
-        >
-          <FlipHorizontal2 size={13} />
-        </FancyButton>
-        <FancyButton shape="rect" iconOnly
-          onClick={() => flipVCmd.execute()}
-          variant="ghost"
-          title={`${flipVCmd.name} (${flipVCmd.shortcutLabel})`}
-          tooltipPosition="bottom"
-          className="w-6 h-6 text-indigo-500"
-        >
-          <FlipVertical2 size={13} />
-        </FancyButton>
+          dropdownOptions={[
+            {
+              label: rotateRightCmd.name,
+              value: 'rotateRight',
+              icon: <RotateCw size={13} />,
+              description: rotateRightCmd.shortcutLabel,
+            },
+            { label: flipHCmd.name, value: 'flipH', icon: <FlipHorizontal2 size={13} /> },
+            { label: flipVCmd.name, value: 'flipV', icon: <FlipVertical2 size={13} /> },
+          ]}
+          onDropdownSelect={(value) => {
+            if (value === 'rotateRight') rotateRightCmd.execute();
+            else if (value === 'flipH') flipHCmd.execute();
+            else if (value === 'flipV') flipVCmd.execute();
+          }}
+          dropdownAlign="left"
+          shape="pill"
+          className="text-sky-500"
+        />
+        <StraightenControl />
       </div>
     </div>
   );

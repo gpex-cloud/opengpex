@@ -43,9 +43,9 @@ import {
   insertPointSorted,
 } from './grading/manual-apply';
 import { buildPresetMasks, resolvePresetForApply } from './grading/presets/preset-apply';
+import { SettingsPanelAPI } from '../../panels/SettingsPanel/protocols';
 import type {
   GradingTool,
-  AdjustmentDrawerConfig,
   CurveChannel,
   LevelsPatch,
   ChannelMixPatch,
@@ -55,20 +55,16 @@ import type {
 } from './protocols';
 
 /**
- * Persists the active grading tool both to the shared signal (so other plugins
- * can observe it via `usePluginSignals`) and to `pluginConfig` so the choice
- * survives across editor sessions.
+ * Sets the active grading tool on the shared signal (so other plugins can
+ * observe it via `usePluginSignals`).
  *
- * We intentionally keep this a signal (not just pluginConfig) because switching
- * panels should trigger UI re-renders synchronously — pluginConfig by itself
- * doesn't force an immediate re-render of subscribers.
+ * Kept as a signal (not pluginConfig) because switching panels must trigger
+ * UI re-renders synchronously — pluginConfig by itself doesn't force an
+ * immediate re-render of subscribers. The opening panel is governed by the
+ * `openWithBasic` preference instead of a remembered last tool.
  */
 function setActiveTool(ctx: EditorContextValue, tool: GradingTool) {
   ctx.scoped!.setSignal(P.SIGNAL_ACTIVE_GRADING_TOOL, tool);
-  const cfg = ctx.scoped!.selfConfig as AdjustmentDrawerConfig | undefined;
-  if (cfg?.lastTool !== tool) {
-    ctx.scoped!.setSelfConfig({ lastTool: tool });
-  }
 }
 
 /**
@@ -816,4 +812,13 @@ export const ADJUSTMENT_COMMANDS = {
       });
     },
   } as EditorCommand<{ presetId: string; strength: number }, void>,
+
+  openSettings: {
+    id: P.CMD_OPEN_SETTINGS,
+    name: 'Open Adjustment Settings',
+    execute: (ctx: EditorContextValue) => {
+      ctx.actions.setStateSignal(SettingsPanelAPI.signals.tab, 'Adjustments');
+      ctx.actions.setStateSignal(SettingsPanelAPI.signals.open, true);
+    },
+  } as EditorCommand<void, void>,
 } as const;

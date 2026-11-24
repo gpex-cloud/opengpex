@@ -295,7 +295,19 @@ export interface GeometryService {
     /** Decomposes matrix: extracts pose parameters like rotation, scale, flip */
     decomposeMatrix: (matrix: IMatrix3x3, refRotation?: number) => DecomposedMatrix;
     /** Executes artboard-level geometry transformation (rotate/flip) */
-    transformFrame: (frame: Frame, operation: 'rotate_r' | 'rotate_l' | 'flip_h' | 'flip_v') => Frame;
+    /** Canvas straighten: committed free-angle materialization about the effective clip-rect center */
+    /** Pivot the canvas straighten turns about (effective clip rectangle center) */
+    transformFrame: (
+      frame: Frame,
+      operation: 'rotate_r' | 'rotate_l' | 'flip_h' | 'flip_v',
+      remapDrafts?: (drafts: Record<string, unknown> | undefined, canvas: { w: number; h: number }) => Record<string, unknown> | undefined,
+    ) => Frame;
+    rotatePoseAboutPivot: (
+      layer: Pick<Layer, 'cx' | 'cy' | 'rotation'>,
+      pivot: { x: number; y: number },
+      canvas: { w: number; h: number },
+      thetaDeg: number,
+    ) => { cx: number; cy: number; rotation: number };
     /** Computes correct (cx, cy) world anchor for a fragment layer accounting for orientation */
     computeFragmentCenter: (worldCenter: Point2D, visibleOffset: Point2D, rotation: number, flip: { h: boolean; v: boolean }) => Point2D;
     /** Computes rotation-aware pose info (AABB size, center offset) for layer move operations */

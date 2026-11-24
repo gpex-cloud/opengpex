@@ -18,10 +18,8 @@
  */
 
 import { Matrix3x3, GeometryOp } from '../matrix';
-import { Layer, Frame, IMatrix3x3, asLocalRect, asLocalPoint, asLocalPolygon, LocalPolygon, LayerPoseOverride, Point2D, Dimensions } from '@opengpex/editor/core/types';
 import { computePolygonBounds } from './polygon';
-import { getFrameDraftCodec } from '../../state/drafts';
-
+import { Layer, Frame, IMatrix3x3, asLocalRect, asLocalPoint, asLocalPolygon, LocalPolygon, LayerPoseOverride, Point2D, Dimensions } from '@opengpex/editor/core/types';
 /**
  * [Generic] Core geometric operator: calculate transform matrix of any asset in world coordinate system
  *
@@ -268,7 +266,7 @@ export function transformPolygon(
 
   // Orientation record folds with the SAME rigid transform as the vertices
   // (orientation decree — the record must always reflect the polygon's real
-  // on-canvas direction, never reset by a transport): rotate adds ±90° in the
+  // on-canvas direction, never reset by a canvas transform): rotate adds ±90° in the
   // same clockwise-positive convention as rotatePolygon; a single mirror
   // reverses the rotation direction, so both flips negate the record.
   const orientation = poly.orientationDeg ?? 0;
@@ -288,12 +286,75 @@ export function transformPolygon(
 
 
 /**
- * Execute artboard-level geometric update (rotation/flip)
+ * Exact orientation composition for ONE CANVAS TRANSFORM op (the ±90 / flip
+ * family). With the
+ * orientation contract O = R(rot) × F, the composition O_op × O_layer is
+ * closed-form — NO matrix decomposition needed (and decomposeMatrix rounds
+ * to whole degrees, which silently quantizes any fractional layer rotation
+ * on every canvas-transform round trip: content rotation −2.7° + canvas
+ * rotate 90° + reset used
+ * to come back as −3°, a visible residual tilt).
+ *
+ *   rotate ±90: O_op = R(δ) → R(δ)·R(rot)·F = R(rot+δ)·F
+ *               ⇒ rotation += δ, flips untouched.
+ *   flip axis:  O_op = F  → F·R(rot)·F_layer:
+ *               F_layer = ∅ ⇒ R(−rot)·F  (rotation negates, axis toggles on)
+ *               F_layer = F ⇒ F·R(rot)·F = R(−rot) (rotation negates, axis
+ *               toggles off)
+ *               ⇒ rotation negates, the flipped axis toggles.
+ */
+export function composeD4Orientation(
+  rotation: number,
+  flip: { h: boolean; v: boolean },
+  operation: 'rotate_r' | 'rotate_l' | 'flip_h' | 'flip_v',
+): { rotation: number; flip: { h: boolean; v: boolean } } {
+  const normalize = (deg: number) => {
+    const r = ((deg % 360) + 360) % 360;
+    // Keep the [0,360) record canonical; 360 folds to 0.
+    return r === 360 ? 0 : r;
+  };
+  switch (operation) {
+    case 'rotate_r':
+      return { rotation: normalize(rotation + 90), flip };
+    case 'rotate_l':
+      return { rotation: normalize(rotation - 90), flip };
+    case 'flip_h':
+      return { rotation: normalize(-rotation), flip: { ...flip, h: !flip.h } };
+    case 'flip_v':
+      return { rotation: normalize(-rotation), flip: { ...flip, v: !flip.v } };
+  }
+}
+
+
+
+
+/**
+ * Optional draft-remap hook: pure-geometry operators stay draft-agnostic —
+ * the application layer (state/drafts glue) injects this so a viewport
+ * transform carries its drafts along in the same record rewrite.
+ */
+type RemapDrafts = (
+  drafts: Record<string, unknown> | undefined,
+  canvas: Dimensions,
+) => Record<string, unknown> | undefined;
+
+/**
+ * Execute artboard-level CANVAS TRANSFORM (rotation/flip): the whole document
+ * coordinate system changes — canvas resizes, camera re-bases, the clip box
+ * and the selection ride along, every layer pose moves by the D4 linear part,
+ * and the orientation record composes the operation EXACTLY (closed form via
+ * composeD4Orientation — no whole-degree decomposition rounding, which used
+ * to quantize fractional layer rotations on every transport round trip).
+ *
+ * Frame drafts travel with the pixels through the INJECTED remap hook: the
+ * operator itself knows nothing about the draft registry. Keys without a
+ * transform hook pass through verbatim — unknown drafts are never corrupted.
  */
 export function transformFrame(
   frame: Frame,
-  operation: 'rotate_r' | 'rotate_l' | 'flip_h' | 'flip_v'
-) {
+  operation: 'rotate_r' | 'rotate_l' | 'flip_h' | 'flip_v',
+  remapDrafts?: RemapDrafts,
+): Frame {
   let O: Matrix3x3;
   const isRotation = operation.startsWith('rotate');
   const oldW = frame.canvas.w;
@@ -307,16 +368,17 @@ export function transformFrame(
     default: return frame;
   }
 
+  // Layer-rewrite pass: every layer pose (and birthCenter anchor) moves by
+  // the D4 linear part O.
   const nextById: Record<string, typeof frame.layers.byId[string]> = {};
   frame.layers.order.forEach(id => {
     const l = frame.layers.byId[id];
-    const L_orient = getOrientationMatrix(l.rotation, l.flip);
-    const nextL_orient = O.multiply(L_orient);
-    const { rotation, flip } = decomposeMatrix(nextL_orient, l.rotation);
+    const { rotation, flip } = composeD4Orientation(l.rotation, l.flip, operation);
     const nextP = O.apply({ x: l.cx, y: l.cy });
 
-    // birthCenter records a world-space anchor; when the coordinate system itself
-    // rotates/flips (canvas transform), it must follow the same transformation as cx/cy.
+    // birthCenter records a world-space anchor; when the coordinate system
+    // itself rotates/flips (canvas transform), it must follow the same
+    // transformation as cx/cy.
     const nextBirthCenter = l.birthCenter
       ? (() => { const bp = O.apply({ x: l.birthCenter.cx, y: l.birthCenter.cy }); return { cx: bp.x, cy: bp.y }; })()
       : undefined;
@@ -350,39 +412,39 @@ export function transformFrame(
     camera: nextCamera,
     confinement: nextConfinement,
     canvasClipBox: { ...frame.canvasClipBox, rect: asLocalRect(nextCanvasCropBox) },
-    // Frame drafts travel with the pixels: every draft whose codec declares
-    // a viewport-transform hook is remapped through the same D4 operation
-    // (frame-local geometry must live in the SAME axes as the pixels). Keys
-    // without a hook pass through verbatim — unknown drafts are never
-    // corrupted by a viewport op. Same undo step as the pixels (the caller
-    // lands this whole patch in one updateFrame).
-    drafts: transformFrameDrafts(frame, operation),
+    drafts: remapDrafts?.(frame.drafts, frame.canvas) ?? frame.drafts,
   };
 }
 
 /**
- * Remaps every transformable draft in `frame.drafts` through the D4
- * operation, using the PRE-transform canvas as the mapping container (the
- * point maps above are expressed against the old dimensions). Returns the
- * input record untouched when no draft declares a transform hook.
+ * Pose-override view of the canvas straighten for ONE layer: the pivot map
+ * applied to (cx, cy) plus the additive rotation. This is the function the
+ * render engine calls per pointermove for the live drag preview; the
+ * materialization step rewrites the records through the IDENTICAL
+ * expressions the straighten materialization rewrites, so preview pixels ==
+ * materialized pixels bitwise, by construction.
+ *
+ * `pivot` is in top-left canvas coordinates; the pose space (canvas-center
+ * origin — getLayerLocalMatrix re-adds the canvas-center offset, and the ±90
+ * canvas transform likewise rotates poses about that origin) is entered inline by
+ * re-anchoring the pivot: mixing the two spaces shifts the pivot map by
+ * exactly half a canvas — "rotate about the center" vs "about the corner".
  */
-function transformFrameDrafts(
-  frame: Frame,
-  operation: 'rotate_r' | 'rotate_l' | 'flip_h' | 'flip_v',
-): Record<string, unknown> | undefined {
-  if (!frame.drafts) return undefined;
-  let next: Record<string, unknown> | null = null;
-  for (const [toolId, payload] of Object.entries(frame.drafts)) {
-    const codec = getFrameDraftCodec(toolId);
-    const transformed = codec?.transform && payload && typeof payload === 'object'
-      ? codec.transform(payload as never, { w: frame.canvas.w, h: frame.canvas.h }, operation)
-      : payload;
-    if (transformed !== payload) {
-      next ??= { ...frame.drafts };
-      next[toolId] = transformed;
-    }
-  }
-  return next ?? frame.drafts;
+export function rotatePoseAboutPivot(
+  layer: Pick<Layer, 'cx' | 'cy' | 'rotation'>,
+  pivot: Point2D,
+  canvas: Dimensions,
+  thetaDeg: number,
+): { cx: number; cy: number; rotation: number } {
+  const P = { x: pivot.x - canvas.w / 2, y: pivot.y - canvas.h / 2 };
+  const O = Matrix3x3.rotate(thetaDeg);
+  const dx = layer.cx - P.x;
+  const dy = layer.cy - P.y;
+  return {
+    cx: P.x + dx * O.a + dy * O.c,
+    cy: P.y + dx * O.b + dy * O.d,
+    rotation: layer.rotation + thetaDeg,
+  };
 }
 
 /**

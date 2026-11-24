@@ -21,6 +21,7 @@ import { useRef, useCallback } from 'react';
 import { useEditorServices, useEditorState } from '@opengpex/editor/core/context';
 import { useFastSync } from '@opengpex/editor/core/state/volatile';
 import { Motion } from '@opengpex/editor/core/motion';
+import { straightenPreviewPose } from '@opengpex/editor/core/state/volatile/straighten';
 import { Frame, CameraState, VolatileState, asLocalShape } from '@opengpex/editor/core/types';
 import { LayerUtils } from '@opengpex/editor/core/layer/utils';
 import { compensateCenterX, compensateCenterY, reanchorCompensationBase } from '../geometry';
@@ -74,7 +75,13 @@ export function useTextEditorFastSync(
     // rasterizer (painter2d wraps at the zoom-independent fontSize), breaking
     // WYSIWYG. So the combined matrix carries rotation + uniform scale together,
     // and the box origin (bounding top-left = local 0,0) lands at matrix.{tx,ty}.
-    const worldMatrix = geometry.transform.getLayerWorldMatrix(layer);
+    // Fold the live canvas-straighten preview pose in, so the editor box
+    // tracks the GPU preview pixels exactly (same expressions as the engine
+    // seam).
+    const worldMatrix = geometry.transform.getLayerWorldMatrix(
+      layer,
+      straightenPreviewPose(v.transient, layer, f.canvas),
+    );
     const viewMatrix = geometry.camera.getCameraMatrix(f, cam);
     const screenMatrix = viewMatrix.multiply(worldMatrix);
 
@@ -212,7 +219,7 @@ export function usePreEditFrameSync(
 ) {
   const { geometry } = useEditorServices();
 
-  useFastSync(boxRef, !!layerId, (_v: VolatileState, f: Frame, cam: CameraState) => {
+  useFastSync(boxRef, !!layerId, (v: VolatileState, f: Frame, cam: CameraState) => {
     const el = boxRef.current;
     if (!el || !layerId) return;
 
@@ -225,8 +232,13 @@ export function usePreEditFrameSync(
     // Project the bounding box through the layer's FULL world matrix (includes
     // layer.rotation/flip; canvas rotation is baked into the layer pose by
     // transformFrame without changing bounding.w/h) composed with the camera
-    // matrix — same pipeline as LayerOverlay and MarkerOverlay.
-    const worldMatrix = geometry.transform.getLayerWorldMatrix(layer);
+    // matrix — same pipeline as LayerOverlay and MarkerOverlay. The live
+    // canvas-straighten preview pose is folded in so the box tracks the GPU
+    // preview pixels exactly.
+    const worldMatrix = geometry.transform.getLayerWorldMatrix(
+      layer,
+      straightenPreviewPose(v.transient, layer, f.canvas),
+    );
     const viewMatrix = geometry.camera.getCameraMatrix(f, cam);
     const screenMatrix = viewMatrix.multiply(worldMatrix);
 

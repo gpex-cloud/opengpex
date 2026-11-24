@@ -20,6 +20,7 @@
 import { useEffect, useRef } from 'react';
 import { useEditorServices } from '@opengpex/editor/core/context';
 import { useFastSync } from '@opengpex/editor/core/state/volatile';
+import { straightenPreviewPointMap, straightenPreviewPose } from '@opengpex/editor/core/state/volatile/straighten';
 import type { CameraState, Frame, Layer, VolatileState } from '@opengpex/editor/core/types';
 import {
   composePenToolState,
@@ -65,11 +66,13 @@ export function usePenSurfaceSync(
   // seen even if the ticker still holds the previous callback identity.
   const outlineRef = useRef<boolean>(outlineOnly);
   const lastOutlineRef = useRef<boolean>(outlineOnly);
+  /** Last straighten-preview stamp seen by a rebuild (change key). */
+  const lastStraightenStampRef = useRef<string>('');
   // Effect (not render) write: react-hooks/refs forbids mutating refs during
   // render, and the ticker reads this on the following frame anyway.
   useEffect(() => { outlineRef.current = outlineOnly; }, [outlineOnly]);
 
-  useFastSync(containerRef, isActive, (_v: VolatileState, f: Frame, cam: CameraState) => {
+  useFastSync(containerRef, isActive, (v: VolatileState, f: Frame, cam: CameraState) => {
     const g = groupRef.current;
     if (!g) return;
     const outline = outlineRef.current;
@@ -87,15 +90,26 @@ export function usePenSurfaceSync(
 
     const workVersion = getPenWorkVersion();
     const selectionVersion = getPenSelectionVersion();
+    // A live canvas-straighten drag rotates committed layers through the
+    // volatile transient without touching any committed record — the surface
+    // must repaint on every preview step (the straighten stamp is part of
+    // the change key below).
+    const straighten = v.transient['straighten'] as
+      | { thetaDeg?: unknown; pivot?: { x?: unknown; y?: unknown } }
+      | undefined;
+    const straightenStamp = straighten && typeof straighten.thetaDeg === 'number'
+      ? `${straighten.thetaDeg.toFixed(4)}@${Number(straighten.pivot?.x).toFixed(2)},${Number(straighten.pivot?.y).toFixed(2)}`
+      : '';
     // The frame object changes identity whenever Redux commits anything on
     // it (a draft write, layer moves, visibility, penData patches) — all must
     // repaint the committed paths even though the module versions did not
     // move.
     const frameChanged = lastFrameRef.current !== f;
     lastFrameRef.current = f;
-    if (!camChanged && !frameChanged && !modeChanged && workVersion === lastWorkVersionRef.current && selectionVersion === lastSelectionRef.current) return;
+    if (!camChanged && !frameChanged && !modeChanged && workVersion === lastWorkVersionRef.current && selectionVersion === lastSelectionRef.current && straightenStamp === lastStraightenStampRef.current) return;
     lastWorkVersionRef.current = workVersion;
     lastSelectionRef.current = selectionVersion;
+    lastStraightenStampRef.current = straightenStamp;
 
     // Only structural changes and camera moves reach this ticker: the
     // rubber band follows the pointer directly in the pointermove listener
@@ -107,14 +121,20 @@ export function usePenSurfaceSync(
       collectCommittedPenLayers(f),
       cam,
       f,
-      (layer, frame) => geometry.transform.getLayerLocalMatrix(layer, frame),
+      (layer, frame) => geometry.transform.getLayerLocalMatrix(
+        layer,
+        frame,
+        straightenPreviewPose(v.transient, layer, frame.canvas),
+      ),
       outline ? null : getPenDraftSelection(),
       (path, map) => geometry.bezier.mapPathAnchors(path, map),
       outline,
+      straightenPreviewPointMap(v.transient),
     );
     if (outline) return;
     const tip = getPenRubberTip(toolState);
-    placePenRubberTip(tip ? canvasToScreen(tip, cam) : null);
+    const straightenMap = straightenPreviewPointMap(v.transient);
+    placePenRubberTip(tip ? canvasToScreen(straightenMap ? straightenMap(tip) : tip, cam) : null);
     refreshPenAnchorHover();
   }, { throttleHz: 60 });
 }

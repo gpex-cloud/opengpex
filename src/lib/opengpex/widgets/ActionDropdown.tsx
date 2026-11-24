@@ -62,6 +62,14 @@ interface ActionDropdownProps {
   maxVisibleItems?: number;
   /** Whether the menu width should match the trigger width. Default is false. */
   matchTriggerWidth?: boolean;
+  /**
+   * Optional measurement anchor overriding the trigger container. Compound
+   * controls (SplitButton) need this: a 'left'-aligned menu must anchor at
+   * the COMPOUND control's left edge (the primary button), not the chevron
+   * sub-trigger the dropdown is technically wrapped around. 'right' needs no
+   * override — the chevron's right edge IS the compound control's right edge.
+   */
+  anchorRef?: React.RefObject<HTMLElement | null>;
 }
 
 export default function ActionDropdown({
@@ -75,6 +83,7 @@ export default function ActionDropdown({
   direction = 'down',
   maxVisibleItems,
   matchTriggerWidth = false,
+  anchorRef,
 }: ActionDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [coords, setCoords] = useState({ top: 0, bottom: 0, left: 0, width: 0 });
@@ -101,8 +110,9 @@ export default function ActionDropdown({
   }, [isOpen]);
 
   const updateCoords = () => {
-    if (containerRef.current) {
-      const rect = containerRef.current.getBoundingClientRect();
+    const anchor = anchorRef?.current ?? containerRef.current;
+    if (anchor) {
+      const rect = anchor.getBoundingClientRect();
       setCoords({
         top: rect.bottom,
         bottom: rect.top,

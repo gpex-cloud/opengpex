@@ -57,6 +57,7 @@ import {
   computeFragmentCenter,
   computeLayerMovePose,
   isRotatedPose,
+  rotatePoseAboutPivot,
   transformFrame
 } from './operators/transform';
 import {
@@ -145,7 +146,13 @@ export function createGeometryService(): GeometryService {
         return asWorldPoint({ x: wm.tx, y: wm.ty });
       },
       decomposeMatrix: (matrix: IMatrix3x3, refRotation?: number) => decomposeMatrix(matrix, refRotation),
-      transformFrame: (frame: Frame, operation: 'rotate_r' | 'rotate_l' | 'flip_h' | 'flip_v') => transformFrame(frame, operation),
+      /** Pivot the canvas straighten turns about (effective clip rectangle center). */
+      transformFrame: (
+        frame: Frame,
+        operation: 'rotate_r' | 'rotate_l' | 'flip_h' | 'flip_v',
+        remapDrafts?: (drafts: Record<string, unknown> | undefined, canvas: { w: number; h: number }) => Record<string, unknown> | undefined,
+      ) => transformFrame(frame, operation, remapDrafts),
+      rotatePoseAboutPivot: (layer: Pick<Layer, 'cx' | 'cy' | 'rotation'>, pivot: Point2D, canvas: Dimensions, thetaDeg: number) => rotatePoseAboutPivot(layer, pivot, canvas, thetaDeg),
       computeFragmentCenter: (worldCenter: Point2D, visibleOffset: Point2D, rotation: number, flip: { h: boolean; v: boolean }) => computeFragmentCenter(worldCenter, visibleOffset, rotation, flip),
       computeLayerMovePose: (layer: Layer) => computeLayerMovePose(layer),
       normalizeAngle: (deg: number) => normalizeAngle(deg),

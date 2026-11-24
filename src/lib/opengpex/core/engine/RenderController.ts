@@ -67,6 +67,8 @@
  */
 
 import type { Frame, CameraState, Dimensions, TransformLayer, GeometryService, AssetService, BitmapMaskOverrideMap } from '@opengpex/editor/core/types';
+import { rotatePoseAboutPivot } from '@opengpex/editor/core/geometry/operators/transform';
+import { STRAIGHTEN_TRANSIENT_KEY, type StraightenPreviewPayload } from '@opengpex/editor/core/state/volatile/straighten';
 import { CHANNEL_MASK_RGB } from '@opengpex/editor/core/engine';
 import type { SceneChannelMask } from '@opengpex/editor/core/engine/pipeline/scene/Scene';
 import { PERF_MON } from '@opengpex/editor/core/helpers/config';
@@ -90,6 +92,22 @@ export interface RenderTickVolatile {
     readonly layers: Record<string, { mask?: BitmapMaskOverrideMap; useIncreComp?: boolean } | undefined>;
   };
   readonly transient: Record<string, unknown>;
+}
+
+
+/** Reads the live content-transform (free-angle straighten) drag payload from the fast-track
+ * transient store, or null when no straighten drag is in flight. */
+function readStraightenPreview(volatile: RenderTickVolatile): StraightenPreviewPayload | null {
+  const t = volatile.transient[STRAIGHTEN_TRANSIENT_KEY] as Partial<StraightenPreviewPayload> | undefined;
+  if (!t || typeof t.thetaDeg !== 'number' || !t.pivot
+    || typeof t.pivot.x !== 'number' || typeof t.pivot.y !== 'number') return null;
+  return { thetaDeg: t.thetaDeg, pivot: { x: t.pivot.x, y: t.pivot.y } };
+}
+
+/** Serializes the straighten preview into a cache/dirty stamp — a changed
+ * angle or pivot must never be served from a memo keyed without it. */
+function straightenStamp(s: StraightenPreviewPayload | null): string {
+  return s ? `${s.thetaDeg.toFixed(4)}@${s.pivot.x.toFixed(2)},${s.pivot.y.toFixed(2)}` : '';
 }
 
 /** Per-tick session inputs — everything the engine must not reach into on
@@ -159,6 +177,10 @@ export class RenderController {
   // notification at all and could render stale until some other dirty).
   private lastChannelMask: number | null = null;
   private lastAdaptiveDensity: boolean | null = null;
+  /** Per-tick snapshot of the straighten-preview stamp (see straightenStamp):
+   * a transient-only drag changes neither the frame nor the camera reference,
+   * so the stamp diff is what makes the preview repaint per pointermove. */
+  private lastStraightenKey = '';
 
   // ── [PERF_MON] rolling-window diagnostics (assemble vs render split) ──
   private lastTickTs = 0;
@@ -296,9 +318,15 @@ export class RenderController {
     const channelMask: SceneChannelMask =
       typeof input.channelMask === 'number' ? input.channelMask : CHANNEL_MASK_RGB;
 
+    // Canvas-straighten preview probe: resolve ONCE per tick, feed both the
+    // dirty diff and the pose-override seam below.
+    const straighten = readStraightenPreview(input.volatile);
+    const straightenKey = straightenStamp(straighten);
+
     const inputChanged =
       channelMask !== this.lastChannelMask ||
-      input.adaptiveDensity !== this.lastAdaptiveDensity;
+      input.adaptiveDensity !== this.lastAdaptiveDensity ||
+      straightenKey !== this.lastStraightenKey;
     const isDirty =
       this.needsRender || inputChanged || this.syncCanvasBuffer(input.canvas, input.viewportDim, input.dpr);
 
@@ -316,6 +344,7 @@ export class RenderController {
     this.lastCam = input.camera;
     this.lastChannelMask = channelMask;
     this.lastAdaptiveDensity = input.adaptiveDensity;
+    this.lastStraightenKey = straightenKey;
     this.needsRender = false;
 
     if (PERF_MON) assembleT0 = performance.now();
@@ -336,6 +365,9 @@ export class RenderController {
         colorSpace: WORKING_GAMUT,
         dirty: isDirty,
         animating: false,
+        // Straighten-preview stamp: every pointermove of a straighten drag
+        // changes the pose overrides WITHOUT a new layers reference.
+        straightenKey,
       },
       () =>
         SceneAssembler.buildContent({
@@ -349,6 +381,19 @@ export class RenderController {
           },
           // Live fragment-transform scale (LIVE-EDIT stamp discipline).
           getLayerPoseOverride: (layerId: string) => {
+            // Canvas-straighten preview FIRST: rotate the layer's committed
+            // pose about the drag pivot — the exact pivot map the release
+            // materialization applies to the records, so preview pixels ==
+            // materialized pixels by construction. Mutually exclusive with
+            // the fragment-scale gesture (edit gestures are soft-disabled
+            // during a straighten drag).
+            if (straighten && straighten.thetaDeg) {
+              const l = input.frame.layers.byId[layerId];
+              if (!l) return undefined;
+              // Same expressions the materialization rewrite runs — bitwise
+              // identical poses, so the hand-over cannot shift a pixel.
+              return rotatePoseAboutPivot(l, straighten.pivot, input.frame.canvas, straighten.thetaDeg);
+            }
             const t = input.volatile.transient['fragmentTransform'] as Partial<TransformLayer> | undefined;
             if (!t || t.layerId !== layerId || typeof t.scaleX !== 'number') return undefined;
             // Hand-over guard: once the bake lands the layer on its new

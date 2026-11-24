@@ -105,6 +105,12 @@ export function buildPenOverlaySvg(
   /** The L0 anchor-map op (handles re-basing) — injected by the caller. */
   mapPathAnchors?: (path: PenPathData, map: PointMap) => PenPathData,
   outlineOnly = false,
+  /**
+   * Live canvas-straighten preview map for CANVAS-LOCAL points (the draft
+   * is not a layer pose, so it must be mapped explicitly). Null/undefined =
+   * no drag in flight — identity.
+   */
+  draftPreviewMap?: PointMap | null,
 ): string {
   const mapOps = mapPathAnchors ?? ((path: PenPathData, map: PointMap) => ({
     paths: path.paths.map((sub) => ({
@@ -151,12 +157,18 @@ export function buildPenOverlaySvg(
 
   // ── Draft (canvas-local): in edit mode every anchor with its handles and
   //    the selected draft anchor solid; in outline mode just the path lines
-  //    (the Work Path read — visible, not advertised as editable).
+  //    (the Work Path read — visible, not advertised as editable). The draft
+  //    is NOT a layer, so a live canvas-straighten preview must map its
+  //    points explicitly through the same pivot map the materialization's
+  //    codec hook applies on release.
+  const draftToView: PointMap = draftPreviewMap
+    ? (p) => canvasToView(draftPreviewMap(p))
+    : canvasToView;
   if (state.draft) {
     for (let pi = 0; pi < state.draft.subpaths.length; pi++) {
       const sub = state.draft.subpaths[pi];
       if (sub.anchors.length === 0) continue;
-      const d = penPathToSvgD({ paths: [mapOps({ paths: [sub] }, canvasToView).paths[0]] });
+      const d = penPathToSvgD({ paths: [mapOps({ paths: [sub] }, draftToView).paths[0]] });
       if (!d) continue;
       if (outlineOnly) {
         svg += pathGraphic(d, sub.closed ? FILL : 'none');
@@ -166,8 +178,8 @@ export function buildPenOverlaySvg(
       for (let ai = 0; ai < sub.anchors.length; ai++) {
         const a = sub.anchors[ai];
         const isSel = !!draftSelected && draftSelected.pathIdx === pi && draftSelected.anchorIdx === ai;
-        svg += handleGraphics(a, canvasToView, isSel, `d:${pi}:${ai}`);
-        svg += anchorSquare(canvasToView(a), isSel, `d:${pi}:${ai}`);
+        svg += handleGraphics(a, draftToView, isSel, `d:${pi}:${ai}`);
+        svg += anchorSquare(draftToView(a), isSel, `d:${pi}:${ai}`);
       }
     }
   }

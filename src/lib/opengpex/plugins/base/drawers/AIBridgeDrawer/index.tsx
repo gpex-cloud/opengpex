@@ -79,7 +79,7 @@ export const plugin: EditorPlugin = {
       component: AIBridgeSettings,
       title: "AI Bridge Keys",
       icon: <Key size={12} />,
-      order: 320,
+      order: 532,
     },
     {
       slot: "DOCK_ACTIONS",

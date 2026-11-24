@@ -552,6 +552,7 @@ export function useEditorStore() {
             flipH: advRef(P.ADV_VIEWPORT_FLIP_H, () => executeCommand(P.ADV_VIEWPORT_FLIP_H)),
             flipV: advRef(P.ADV_VIEWPORT_FLIP_V, () => executeCommand(P.ADV_VIEWPORT_FLIP_V)),
             reset: advRef(P.ADV_VIEWPORT_RESET, () => executeCommand(P.ADV_VIEWPORT_RESET)),
+            straighten: advRef(P.ADV_VIEWPORT_STRAIGHTEN, (payload: { thetaDeg: number }) => executeCommand(P.ADV_VIEWPORT_STRAIGHTEN, payload)),
           },
           translate: {
             fit: advRef(P.ADV_VIEWPORT_FIT, () => executeCommand(P.ADV_VIEWPORT_FIT)),

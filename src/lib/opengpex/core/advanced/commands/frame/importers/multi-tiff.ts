@@ -148,7 +148,10 @@ async function rebuildOnePage(
   });
   const expandedLayers = LayerFactory.expandLayers([baseLayer]);
 
-  // 5. Commit in-place (no history reset / HUD — owned by the outer loop)
+  // 5. Commit in-place (no history reset / HUD — owned by the outer loop).
+  //    Revert restores the ORIGINAL import state: drafts cleared (pen work
+  //    path belongs to the discarded edits), straighten history counter
+  //    zeroed (rebuilt poses are upright), tiff group identity preserved.
   actions.updateFrame(frameId, {
     layers: { byId: Object.fromEntries(expandedLayers.map(l => [l.id, l])), order: expandedLayers.map(l => l.id) },
     activeLayerId: baseLayer.id,
@@ -157,6 +160,11 @@ async function rebuildOnePage(
     canvasClipBox,
     metadata,
     confinement: null,
+    drafts: {},
+    extra: {
+      ...((ctx.state.frames.byId[frameId]?.extra ?? {}) as Record<string, unknown>),
+      straightenTotalDeg: 0,
+    },
   });
 }
 

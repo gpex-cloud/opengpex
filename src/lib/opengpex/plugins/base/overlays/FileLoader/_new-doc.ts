@@ -55,7 +55,7 @@ export type BlankCanvasSizeVerdict =
   | { ok: false; reason: string };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// Naming — `creation-{ran}`, random base36, regenerate on collision
+// Naming — `new-creation-{ran}`, random base36, regenerate on collision
 // ═══════════════════════════════════════════════════════════════════════════════
 
 const NAME_CHARSET = 'abcdefghijklmnopqrstuvwxyz0123456789';
@@ -71,7 +71,7 @@ function randomSuffix(): string {
 }
 
 /**
- * Generate a collision-free `creation-{ran}` frame name. Deliberately random
+ * Generate a collision-free `new-creation-{ran}` frame name. Deliberately random
  * rather than index-incrementing: no order bookkeeping, and parallel sessions
  * cannot race on a counter.
  *
@@ -80,7 +80,7 @@ function randomSuffix(): string {
 export function generateCreationName(existingNames: Iterable<string>): string {
   const taken = new Set(existingNames);
   for (let attempt = 0; attempt < 64; attempt++) {
-    const candidate = `creation-${randomSuffix()}`;
+    const candidate = `new-creation-${randomSuffix()}`;
     if (!taken.has(candidate)) return candidate;
   }
   // 64 collisions on a ≥36^6 space means something is deeply wrong (all names

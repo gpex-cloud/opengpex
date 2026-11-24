@@ -59,8 +59,12 @@ const BACKGROUNDS: Array<{ label: string; value: BackgroundPreset }> = [
  * Size presets: one tap fills size + unit + DPI, everything else stays. The
  * active chip is derived from the current fields, so any manual edit simply
  * drops the highlight instead of fighting the user.
+ *
+ * The `clipboard` pseudo-preset is not part of the static table: it only
+ * exists while the system clipboard held an image when the dialog opened,
+ * and its dimensions come from the clipboard snapshot (see the read effect).
  */
-type SizePresetId = 'fhd' | '4k' | 'mobile' | 'a4' | 'letter';
+type SizePresetId = 'clipboard' | 'fhd' | '4k' | 'mobile' | 'a4' | 'letter';
 interface SizePreset { id: SizePresetId; label: string; w: number; h: number; unit: BlankSizeUnit; dpi: number }
 const SIZE_PRESETS: SizePreset[] = [
   // Generic 9:16 portrait baseline (the dialog default); real handsets differ
@@ -68,10 +72,47 @@ const SIZE_PRESETS: SizePreset[] = [
   { id: 'mobile', label: 'Mobile', w: 1080, h: 1920, unit: 'px', dpi: 72 },
   { id: 'fhd', label: 'FHD', w: 1920, h: 1080, unit: 'px', dpi: 72 },
   { id: '4k', label: '4K', w: 3840, h: 2160, unit: 'px', dpi: 72 },
-  { id: 'a4', label: 'A4', w: 210, h: 297, unit: 'mm', dpi: 300 },
   { id: 'letter', label: 'Letter', w: 8.5, h: 11, unit: 'in', dpi: 300 },
+  { id: 'a4', label: 'A4', w: 210, h: 297, unit: 'mm', dpi: 300 },
 ];
 const SIZE_PRESET_OPTIONS: Array<{ label: string; value: SizePresetId }> = SIZE_PRESETS.map((p) => ({ label: p.label, value: p.id }));
+
+/** Pixel dimensions of the image found on the system clipboard, if any. */
+interface ClipboardImageSize { w: number; h: number }
+
+/**
+ * Resolve the clipboard snapshot to pixel dimensions. An in-app Copy carries
+ * layer metadata whose visible shape IS the taken fragment's exact pixel
+ * bounds — read it directly, no decode. Anything else (screenshot, file
+ * copied in Finder, image from another app) only exists as a blob, so its
+ * size costs one decode. Returns null when the clipboard holds no usable
+ * image or the browser refuses the read (permission denied / unsupported).
+ */
+async function readClipboardImageSize(clipboard: { read: (e?: ClipboardEvent) => Promise<{ metadata?: { layer?: { type?: string; visibleShape?: { rect?: { w: number; h: number } } } } | null; blob?: Blob | null } | null> }): Promise<ClipboardImageSize | null> {
+  let res: Awaited<ReturnType<typeof clipboard.read>>;
+  try {
+    res = await clipboard.read();
+  } catch {
+    // Permission denied (user declined the prompt) or API unavailable
+    // (Firefox has no navigator.clipboard.read) — no Clipboard preset.
+    return null;
+  }
+  if (!res) return null;
+  const layer = res.metadata?.layer;
+  const rect = layer?.type === 'image' ? layer.visibleShape?.rect : undefined;
+  if (rect && rect.w > 0 && rect.h > 0) return { w: rect.w, h: rect.h };
+  if (res.blob) {
+    try {
+      const bitmap = await createImageBitmap(res.blob);
+      const size = { w: bitmap.width, h: bitmap.height };
+      bitmap.close();
+      return size;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
 
 const GAMUTS: Array<{ label: string; value: BlankGamut }> = [
   { label: 'sRGB', value: 'srgb' },
@@ -128,7 +169,7 @@ interface NewDocumentModalProps {
  */
 export function NewDocumentModal({ isVisible, onCancel }: NewDocumentModalProps) {
   const { state } = useEditorState();
-  const { pixels } = useEditorServices();
+  const { pixels, clipboard } = useEditorServices();
   const { createBlankCmd } = usePluginCommands<FileLoaderCommandsMap>();
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -152,6 +193,15 @@ export function NewDocumentModal({ isVisible, onCancel }: NewDocumentModalProps)
   const [bitDepth, setBitDepth] = useState<8 | 16>(8);
   const [name, setName] = useState('');
 
+  // ── Clipboard preset probe ──
+  // The Preset row stays invisible until the clipboard read settles, so the
+  // row appears complete in one frame instead of growing a chip after the
+  // fact. `clipboardSize` feeds the (only-when-present) Clipboard preset.
+  const [presetsReady, setPresetsReady] = useState(false);
+  const [clipboardSize, setClipboardSize] = useState<ClipboardImageSize | null>(null);
+  /** First manual size edit wins over the late clipboard default. */
+  const sizeTouchedRef = useRef(false);
+
   if (isVisible !== prevIsVisible) {
     setPrevIsVisible(isVisible);
     if (isVisible) {
@@ -164,9 +214,32 @@ export function NewDocumentModal({ isVisible, onCancel }: NewDocumentModalProps)
       setCustomHex(DEFAULT_CUSTOM_HEX);
       setGamut('display-p3');
       setBitDepth(8);
+      setPresetsReady(false);
+      setClipboardSize(null);
       setName(generateCreationName(state.frames.order.map((id) => state.frames.byId[id]?.name ?? '')));
     }
   }
+
+  useEffect(() => {
+    if (!isVisible) return;
+    let cancelled = false;
+    sizeTouchedRef.current = false;
+    readClipboardImageSize(clipboard).then((size) => {
+      if (cancelled) return;
+      setClipboardSize(size);
+      setPresetsReady(true);
+      // Seed the size fields with the clipboard dimensions only while the
+      // user has not expressed their own choice yet; otherwise the probe
+      // result just becomes an extra preset chip.
+      if (size && !sizeTouchedRef.current) {
+        setUnit('px');
+        setDpi(DEFAULT_DPI);
+        setWidthValue(size.w);
+        setHeightValue(size.h);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [isVisible, clipboard]);
 
   useEffect(() => {
     if (isVisible) {
@@ -227,9 +300,25 @@ export function NewDocumentModal({ isVisible, onCancel }: NewDocumentModalProps)
   const nameError = !trimmedName ? 'Name cannot be empty.' : nameTaken ? 'A document with this name already exists.' : null;
   const canCreate = verdict.ok && !nameError && !!createBlankCmd;
 
+  const presetOptions: Array<{ label: string; value: SizePresetId }> = clipboardSize
+    ? [...SIZE_PRESET_OPTIONS, { label: 'Clipboard', value: 'clipboard' as const }]
+    : SIZE_PRESET_OPTIONS;
   const activePreset: SizePresetId | '' =
-    SIZE_PRESETS.find((p) => p.unit === unit && p.dpi === dpi && p.w === widthValue && p.h === heightValue)?.id ?? '';
+    (clipboardSize && unit === 'px' && dpi === DEFAULT_DPI
+      && clipboardSize.w === widthValue && clipboardSize.h === heightValue)
+      ? 'clipboard'
+      : SIZE_PRESETS.find((p) => p.unit === unit && p.dpi === dpi && p.w === widthValue && p.h === heightValue)?.id ?? '';
+  const isClipboardActive = activePreset === 'clipboard';
   const applyPreset = (id: SizePresetId) => {
+    sizeTouchedRef.current = true;
+    if (id === 'clipboard') {
+      if (!clipboardSize) return;
+      setUnit('px');
+      setDpi(DEFAULT_DPI);
+      setWidthValue(clipboardSize.w);
+      setHeightValue(clipboardSize.h);
+      return;
+    }
     const p = SIZE_PRESETS.find((x) => x.id === id);
     if (!p) return;
     setUnit(p.unit);
@@ -240,6 +329,7 @@ export function NewDocumentModal({ isVisible, onCancel }: NewDocumentModalProps)
 
   const isPortrait = heightPx > widthPx;
   const swapOrientation = () => {
+    sizeTouchedRef.current = true;
     setWidthValue(heightValue);
     setHeightValue(widthValue);
   };
@@ -247,6 +337,7 @@ export function NewDocumentModal({ isVisible, onCancel }: NewDocumentModalProps)
   const handleUnitChange = (next: BlankSizeUnit) => {
     if (next === unit) return;
     // Keep the pixel size constant across the unit switch; the field just re-expresses it.
+    sizeTouchedRef.current = true;
     setWidthValue(pixelsToUnit(widthPx, next, dpi));
     setHeightValue(pixelsToUnit(heightPx, next, dpi));
     setUnit(next);
@@ -314,13 +405,17 @@ export function NewDocumentModal({ isVisible, onCancel }: NewDocumentModalProps)
             />
           </div>
 
-          {/* Presets */}
-          <div className="flex items-center gap-2">
+          {/* Presets: held invisible (same footprint) until the clipboard
+              probe settles, so the row never grows a chip after the fact. */}
+          <div className={`flex items-center gap-2 ${presetsReady ? '' : 'opacity-0'}`}>
             <FieldLabel>Preset</FieldLabel>
             <FunctionTabs<SizePresetId | ''> forModal
-              options={SIZE_PRESET_OPTIONS}
+              options={presetOptions}
               value={activePreset}
               onChange={(v) => { if (v) applyPreset(v); }}
+              // Amber marks the clipboard-derived size (matches the export
+              // panel's tone semantics: the value deviates from the presets).
+              activeTone={isClipboardActive ? 'amber' : 'default'}
               size="sm"
               className="flex-1"
             />
@@ -335,18 +430,18 @@ export function NewDocumentModal({ isVisible, onCancel }: NewDocumentModalProps)
                 label="W"
                 type="number"
                 value={widthValue}
-                onChange={setWidthValue}
+                onChange={(v) => { sizeTouchedRef.current = true; setWidthValue(v); }}
                 suffix={unitSuffix}
-                className="flex-1"
+                className={`flex-1 ${isClipboardActive ? '[&_input]:text-amber-600 dark:[&_input]:text-amber-400' : ''}`}
               />
               <span className="text-[var(--text-muted)] text-[10px]">×</span>
               <ComboInput<number>
                 label="H"
                 type="number"
                 value={heightValue}
-                onChange={setHeightValue}
+                onChange={(v) => { sizeTouchedRef.current = true; setHeightValue(v); }}
                 suffix={unitSuffix}
-                className="flex-1"
+                className={`flex-1 ${isClipboardActive ? '[&_input]:text-amber-600 dark:[&_input]:text-amber-400' : ''}`}
               />
               {/* DPI dropdown rendered in-container: the portal variant sits at
                   portal variant sits at z-index 1100 inside the popup root,

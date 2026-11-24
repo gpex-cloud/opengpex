@@ -21,6 +21,7 @@
 
 import { useCallback } from 'react';
 import { useEditorServices } from '@opengpex/editor/core/context';
+import { straightenPreviewPose } from '@opengpex/editor/core/state/volatile/straighten';
 import type { CameraState, Frame, ScreenRotationBox, VolatileState } from '@opengpex/editor/core/types';
 
 /**
@@ -41,7 +42,7 @@ export function usePenHudAnchor(layerId: string | null) {
   const { geometry } = useEditorServices();
 
   const getAnchorFrame = useCallback((
-    _v: VolatileState,
+    v: VolatileState,
     f: Frame,
     cam: CameraState,
   ): ScreenRotationBox | null => {
@@ -50,7 +51,12 @@ export function usePenHudAnchor(layerId: string | null) {
     if (!layer || layer.type !== 'vector' || !layer.penData) return null;
     if (layer.role && layer.role !== 'host') return null;
 
-    const worldMatrix = geometry.transform.getLayerWorldMatrix(layer);
+    // Fold the live canvas-straighten preview pose in so the HUD tracks
+    // the GPU preview pixels exactly (same expressions as the engine seam).
+    const worldMatrix = geometry.transform.getLayerWorldMatrix(
+      layer,
+      straightenPreviewPose(v.transient, layer, f.canvas),
+    );
     const viewMatrix = geometry.camera.getCameraMatrix(f, cam);
     const matrix = {
       ...viewMatrix.multiply(worldMatrix),

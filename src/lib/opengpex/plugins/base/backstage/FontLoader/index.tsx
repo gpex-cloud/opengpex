@@ -73,7 +73,7 @@ export const plugin: EditorPlugin = {
       component: FontSettings,
       title: "Fonts",
       icon: <Type size={12} />,
-      order: 300,
+      order: 420,
     },
   ] },
 };

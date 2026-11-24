@@ -29,6 +29,7 @@ import { presets } from '@opengpex/editor/core/helpers/preferences';
 const VIEWPORT_FIT_PADDING = presets.get('VIEWPORT_FIT_PADDING');
 import type { DecodeResult } from '@opengpex/editor/core/files/types';
 import type { ImportOptions } from './_types';
+import { newFrameId } from '../_naming';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // buildGifFrameContent — Pure GIF content builder (shared by import + revert)
@@ -238,7 +239,7 @@ export async function importAnimatedGif(
   // 4. Assemble and add frame
   const frameName = file.name.replace(/\.[^.]+$/, '');
   const frame = LayerFactory.getNewFrame({
-    id: `f-${Date.now().toString(36)}-trunk`,
+    id: newFrameId(false),
     name: frameName || file.name,
     source: file.name,
     canvas: content.canvas,

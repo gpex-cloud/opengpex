@@ -120,7 +120,7 @@ export const plugin: EditorPlugin = {
       component: AIToolsSettings,
       title: "AI Tools",
       icon: <Cpu size={12} />,
-      order: 310,
+      order: 531,
     },
   ] },
 };

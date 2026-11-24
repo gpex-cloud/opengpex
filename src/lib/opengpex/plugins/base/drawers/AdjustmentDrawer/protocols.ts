@@ -144,6 +144,9 @@ export const CMD_OPEN_COLOR_BALANCE = 'cmd.open_color_balance';
 /** Open drawer and switch to Channel Mixer panel (Cmd+Shift+X / Ctrl+Shift+X). */
 export const CMD_OPEN_MIXER = 'cmd.open_mixer';
 
+/** Open the global Settings panel focused on this drawer's settings tab. */
+export const CMD_OPEN_SETTINGS = 'cmd.open_settings';
+
 // ─── Curves commands ──────────────────────────────────────────────────
 //
 // `beginCurvesEdit` is the Undo checkpoint (undoable command with empty body,
@@ -365,8 +368,9 @@ export type ActiveGradingTool = GradingTool;
  * open the drawer to make a photo look better with ONE click, so the preset
  * grid fronts the drawer. Manual panels (basic/curves/levels/...) remain one
  * header-icon away for pixel-precise tonal control. Previously `'basic'`
- * (Photoshop / Lightroom onboarding convention) — the persisted
- * `pluginConfig.lastTool` still round-trips whatever the user last picked.
+ * (Photoshop / Lightroom onboarding convention). Users who prefer landing on
+ * the manual Basic panel can flip the `openWithBasic` preference in the
+ * drawer's settings (gear button in the header).
  */
 export const DEFAULT_GRADING_TOOL: GradingTool = 'presets';
 
@@ -374,13 +378,17 @@ export const DEFAULT_GRADING_TOOL: GradingTool = 'presets';
 /**
  * Plugin-local pluginConfig storage.
  *
- * We persist the last-picked tool per user, so re-opening the drawer restores
- * their preferred workspace (Photoshop / Lightroom convention). Actual grading
- * state lives on the Layer (`layer.curves / .levels / .channelMix`), NOT here.
+ * Persisted user preferences for the drawer (via `pluginConfig`). Actual
+ * grading state lives on the Layer (`layer.curves / .levels / .channelMix`),
+ * NOT here.
  */
 export interface AdjustmentDrawerConfig {
-  /** Remembered sub-panel across sessions (persisted via `pluginConfig`). */
-  lastTool?: GradingTool;
+  /**
+   * When true, the drawer opens on the manual Basic panel instead of the
+   * Presets (filter) wall. Default false — the one-click filter wall stays
+   * the entry surface. Editable from the drawer's settings panel.
+   */
+  openWithBasic?: boolean;
   /**
    * User-saved filter presets ("save current look"). Persists via
    * `pluginConfig` so saved looks survive editor reloads. Capped at

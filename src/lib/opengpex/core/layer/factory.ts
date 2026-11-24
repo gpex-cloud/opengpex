@@ -85,7 +85,10 @@ export const LayerFactory = {
    * Standardizes the initial structure and default state of the artboard.
    */
   getNewFrame(patch: Partial<Frame>): Frame {
-    const id = patch.id || `f-${Date.now().toString(36)}`;
+    // Random suffix mandatory: callers may create frames in a tight loop and
+    // a bare millisecond timestamp collides (duplicate ids corrupt id-keyed
+    // state and trip React duplicate keys).
+    const id = patch.id || `f-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 
     // NO `bitDepth` / `colorSpace` defaults here. Colour and depth are
     // per-ASSET truth (`StoredAsset.colorIdentity`), resolved by `SceneAssembler`
