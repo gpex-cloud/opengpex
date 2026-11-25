@@ -97,6 +97,16 @@ export const ADV_LAYER_BITMAP_MASK_CLEAR = 'adv.layer.bitmapMask.clear_all';
 export const ADV_LAYER_ADJUST_MASK_TOGGLE = 'adv.layer.adjustMask.toggle';
 export const ADV_LAYER_ADJUST_MASK_REMOVE = 'adv.layer.adjustMask.remove';
 
+// Layer render effects (A8) — toggle one chain entry's enabled flag. This is
+// the ONLY effect command in the adv namespace: it mutates document state
+// (the chain), so it belongs here like its mask siblings. The effects
+// drawer's OTHER commands stay plugin-owned — they drive the drawer's gesture
+// session (begin/fast/commit), and `openEffectInstancePanel` is pure UI
+// routing (pushes the
+// drawer onto activeSidebarIds + sets a signal), which cannot be an adv
+// command; those dispatch by protocol id through actions.executeCommand.
+export const ADV_LAYER_EFFECT_TOGGLE = 'adv.layer.effect.toggle';
+
 // 5. Irregular Selection (lasso / wand / AI matting → polygon → bitmap mask)
 //
 // Note: there is intentionally NO `set` / `clear` adv command

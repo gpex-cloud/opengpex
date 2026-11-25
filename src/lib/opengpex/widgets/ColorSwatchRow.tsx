@@ -47,19 +47,22 @@ type ColorSwatchRowBinding =
 const ColorSwatchRow = React.memo(function ColorSwatchRow(props: {
   label: string;
   labelClassName?: string;
+  /** Optional row container className; defaults to `'px-1'` for legacy callers. */
+  className?: string;
   /** Declare only when the row sits inside a modal dialog (the picker popover renders above it). */
   forModal?: boolean;
 } & ColorSwatchRowBinding) {
   const {
     label,
     labelClassName = 'text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-20 shrink-0',
+    className = 'px-1',
   } = props;
   const [open, setOpen] = useState(false);
   const swatchCss = props.value ? toCssColor4(props.value) : props.color;
   const hexLabel = props.value ? props.value.hex : props.color;
 
   return (
-    <div className="flex items-center gap-2 px-1">
+    <div className={`flex items-center gap-2 ${className}`}>
       <span className={labelClassName}>{label}</span>
       <Popover
         isOpen={open}

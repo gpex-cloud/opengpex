@@ -35,6 +35,7 @@ import {
   PenTool,
   Maximize2,
   Image as ImageIcon,
+  Sparkles,
 } from "lucide-react";
 import { useEditorServices, usePluginCommands } from "@opengpex/editor/core/context";
 import { ADV_LAYER_MERGE_BACK, ADV_LAYER_MERGE_RASTERIZE } from "@opengpex/editor/core/advanced/protocols";
@@ -58,6 +59,12 @@ interface LayerMenuProps {
   setIsSubLayersExpanded: (v: boolean) => void;
   isMasksExpanded: boolean;
   setIsMasksExpanded: (v: boolean) => void;
+  /** Whether this layer carries effect instances (gates the toggle) */
+  hasEffects?: boolean;
+  /** Effect instance count, for the menu description */
+  effectsLength?: number;
+  isEffectsExpanded?: boolean;
+  setIsEffectsExpanded?: (v: boolean) => void;
   /** Whether this layer can be merged back to its source (is a cut fragment with sourceLayerId + assocMaskId) */
   canMergeBack?: boolean;
   /** Whether this layer has fragments that can be merged back (hole masks whose fragment still exists) */
@@ -88,6 +95,10 @@ export const LayerMenu = React.memo(
     setIsSubLayersExpanded,
     isMasksExpanded,
     setIsMasksExpanded,
+    hasEffects,
+    effectsLength,
+    isEffectsExpanded,
+    setIsEffectsExpanded,
     canMergeBack,
     canMergeBackAll,
     canRasterize,
@@ -130,6 +141,15 @@ export const LayerMenu = React.memo(
         value: isMasksExpanded ? "close-masks" : "open-masks",
         icon: <VenetianMask size={12} />,
         description: `(${masksLength})`,
+      });
+    }
+
+    if (hasEffects) {
+      options.push({
+        label: isEffectsExpanded ? "Hide Effects" : "Show Effects",
+        value: isEffectsExpanded ? "close-effects" : "open-effects",
+        icon: <Sparkles size={12} />,
+        description: `(${effectsLength ?? 0})`,
       });
     }
 
@@ -225,6 +245,10 @@ export const LayerMenu = React.memo(
         setIsMasksExpanded(true);
       } else if (val === "close-masks") {
         setIsMasksExpanded(false);
+      } else if (val === "open-effects") {
+        setIsEffectsExpanded?.(true);
+      } else if (val === "close-effects") {
+        setIsEffectsExpanded?.(false);
       } else if (val === "merge-back" || val === "merge-all-fragments") {
         // Both actions dispatch the same unified mergeBack command —
         // the command auto-detects fragment vs source role based on layer metadata.

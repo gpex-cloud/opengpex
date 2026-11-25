@@ -108,13 +108,22 @@ export interface DrawLayerParams {
    * this sub-rect of the source, so `uvRect` shifts by its origin (see
    * `resolveLayerGeometry`). Undefined → content-aligned with the full source.
    */
-  readonly contentWindow?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+  readonly contentWindow?: {
+    readonly x: number;
+    readonly y: number;
+    readonly w: number;
+    readonly h: number;
+    /** Producer-stamped coordinate space: 'asset' texels or 'content-local' logical px. */
+    readonly basis?: 'asset' | 'content-local';
+  };
   /**
    * `contentWindow` extends beyond the source asset (alphaFeather's unclamped
    * feather ring) — the drawn quad covers the WHOLE window so the feathered
    * ring outside the crop is visible (see `resolveLayerGeometry`).
    */
   readonly expandQuadToWindow?: boolean;
+  /** True when prepass already baked bmask+vmask into alpha; skip compositor mask evaluation. */
+  readonly maskFree?: boolean;
   /**
    * The `texture` already holds LINEAR light because the pipeline produced it
    * (`AdjustPrePass` bake and/or `FilterPass` output), regardless of the original
@@ -297,7 +306,9 @@ export class CompositePass {
     ctx: CompositePassContext,
     params: DrawLayerParams,
   ): void {
-    const { layer, texture, maskTexture, vmaskTexture, isBottomOpaque } = params;
+    const { layer, texture, isBottomOpaque } = params;
+    const maskTexture = params.maskFree ? undefined : params.maskTexture;
+    const vmaskTexture = params.maskFree ? undefined : params.vmaskTexture;
 
     let flags = 0;
     if (maskTexture) flags |= LAYER_FLAG_HAS_MASK;
@@ -341,6 +352,10 @@ export class CompositePass {
       resolveLayerDprScale(layer, texture.width, params.vectorTransient),
       params.contentWindow,
       params.expandQuadToWindow === true,
+      // The window's reporting basis is producer-stamped: 'asset' windows
+      // convert to logical px through dprScale, 'content-local' windows
+      // (vector/solid effect transients) are already logical.
+      params.contentWindow?.basis ?? 'asset',
     );
 
     // ⚠️ POT-BUCKET UV FIX: `resolveLayerGeometry` computes UVs in CONTENT-relative
@@ -358,7 +373,14 @@ export class CompositePass {
 
     // Resolve the vmask uniform triple (analytic → SDF params; polygon →
     // just the HAS_TEX bit, invert/hard already baked into vmaskTexture).
-    const vmaskU = resolveVmaskUniform(layer.vmask, contentWidth, contentHeight, !!vmaskTexture, params.vmaskWindow);
+    // Mask-free prepass outputs skip vmask completely (already baked in).
+    const vmaskU = resolveVmaskUniform(
+      params.maskFree ? undefined : layer.vmask,
+      contentWidth,
+      contentHeight,
+      !!vmaskTexture,
+      params.vmaskWindow,
+    );
 
     // 1. Pack uniforms
     packLayerUniforms(

@@ -257,6 +257,17 @@ export function prepareVectorSources(
     vectorPass.end();
 
     // The strategy resolved colour AND domain: straight-alpha working-gamut linear light.
+    // The transient covers the layer's FULL logical extent with its origin at
+    // texel (0,0), so the visible content is the crop sub-rect scaled by the
+    // transient's texels-per-logical density (full texture when there is no
+    // crop). Declared HERE in transient texels — the effect prepass rings this
+    // rect and never re-derives crop semantics itself. Same density formula the
+    // effect prepass derives (`texture.width / logical width`), so the two
+    // stages cannot drift.
+    const vectorDensity = reqW / Math.max(1, layer.width ?? reqW);
+    const vectorContentRect = layer.crop
+      ? { x: layer.crop.x * vectorDensity, y: layer.crop.y * vectorDensity, w: layer.crop.w * vectorDensity, h: layer.crop.h * vectorDensity }
+      : { x: 0, y: 0, w: transient.width, h: transient.height };
     const vectorSource: PreparedSource = {
       texture: transient,
       suppressAdjust: false,
@@ -264,6 +275,7 @@ export function prepareVectorSources(
       sourceIsLinear: true,
       sourceIsWorkingGamut: true,
       sourceIntentApplied: true,
+      contentRectInTexture: vectorContentRect,
     };
 
     if (!filtered) {

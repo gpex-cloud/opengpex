@@ -265,6 +265,14 @@ export interface EditorActions {
         toggle: AdvCommandRef<{ frameId?: string; layerId: string; maskId: string }>;
         remove: AdvCommandRef<{ frameId?: string; layerId: string; maskId: string }>;
       };
+      // Layer render effects (A8). Only the chain toggle lives here — it
+      // mutates document state. The effects drawer's openEffectInstancePanel
+      // routing command
+      // is plugin-owned and dispatches by protocol id through
+      // actions.executeCommand (see ADV_LAYER_EFFECT_TOGGLE's note).
+      effect: {
+        toggle: AdvCommandRef<{ frameId?: string; layerId: string; instanceId: string; enabled: boolean }>;
+      };
       merge: {
         down: AdvCommandRef;
         visible: AdvCommandRef;

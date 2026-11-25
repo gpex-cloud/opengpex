@@ -229,6 +229,92 @@ export interface AdjustmentMask {
 /** Hard per-layer cap on adjustment masks (product decision, not a performance limit). */
 export const MAX_ADJUSTMENT_MASKS_PER_LAYER = 16;
 
+// ─── Layer render effects (A8) ───────────────────────────────────────────────
+
+/** Supported render-effect categories. First release ships stroke + shadow; the chain model admits future categories (glow / inner shadow / overlay / bevel) without migration. */
+export type EffectCategory = 'stroke' | 'shadow';
+
+/**
+ * Outward stroke parameters. The first release renders OUTWARD strokes only
+ * (95% use case per product adjudication): the line is drawn outside the
+ * content alpha, so the source pixels are never eaten. No `position` field
+ * exists — re-adding center/inside is a data-model change, not a default.
+ */
+/** Stroke placement relative to the layer alpha contour. */
+export type StrokePosition = 'outside' | 'center' | 'inside';
+
+/**
+ * Stroke effect parameters. `position` defaults to `'outside'` when omitted
+ * (backwards-compatible with documents saved before G1).
+ */
+export interface StrokeParams {
+  /** TRC-encoded stroke colour (same currency as fillColor / penStyle). */
+  color: ColorValue;
+  /** Stroke width in canvas px (UI range 1–250). */
+  widthPx: number;
+  /** Placement relative to the contour (`'outside'` default). */
+  position?: StrokePosition;
+}
+
+/**
+ * Drop-shadow parameters. The offset is stored as canvas-px deltas (positive y
+ = down) instead of angle+distance so the render pass needs no trig and the
+ future direction-dial control writes its drag vector directly.
+ */
+export interface ShadowParams {
+  /** TRC-encoded shadow colour (same currency as fillColor / penStyle). */
+  color: ColorValue;
+  /** Offset in canvas px; positive x = right. */
+  offsetX: number;
+  /** Offset in canvas px; positive y = down. */
+  offsetY: number;
+  /** Gaussian sigma in canvas px (UI label: softness). */
+  blurRadius: number;
+  /** Shadow opacity 0..1 (UI label: strength). */
+  opacity: number;
+}
+
+/**
+ * One non-destructive render-effect instance on a layer — the chain-item
+ * sibling of {@link AdjustmentMask} (same structural vocabulary: id /
+ * category / params / enabled / optional coverage shape / preset provenance).
+ *
+ * `Layer.effects` array order is the WITHIN-CATEGORY render order (tab order
+ * in the effects drawer mirrors it). Across categories the render order is
+ * physically fixed — shadow always beneath, stroke above it, content on top —
+ * and no UI exposes cross-category reordering (see
+ * `sortEffectInstancesForRender` in `core/layer/effects.ts`).
+ *
+ * At least ONE instance per category is always kept (the removal primitive
+ * refuses to empty a category), so "no stroke" is expressed as a disabled
+ * instance, never a missing one — the drawer tabs stay stable.
+ *
+ * `shape` / `feather` are the future per-instance coverage seam (frozen
+ * selection snapshot, layer-local, absent = whole-layer coverage). They are
+ * RESERVED in the first release: no UI writes them, and the render pass
+ * ignores them until the scoping feature lands.
+ *
+ * Absent `Layer.effects` = no effects — the overwhelmingly common case, so
+ * older documents hydrate with zero migration.
+ */
+export interface EffectInstance {
+  id: string;
+  category: EffectCategory;
+  enabled: boolean;
+  /** Discriminated by `category`: stroke → {@link StrokeParams}, shadow → {@link ShadowParams}. */
+  params: StrokeParams | ShadowParams;
+  /** Reserved future scoping seam (first release: never written, never read). */
+  shape?: LocalPolygon;
+  /** Reserved future scoping seam — feather radius (px) for the shape edge. */
+  feather?: number;
+  /**
+   * Who wrote this instance (`'preset'` for future preset applications;
+   * absence = manual). Reserved in the first release — no preset path writes
+   * effects yet — but declared now so the presets seam needs no migration.
+   */
+  origin?: 'preset' | 'manual';
+}
+
 export interface VectorMask {
   id: string;
   shape: LocalShape;          // Shape descriptor (local coordinate system)
@@ -601,6 +687,14 @@ export interface Layer {
    * migration in `Hydrating.ts` folds into a single entry.
    */
   adjustMasks?: AdjustmentMask[];
+
+  /**
+   * Non-destructive render effects as an ordered chain of effect instances
+   * (adjustMasks' structural sibling). Absent / empty ⇒ no effects — older
+   * documents hydrate with zero migration and the field is invisible to every
+   * existing consumer. See {@link EffectInstance} for the order/floor contract.
+   */
+  effects?: EffectInstance[];
 
   // State attributes
   visible: boolean;

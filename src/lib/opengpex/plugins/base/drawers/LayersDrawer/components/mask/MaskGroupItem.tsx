@@ -28,6 +28,7 @@ import type {
 } from "@opengpex/editor/core/types";
 import { summarizeAdjustMask } from "../../utils";
 import { useMaskEdit } from "../../hooks";
+import { MaskItem } from "./MaskItem";
 import { MaskGroupPanel } from "./MaskGroupPanel";
 
 /**
@@ -226,10 +227,8 @@ export const MaskGroupItem = ({ layerId, family, masks }: MaskGroupItemProps) =>
 
       {open && anchorRect && (
         <MaskGroupPanel
-          layerId={layerId}
-          family={family}
-          masks={masks}
           anchorRect={anchorRect}
+          remeasureKey={masks.length}
           editingActive={editingActive}
           onPointerEnter={() => {
             panelHovered.current = true;
@@ -243,7 +242,17 @@ export const MaskGroupItem = ({ layerId, family, masks }: MaskGroupItemProps) =>
             armAutoClose();
           }}
           onClose={() => setOpen(false)}
-        />
+        >
+          {[...masks].reverse().map((mask) => (
+            <MaskItem
+              key={mask.id}
+              layerId={layerId}
+              family={family}
+              mask={mask}
+              index={masks.findIndex((m) => m.id === mask.id)}
+            />
+          ))}
+        </MaskGroupPanel>
       )}
     </>
   );

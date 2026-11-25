@@ -452,6 +452,50 @@ export function vmaskBakeTransform(
   };
 }
 
+/** Number of polygon vertices used when tessellating an analytic ellipse vmask for effect prepass baking. */
+const ANALYTIC_ELLIPSE_SEGMENTS = 64;
+
+/**
+ * Convert an analytic vmask (`rect` / `ellipse` in normalized `[0..1]` space)
+ * into polygon `VectorSubMask[]` in layer-local logical pixels so effect-bearing
+ * layers can bake analytic masks through the exact same polygon fill-pass
+ * cache as polygon vmasks (G3 stage 1).
+ */
+export function analyticVmaskToSubMasks(
+  vmask: Extract<NonNullable<CompiledScene['scene']['layers'][number]['vmask']>, { kind: 'analytic' }>,
+  logicalWidth: number,
+  logicalHeight: number,
+): VectorSubMask[] {
+  const [cxN, cyN, hwN, hhN] = vmask.rect;
+  const cx = cxN * logicalWidth;
+  const cy = cyN * logicalHeight;
+  const hw = Math.max(0, hwN * logicalWidth);
+  const hh = Math.max(0, hhN * logicalHeight);
+  let ring: [number, number][];
+  if (vmask.shape === 'ellipse') {
+    ring = [];
+    for (let i = 0; i < ANALYTIC_ELLIPSE_SEGMENTS; i++) {
+      const theta = (i / ANALYTIC_ELLIPSE_SEGMENTS) * Math.PI * 2;
+      ring.push([cx + hw * Math.cos(theta), cy + hh * Math.sin(theta)]);
+    }
+  } else {
+    ring = [
+      [cx - hw, cy - hh],
+      [cx + hw, cy - hh],
+      [cx + hw, cy + hh],
+      [cx - hw, cy + hh],
+    ];
+  }
+  return [
+    {
+      rings: [ring],
+      featherPx: vmask.featherPx,
+      inverted: vmask.inverted,
+      antiAliased: !vmask.hard,
+    },
+  ];
+}
+
 export function prepareVmaskSources(
   encoder: GPUCommandEncoder,
   compiled: CompiledScene,
@@ -462,15 +506,27 @@ export function prepareVmaskSources(
   const seen = new Set<string>();
   for (const layer of compiled.scene.layers) {
     const vmask = layer.vmask;
-    if (!vmask || vmask.kind !== 'polygon') continue;
-    if (vmask.subMasks.length === 0) continue;
-
+    if (!vmask) continue;
+    const hasEffects = (layer.effects?.length ?? 0) > 0;
     const logicalW = Math.max(1, layer.width ?? 1);
     const logicalH = Math.max(1, layer.height ?? 1);
+    let subMasks: readonly VectorSubMask[];
+    if (vmask.kind === 'polygon') {
+      subMasks = vmask.subMasks;
+    } else if (vmask.kind === 'analytic' && hasEffects) {
+      // Force analytic vmasks on effect-bearing layers through the polygon
+      // bake path so prepareEffectSources consumes one uniform coverage
+      // texture before dilation (G3 stage 1).
+      subMasks = analyticVmaskToSubMasks(vmask, logicalW, logicalH);
+    } else {
+      continue;
+    }
+    if (subMasks.length === 0) continue;
+
     // WINDOWED bake (hole windowing): rings are layer-local, so the window is a
     // pure function of the geometry — it flips the cache key with it (dims are
     // in the key) and moves with the mask, never with the layer's world transform.
-    const window = resolveVmaskWindow(vmask.subMasks, logicalW, logicalH);
+    const window = resolveVmaskWindow(subMasks, logicalW, logicalH);
     const bakeW = window?.w ?? logicalW;
     const bakeH = window?.h ?? logicalH;
     // maxTextureDimension2D clamp: an unwindowed (full-layer) bake at a
@@ -487,7 +543,7 @@ export function prepareVmaskSources(
     cache.setPxScale(t.pxScaleX, t.pxScaleY);
     cache.setOrigin(t.originX, t.originY);
 
-    const texture = cache.prepare(encoder, ctx, layer.id, vmask.subMasks, maskW, maskH);
+    const texture = cache.prepare(encoder, ctx, layer.id, subMasks, maskW, maskH);
     out.set(layer.id, { texture, window: window ?? undefined });
     seen.add(layer.id);
   }

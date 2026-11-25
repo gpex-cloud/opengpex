@@ -51,6 +51,7 @@ import { CHANNEL_MASK_RGB } from './Scene';
 import type { IEngine, UploadSource, LutUpload } from '@opengpex/editor/core/engine/pipeline/IEngine';
 import type { HighDepthSource } from '@opengpex/editor/core/engine/sources/HighDepthCache';
 import { translateLayerAdjustments } from './adjustments';
+import { translateLayerEffects } from './translators/effects';
 import { translateLayer } from './translators';
 import { WORKING_GAMUT } from '@opengpex/editor/core/engine/color/gamut';
 import { resolveCompositeDensity } from '@opengpex/editor/core/engine/pipeline/graph/support/densityComposite';
@@ -838,6 +839,15 @@ export class SceneAssembler {
         )
         : adjustmentResult.adjustStages;
 
+      // ── (3b) Effect chain: translate the layer's render-effect instances
+      // (A8) into the declarative stage list. Colours resolve to working-LINEAR
+      // here, once, like every other colour-bearing translator. The result
+      // spreads into the node below — the same single fill point the composite
+      // cache's dirty-detection depends on: the signature serialises
+      // `effects`, so a stroke width drag re-composites while pan/zoom stays
+      // cached. Identity state → undefined (no signature contribution).
+      const effectResult = translateLayerEffects(latestLayer, WORKING_GAMUT);
+
       // ═══ STAGE 5 · NODE ASSEMBLY ═══
       // In:  every prior stage's outputs (transform / source / crop / masks /
       //      grade chain / dims / blend / clip).
@@ -860,7 +870,6 @@ export class SceneAssembler {
         transform,
         width: layerWidth,
         height: layerHeight,
-        crop,
         dprScale: rasterArm ? rasterArm.dprScale : 1,
         opacity: typeof layer.opacity === 'number' ? layer.opacity : 1.0,
         blendMode: layer.blendMode || 'source-over',
@@ -874,6 +883,15 @@ export class SceneAssembler {
         // stays clean.
         ...adjustmentResult,
         adjustStages,
+        ...effectResult,
+        // Effect-bearing layers ALWAYS carry an explicit full-extent crop: the
+        // composite's expandQuadToWindow geometry branch keys on `layer.crop`
+        // being present, and an uncropped raster/vector node would otherwise
+        // fall back to the crop-less quad path where the stroke ring outside
+        // the content extent is unreachable. A full-extent crop is a no-op for
+        // the un-effect geometry (content dims == extent), so this is purely
+        // the effect prepass's entry ticket.
+        crop: effectResult.effects ? (crop ?? { x: 0, y: 0, w: layerWidth, h: layerHeight }) : crop,
         clip: !!layer.clip,
       });
 

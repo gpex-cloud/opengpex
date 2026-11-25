@@ -26,7 +26,7 @@ import { Frame } from './models';
 import type { EditorActions } from './actions';
 import type { EditorContextValue } from './context';
 import type { PixelService, AssetService } from './services';
-import type { EngineContribution } from '../engine/pipeline/scene/translators';
+import type { EngineContribution } from '../engine/pipeline/scene/engineContribution';
 import type { DraftCodec } from '../state/drafts';
 
 export interface EditorShortcut {

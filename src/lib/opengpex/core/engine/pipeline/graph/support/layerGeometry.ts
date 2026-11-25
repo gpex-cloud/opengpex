@@ -75,17 +75,25 @@ export function resolveLayerGeometry(
   textureContentRect?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number },
   /**
    * The texture's content rect extends BEYOND the layer's crop (alphaFeather's
-   * beyondSource window): the region outside the crop is REAL visible content
-   * (the feathered ring), so the drawn quad covers the whole content rect —
-   * quad size / local offset derive from the rect (converted back to logical px
-   * through `dprScale`) and the UV spans the full [0,1] domain. Without this
-   * the quad would stop at the crop edge and the feathered ring would never
-   * reach the screen.
+   * beyondSource window, or an effect prepass's stroke window): the region
+   * outside the crop is REAL visible content, so the drawn quad covers the
+   * whole content rect — quad size / local offset derive from the rect and the
+   * UV spans the full [0,1] domain. Without this the quad would stop at the
+   * crop edge and the extra ring would never reach the screen.
    */
   quadCoversContentRect = false,
+  /**
+   * Which space `textureContentRect` (the reported `contentWindow`) is
+   * expressed in — producers stamp it explicitly. `'asset'` converts the rect
+   * back to logical px through `dprScale`; `'content-local'` uses the rect
+   * as-is (vector transients and materialized solids have dpr 1 by
+   * construction, and a stale `layer.dprScale` on the node must not squeeze
+   * the quad). Defaults to `'asset'` — the historical implicit assumption.
+   */
+  contentWindowBasis: 'asset' | 'content-local' = 'asset',
 ): LayerGeometry {
   if (quadCoversContentRect && textureContentRect && layer.crop) {
-    const d = dprScale > 0 ? dprScale : 1;
+    const d = contentWindowBasis === 'asset' && dprScale > 0 ? dprScale : 1;
     return {
       contentWidth: textureContentRect.w / d,
       contentHeight: textureContentRect.h / d,

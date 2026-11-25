@@ -255,7 +255,7 @@ export default function FancySvgSlider({
   const heightClass = slim ? 'h-3' : 'h-5';
 
   return (
-    <div className={`flex items-center gap-1.5 ${className}`}>
+    <div className={`flex items-center gap-1.5 leading-none ${className}`}>
       <div className="flex-1 min-w-0 relative">
         <svg
           ref={svgRef}
@@ -263,7 +263,7 @@ export default function FancySvgSlider({
           preserveAspectRatio="none"
           overflow="visible"
           tabIndex={disabled ? -1 : 0}
-          className={`w-full ${heightClass} select-none touch-none outline-none ${
+          className={`block w-full ${heightClass} select-none touch-none outline-none ${
             disabled ? 'cursor-not-allowed opacity-50' : 'cursor-ew-resize'
           }`}
           role="slider"

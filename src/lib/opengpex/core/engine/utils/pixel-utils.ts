@@ -355,3 +355,4 @@ export async function download(blob: Blob, name: string): Promise<void> {
   a.click();
   URL.revokeObjectURL(url);
 }
+

@@ -51,6 +51,8 @@ import {
 import type { MaskFamily } from "../mask/MaskGroupItem";
 import { LayerMenu } from "./LayerMenu";
 import { hasLayerAdjustments } from "../../utils";
+import { getEffectChain, sortEffectInstancesForRender } from '@opengpex/editor/core/layer/effects';
+import { EffectGroupItem, EffectMemberRow } from '../mask/EffectGroupItem';
 import type { LayersDrawerCommandsMap } from "../../commands.d";
 
 interface LayerItemProps {
@@ -113,6 +115,9 @@ export const LayerItem = React.memo(
     const dragControls = useDragControls();
     const [isMasksExpanded, setIsMasksExpanded] = React.useState(false);
     const [isSubLayersExpanded, setIsSubLayersExpanded] = React.useState(false);
+    // Effects section visibility (A8): shown only while the layer carries
+    // instances, toggled by the dedicated show/hide button in the row.
+    const [isEffectsExpanded, setIsEffectsExpanded] = React.useState(false);
     // Intrinsic dimensions of the layer's source image, straight from the
     // asset light record (AssetEntry.width/height; pool is hydrate-populated,
     // sync KB-level read). The object-view-box thumbnail crop below is
@@ -131,6 +136,11 @@ export const LayerItem = React.memo(
       (layer.adjustMasks && layer.adjustMasks.length > 0)
     );
     const hasAdjustments = hasLayerAdjustments(layer);
+    // Effects family (A8): presence keys on ENABLED instances — the same
+    // semantics as hasLayerAdjustments (enabled-only). A layer whose effect
+    // instances are all disabled shows nothing here (no dot, no menu entry),
+    // and re-enabling lives in the effects drawer.
+    const hasEffects = getEffectChain(layer).some((e) => e.enabled);
 
     useEffect(() => {
       if (isActive && containerRef.current) {
@@ -384,7 +394,7 @@ export const LayerItem = React.memo(
                 {/* Indicator dots: purple = has user sub-layers, teal = has masks, amber = has adjustments.
                     Only shown when the layer has collapsed content underneath.
                     exchange/frag sub-layers (internal clip system) are excluded. */}
-                {(hasVisibleSubLayersDot || hasMasks || hasAdjustments) && (
+                {(hasVisibleSubLayersDot || hasMasks || hasAdjustments || hasEffects) && (
                   <div className="flex gap-0.5 shrink-0 opacity-40">
                     {hasVisibleSubLayersDot && (
                       <div className="w-1 h-1 rounded-full" style={{ backgroundColor: '#c084fc' }} />
@@ -392,6 +402,9 @@ export const LayerItem = React.memo(
                     {hasMasks && (
                       <div className="w-1 h-1 rounded-full" style={{ backgroundColor: '#00D5BE' }} />
                     )}
+                {hasEffects && (
+                  <div className="w-1 h-1 rounded-full bg-indigo-400" />
+                )}
                     {hasAdjustments && (
                       <div className="w-1 h-1 rounded-full bg-amber-400" />
                     )}
@@ -461,6 +474,12 @@ export const LayerItem = React.memo(
                 setIsSubLayersExpanded={setIsSubLayersExpanded}
                 isMasksExpanded={isMasksExpanded}
                 setIsMasksExpanded={setIsMasksExpanded}
+                hasEffects={hasEffects}
+                // The count follows what the family actually shows: enabled
+                // instances only (disabled ones render nowhere).
+                effectsLength={getEffectChain(layer).filter((e) => e.enabled).length}
+                isEffectsExpanded={isEffectsExpanded}
+                setIsEffectsExpanded={setIsEffectsExpanded}
                 canMergeBack={canMergeBack}
                 canMergeBackAll={canMergeBackAll}
                 canRasterize={
@@ -526,6 +545,35 @@ export const LayerItem = React.memo(
                   />
                 );
               })}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Effects family (A8): visible only when toggled open by the row's
+            show-effects button; the family row itself is always the collapsed
+            group row with the floating member panel (no flat variant). */}
+        <AnimatePresence>
+          {isEffectsExpanded && hasEffects && (
+            <motion.div
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              className="ml-1.5 mr-0.5 mt-0.5 mb-0.5 pl-1.5 border-l border-indigo-500/25 dark:border-indigo-500/40 flex flex-col gap-0.5 overflow-hidden"
+            >
+              {/* The mask families' threshold, effects edition: a single
+                  ENABLED instance renders flat, ≥2 collapse into the group
+                  row with the floating panel (both keyed on the enabled
+                  chain — disabled instances render nowhere). */}
+              {(() => {
+                const enabled = sortEffectInstancesForRender(getEffectChain(layer)).filter((s) => s.enabled);
+                if (enabled.length === 1) {
+                  return <EffectMemberRow layerId={layer.id} instance={enabled[0]} ordinal={1} />;
+                }
+                if (enabled.length >= 2) {
+                  return <EffectGroupItem layerId={layer.id} instances={enabled} />;
+                }
+                return null;
+              })()}
             </motion.div>
           )}
         </AnimatePresence>

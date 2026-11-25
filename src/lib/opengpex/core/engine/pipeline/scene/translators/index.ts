@@ -67,7 +67,6 @@ export {
 } from './vector';
 export type {
   VectorSourceContributor,
-  EngineContribution,
   VectorSourceContext,
   VectorSourceOptions,
 } from './vector';
@@ -75,6 +74,10 @@ export { layerToSolidSource } from './solid';
 export { buildRasterSource, proxyBitmapGamut } from './raster';
 export type { RasterPoolRecord, RasterSourceInputs } from './raster';
 export type { LayerSource } from '../Scene';
+// EngineContribution lives in its OWN ownership-neutral module — the umbrella
+// aggregates the per-slot contracts and must not be hosted inside any single
+// slot's implementation file.
+export type { EngineContribution } from '../engineContribution';
 
 /**
  * Resolve a layer's DECLARATIVE source (the vector or solid arm), or

@@ -628,6 +628,9 @@ export function useEditorStore() {
             toggle: advRef(P.ADV_LAYER_ADJUST_MASK_TOGGLE, (payload: { frameId?: string; layerId: string; maskId: string }) => executeCommand(P.ADV_LAYER_ADJUST_MASK_TOGGLE, payload)),
             remove: advRef(P.ADV_LAYER_ADJUST_MASK_REMOVE, (payload: { frameId?: string; layerId: string; maskId: string }) => executeCommand(P.ADV_LAYER_ADJUST_MASK_REMOVE, payload)),
           },
+          effect: {
+            toggle: advRef(P.ADV_LAYER_EFFECT_TOGGLE, (payload: { frameId?: string; layerId: string; instanceId: string; enabled: boolean }) => executeCommand(P.ADV_LAYER_EFFECT_TOGGLE, payload)),
+          },
           merge: {
             down: advRef(P.ADV_LAYER_MERGE_DOWN, () => executeCommand(P.ADV_LAYER_MERGE_DOWN)),
             visible: advRef(P.ADV_LAYER_MERGE_VISIBLE, () => executeCommand(P.ADV_LAYER_MERGE_VISIBLE)),

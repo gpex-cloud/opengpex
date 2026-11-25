@@ -54,6 +54,7 @@ import { densityCompositeDims } from './support/densityComposite';
 import { effectiveScale } from './support/layerGeometry';
 import { prepareFilteredSources } from './build/prepareFilteredSources';
 import { prepareVectorSources } from './build/prepareVectorSources';
+import { prepareEffectSources } from './build/prepareEffectSources';
 import { prepareVmaskSources, type VmaskBake } from './build/prepareVmaskSources';
 import { prepareAdjustCoverage } from './build/prepareAdjustCoverage';
 import type { AdjustCoverageBinding } from './support/adjustBindGroup';
@@ -335,20 +336,24 @@ export class RenderGraph {
     const passViewport = ev ?? densityViewport;
     prepareVectorSources(commandEncoder, compiled, buildCtx, sources, vectorScale);
 
-    // Bake every POLYGON vmask into an owned coverage texture, keyed by
-    // layer id. Recorded here (before any composite render pass opens) because the
-    // fill is a compute pass. Analytic vmasks are NOT in this map — they solve
-    // per-fragment. The map threads into every drawLayer as `vmaskTexture`.
+    // Bake every POLYGON vmask (and any analytic vmask on an effect-bearing
+    // layer) into an owned coverage texture, keyed by layer id. Recorded
+    // BEFORE prepareEffectSources so the effect prepass can bake vmask+bmask
+    // into content alpha before dilation (G3 stage 1).
     const vmaskSources = new Map<string, VmaskBake>();
     prepareVmaskSources(commandEncoder, compiled, buildCtx, vmaskSources, vectorScale);
 
     // Combine every layer's enabled bmask records into ONE owned coverage
-    // texture, keyed by layer id (the retired stack slots' replacement). Also
-    // a compute phase, recorded before any composite render pass opens. Layers
-    // with a single soft erase record bind their record texture directly
-    // (identity fast path — zero dispatch).
+    // texture, keyed by layer id. Also recorded before prepareEffectSources so
+    // the effect prepass consumes the combined mask directly.
     const bmaskSources = new Map<string, LayerTexture>();
     prepareBmaskCombineSources(commandEncoder, compiled, buildCtx, bmaskSources);
+
+    // Effect prepass (A8): compose every effect-bearing layer into ONE
+    // "effects beneath content" transient, LAST in the build phase because it
+    // consumes filter/vector/vmask/bmask outputs (effects decorate the
+    // outermost visible silhouette).
+    prepareEffectSources(commandEncoder, compiled, buildCtx, sources, adjustCoverageSources, vmaskSources, bmaskSources);
 
     if (compiled.isPureDirect) {
       // ── Pure separable: composite all layers into ONE target. ──
@@ -410,14 +415,14 @@ export class RenderGraph {
           const src = sources.get(layer.id);
           const texture = src?.texture;
           if (!texture) continue;
-          // The COMBINED bmask coverage (bmask combine pass). Absent → unmasked.
-          const maskTex = bmaskSources.get(layer.id);
+          const maskTex = src?.maskFree ? undefined : bmaskSources.get(layer.id);
+          const vmaskBake = src?.maskFree ? undefined : vmaskSources.get(layer.id);
           CompositePass.drawLayer(renderPass, passCtx, {
             layer,
             texture,
             maskTexture: maskTex,
-            vmaskTexture: vmaskSources.get(layer.id)?.texture,
-            vmaskWindow: vmaskSources.get(layer.id)?.window,
+            vmaskTexture: vmaskBake?.texture,
+            vmaskWindow: vmaskBake?.window,
             adjustCoverage: adjustCoverageSources.get(layer.id),
             isBottomOpaque: false,
             solidUniform: src?.solidUniform === true,
@@ -428,6 +433,7 @@ export class RenderGraph {
             sourceIntentApplied: src?.sourceIntentApplied,
             contentWindow: src?.contentWindow,
             expandQuadToWindow: src?.expandQuadToWindow,
+            maskFree: src?.maskFree,
           });
         }
       }
@@ -575,14 +581,14 @@ export class RenderGraph {
           const src = sources.get(layer.id);
           const texture = src?.texture;
           if (!texture) continue;
-          // The COMBINED bmask coverage (bmask combine pass). Absent → unmasked.
-          const maskTex = bmaskSources.get(layer.id);
+          const maskTex = src?.maskFree ? undefined : bmaskSources.get(layer.id);
+          const vmaskBake = src?.maskFree ? undefined : vmaskSources.get(layer.id);
           CompositePass.drawLayer(renderPass, passCtx, {
             layer,
             texture,
             maskTexture: maskTex,
-            vmaskTexture: vmaskSources.get(layer.id)?.texture,
-            vmaskWindow: vmaskSources.get(layer.id)?.window,
+            vmaskTexture: vmaskBake?.texture,
+            vmaskWindow: vmaskBake?.window,
             adjustCoverage: adjustCoverageSources.get(layer.id),
             isBottomOpaque: false,
             solidUniform: src?.solidUniform === true,
@@ -593,6 +599,7 @@ export class RenderGraph {
             sourceIntentApplied: src?.sourceIntentApplied,
             contentWindow: src?.contentWindow,
             expandQuadToWindow: src?.expandQuadToWindow,
+            maskFree: src?.maskFree,
           });
         }
 
@@ -606,8 +613,8 @@ export class RenderGraph {
         const src = sources.get(layer.id);
         const fgTexture = src?.texture;
         if (!fgTexture) continue;
-        // The COMBINED bmask coverage (bmask combine pass). Absent → unmasked.
-        const maskTex = bmaskSources.get(layer.id);
+        const maskTex = src?.maskFree ? undefined : bmaskSources.get(layer.id);
+        const vmaskBake = src?.maskFree ? undefined : vmaskSources.get(layer.id);
 
         if (isFirstStep) {
           // First step is non-separable: seed the accumulator. Normally an
@@ -655,8 +662,8 @@ export class RenderGraph {
           fgTexture,
           bgTexture: currentAccumulator,
           maskTexture: maskTex,
-          vmaskTexture: vmaskSources.get(layer.id)?.texture,
-            vmaskWindow: vmaskSources.get(layer.id)?.window,
+          vmaskTexture: vmaskBake?.texture,
+            vmaskWindow: vmaskBake?.window,
             adjustCoverage: adjustCoverageSources.get(layer.id),
           solidUniform: src?.solidUniform === true,
           suppressAdjust: src?.suppressAdjust,
@@ -666,6 +673,7 @@ export class RenderGraph {
           sourceIntentApplied: src?.sourceIntentApplied,
           contentWindow: src?.contentWindow,
           expandQuadToWindow: src?.expandQuadToWindow,
+          maskFree: src?.maskFree,
         });
         blendPass.end();
 

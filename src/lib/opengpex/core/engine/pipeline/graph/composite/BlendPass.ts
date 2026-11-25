@@ -73,13 +73,22 @@ export interface DrawBlendParams {
    * only this sub-rect of the source, so `uvRect` shifts by its origin (see
    * `resolveLayerGeometry`). Undefined → content-aligned with the full source.
    */
-  readonly contentWindow?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+  readonly contentWindow?: {
+    readonly x: number;
+    readonly y: number;
+    readonly w: number;
+    readonly h: number;
+    /** Producer-stamped coordinate space: 'asset' texels or 'content-local' logical px. */
+    readonly basis?: 'asset' | 'content-local';
+  };
   /**
    * `contentWindow` extends beyond the source asset (alphaFeather's unclamped
    * feather ring) — the drawn quad covers the WHOLE window so the feathered
    * ring outside the crop is visible (see `resolveLayerGeometry`).
    */
   readonly expandQuadToWindow?: boolean;
+  /** True when prepass already baked bmask+vmask into alpha; skip compositor mask evaluation. */
+  readonly maskFree?: boolean;
   /**
    * The layer's COMBINED bmask coverage — the texture the bmask combine pass
    * baked from ALL enabled records (each record's hard bit + erase/restore
@@ -161,7 +170,9 @@ export class BlendPass {
     ctx: BlendPassContext,
     params: DrawBlendParams,
   ): void {
-    const { layer, fgTexture, bgTexture, maskTexture, vmaskTexture } = params;
+    const { layer, fgTexture, bgTexture } = params;
+    const maskTexture = params.maskFree ? undefined : params.maskTexture;
+    const vmaskTexture = params.maskFree ? undefined : params.vmaskTexture;
 
     let flags = 0;
     if (maskTexture) flags |= LAYER_FLAG_HAS_MASK;
@@ -204,6 +215,10 @@ export class BlendPass {
       resolveLayerDprScale(layer, fgTexture.width, params.vectorTransient),
       params.contentWindow,
       params.expandQuadToWindow === true,
+      // The window's reporting basis is producer-stamped: 'asset' windows
+      // convert to logical px through dprScale, 'content-local' windows
+      // (vector/solid effect transients) are already logical.
+      params.contentWindow?.basis ?? 'asset',
     );
 
     // ⚠️ POT-BUCKET UV FIX: same rationale as CompositePass — scale content-relative
@@ -217,8 +232,14 @@ export class BlendPass {
 
     // Resolve vmask uniform triple (shared with CompositePass). Packed at
     // slots 19..27; the transform overwrite below only touches slots 0..11, so the
-    // vmask fields survive untouched.
-    const vmaskU = resolveVmaskUniform(layer.vmask, contentWidth, contentHeight, !!vmaskTexture, params.vmaskWindow);
+    // vmask fields survive untouched. Mask-free prepass outputs skip vmask.
+    const vmaskU = resolveVmaskUniform(
+      params.maskFree ? undefined : layer.vmask,
+      contentWidth,
+      contentHeight,
+      !!vmaskTexture,
+      params.vmaskWindow,
+    );
 
     // Pack uv_rect / opacity / blend_mode / flags at their fixed offsets
     // (12..18) plus vmask (19..27); slot 0..11 is OVERWRITTEN below with the

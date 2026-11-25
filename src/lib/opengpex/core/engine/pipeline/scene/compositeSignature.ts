@@ -190,6 +190,12 @@ function layerSig(layer: LayerNode, opts: CompositeSignatureOptions): string {
   // re-confined or re-ordered chain dirties the composite like any edit.
   const adjSig = layer.adjustStages && layer.adjustStages.length ? JSON.stringify(layer.adjustStages) : '-';
   const fltSig = layer.filters && layer.filters.length ? JSON.stringify(layer.filters) : '-';
+  // Effect chain (A8): small declarative descriptors (working-LINEAR colour
+  // tuples + a dilation radius), so plain JSON is deterministic. Any param
+  // edit, enable/disable flip, or chain append/remove changes this token and
+  // re-composites. The token is APPENDED ONLY when effects exist, so every
+  // pre-A8 signature string stays byte-identical (no cache-wide invalidation).
+  const effSig = layer.effects && layer.effects.length ? `|eff:${JSON.stringify(layer.effects)}` : '';
 
   return [
     `id:${layer.id}`,
@@ -212,7 +218,7 @@ function layerSig(layer: LayerNode, opts: CompositeSignatureOptions): string {
     `src:${srcSig}`,
     `adj:${adjSig}`,
     `flt:${fltSig}`,
-  ].join('|');
+  ].join('|') + effSig;
 }
 
 /**

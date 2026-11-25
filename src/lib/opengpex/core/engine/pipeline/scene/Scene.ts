@@ -657,6 +657,35 @@ export type FilterDesc =
   | { readonly kind: 'pixelate'; readonly blockSize: number };
 
 // ────────────────────────────────────────────────────────────
+// Layer render effects (A8)
+// ────────────────────────────────────────────────────────────
+
+/**
+ * One stage of a layer's non-destructive effect chain, produced by
+ * `translators/effects` from `Layer.effects` (the adjustMasks sibling). Pure
+ * engine-neutral data consumed by the effect prepass
+ * (`prepareEffectSources`); colours are already working-gamut LINEAR
+ * straight-alpha, resolved by the translator, so the prepass converts nothing.
+ * Absent `LayerNode.effects` = no effects — zero signature contribution.
+ */
+export type EffectStageDesc =
+  /**
+   * OUTWARD stroke: the prepass dilates the content alpha by `radiusPx`
+   * (half the stroke width, rounded up), tints the ring outside the original
+   * alpha with `color`, and composites it beneath the content. P2 ships the
+   * stroke arm; shadow joins the union when its pipeline lands.
+   */
+  | {
+    readonly kind: 'stroke';
+    /** Stroke colour: working-gamut LINEAR straight-alpha RGBA (0..1). */
+    readonly color: readonly [number, number, number, number];
+    /** Stroke width in logical px (1..250). */
+    readonly widthPx: number;
+    /** Placement relative to the alpha contour. */
+    readonly position: 'outside' | 'center' | 'inside';
+  };
+
+// ────────────────────────────────────────────────────────────
 // Layer node
 // ────────────────────────────────────────────────────────────
 
@@ -717,7 +746,16 @@ export interface LayerNode {
   readonly adjustLutAtlasId?: string;
   /** Applied in order, after `adjustStages`. */
   readonly filters?: readonly FilterDesc[];
-  /** Clip to the layer below (Photoshop-style clipping mask). */
+  /**
+   * The non-destructive effect chain (A8): one stage per enabled effect
+   * instance, in render evaluation order (category precedence — shadow
+   * beneath, stroke above — then the chain array order). Consumed by the
+   * effect prepass AFTER the filter spine (effects modify the outermost
+   * content). Absent ⇒ no effects; a layer with every instance disabled
+   * translates back to absent, so the composite signature reverts to the
+   * no-effects token.
+   */
+  readonly effects?: readonly EffectStageDesc[];  /** Clip to the layer below (Photoshop-style clipping mask). */
   readonly clip?: boolean;
   /**
    * Present-time scheduling hint: this vector source is being LIVE-EDITED

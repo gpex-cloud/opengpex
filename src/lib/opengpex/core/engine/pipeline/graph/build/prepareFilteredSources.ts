@@ -86,7 +86,20 @@ function resolveLayerSourceTexture(
     // No pipeline-produced transient: the domain is whatever the ASSET declares.
     // (A solid layer never reaches the inline path with a colour-bearing asset —
     // the compositor reads the uniform; the texture arg is the white formality.)
-    return { texture: asset, suppressAdjust: false, sourceIsLinear: false, sourceIsWorkingGamut: false, sourceIntentApplied: false };
+    // The content rect follows the fragment model, which THIS stage owns as the
+    // single source of truth: a logical fragment shares the source asset and its
+    // visible content is the crop sub-rect (`crop · dpr` in asset texels —
+    // `clipToLogicalLayer` keeps `visibleShape.rect` in the source frame), while
+    // every layer owning its own asset (full rasters, physical trimmed products)
+    // is content-aligned with the full texture. The effect prepass consumes this
+    // declared rect verbatim and never re-derives crop semantics itself.
+    const dpr = layer.dprScale && layer.dprScale > 0 ? layer.dprScale : 1;
+    const contentRectInTexture = solidColor
+      ? undefined
+      : layer.crop
+        ? { x: layer.crop.x * dpr, y: layer.crop.y * dpr, w: layer.crop.w * dpr, h: layer.crop.h * dpr }
+        : { x: 0, y: 0, w: asset.width, h: asset.height };
+    return { texture: asset, suppressAdjust: false, sourceIsLinear: false, sourceIsWorkingGamut: false, sourceIntentApplied: false, contentRectInTexture };
   }
 
   const { device, pipelineCache, bufferRing, texturePool } = ctx;

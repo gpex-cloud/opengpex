@@ -31,6 +31,7 @@ import { LayerCmdJCommands } from './commands/layer/cmdj';
 import { LayerMaskCommands } from './commands/layer/vmask';
 import { LayerBitmapMaskCommands } from './commands/layer/bmask';
 import { LayerAdjustMaskCommands } from './commands/layer/amask';
+import { LayerEffectCommands } from './commands/layer/effects';
 import { ViewportTranslateCommands } from './commands/viewport/translate';
 import { SystemAssetCommands } from './commands/system/assets';
 import { ViewportTransformCommands } from './commands/viewport/transform';
@@ -57,6 +58,7 @@ export * from './commands/layer/cmdj';
 export * from './commands/layer/vmask';
 export * from './commands/layer/bmask';
 export * from './commands/layer/amask';
+export * from './commands/layer/effects';
 export * from './commands/viewport/translate';
 export * from './commands/system/assets';
 export * from './commands/viewport/transform';
@@ -80,6 +82,7 @@ export function registerAdvancedCommands(ctx: EditorContextValue['actions']) {
     LayerMaskCommands,
     LayerBitmapMaskCommands,
     LayerAdjustMaskCommands,
+    LayerEffectCommands,
     ViewportTranslateCommands,
     SystemAssetCommands,
     ViewportTransformCommands,

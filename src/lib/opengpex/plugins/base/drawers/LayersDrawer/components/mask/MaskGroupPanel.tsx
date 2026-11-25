@@ -4,7 +4,7 @@
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, version 3 of the License.
+ * the Free Software Foundation, version 3 of the GNU General Public License.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
@@ -22,8 +22,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import EditorPortal from "@opengpex/editor/widgets/Portal";
 import { EDITOR_Z_INDEX } from "@opengpex/editor/core/helpers/config";
-import { MaskItem } from "./MaskItem";
-import type { MaskFamily, AnyLayerMask } from "./MaskGroupItem";
 
 /** Sized so member rows match the sub-layer rows under a group layer:
  * drawer content is 320 wide, its nested mask/sub-layer area subtracts
@@ -49,6 +47,9 @@ interface PanelRect {
  * both drawer dock sides and narrow viewports without reading any dock
  * state. Vertically the panel's top edge aligns with the row and is shifted
  * up just enough to stay inside the viewport when it would overflow.
+ *
+ * PURE and family-agnostic: both the mask group panel and the effects group
+ * panel place themselves through this function.
  */
 export function computePanelPosition(
   anchorRect: PanelRect,
@@ -70,32 +71,59 @@ export function computePanelPosition(
 }
 
 interface MaskGroupPanelProps {
-  layerId: string;
-  family: MaskFamily;
-  masks: AnyLayerMask[];
   anchorRect: DOMRect;
-  /** When true (a bitmap member is in its editing session) auto-close is suppressed. */
-  editingActive: boolean;
-  onPointerEnter: () => void;
-  onPointerLeave: () => void;
+  /**
+   * The member rows. The panel is CONTENT-AGNOSTIC — the mask families pass
+   * MaskItem rows, the effects family passes EffectMemberRow rows; this
+   * component owns only the floating chrome (portal, measurement, placement,
+   * dismissal) and adds no commands and no editing surface of its own.
+   */
+  children: React.ReactNode;
+  /**
+   * Change of this key re-measures the panel (member count changes alter
+   * the height). Omitted → only the initial attach and anchor moves remeasure.
+   */
+  remeasureKey?: number;
+  /** When true auto-close is suppressed (a bitmap member is being edited). */
+  editingActive?: boolean;
+  /** testid hook (the mask panel keeps the historical id; the effects panel passes its own). */
+  testId?: string;
+  /** Hover bridging from the group row: keep-alive while the pointer is on the panel. */
+  onPointerEnter?: () => void;
+  onPointerLeave?: () => void;
   onClose: () => void;
 }
 
 /**
- * Floating member list for a mask group row. Portaled into the popup root
+ * Floating member list for a family group row. Portaled into the popup root
  * (same seat as Popover, below every dialog) with fixed positioning because
  * the layer list is a scrolling, height-animated container that would clip
- * in-row absolute positioning. Members reuse the
- * exact flat-row components (newest first), so toggling and deleting go
- * through the same existing commands as before — this panel adds no
- * commands, no reordering, and no editing surface of its own.
+ * in-row absolute positioning.
+ *
+ * Positioning timing. Unlike Popover (which places itself purely from the
+ * trigger rect plus a CSS transform), this panel must know its OWN rendered
+ * size before it can be placed: computePanelPosition flips it to the left
+ * side when it would overflow the right viewport edge and pulls it up when
+ * it would overflow the bottom, and both decisions need the panel's real
+ * width and height. So the panel mounts hidden (visibility: hidden,
+ * off-screen), is measured, then shown at the computed spot.
+ *
+ * The panel element lives in a portal root that EditorPortal attaches one
+ * effect after mount, so it can appear a render later than this component;
+ * a mount-time layout effect would find no element. Measurement therefore
+ * happens in a ref callback, which fires exactly when the element attaches.
+ * That callback MUST be referentially stable: an inline arrow is a new
+ * function every render, and React re-invokes a changed ref callback (null,
+ * then the element) on every commit — combined with the setPos below that
+ * is an infinite render loop. Hence useCallback with no dependencies, and
+ * anchorRect read through a ref instead of the closure.
  */
 export const MaskGroupPanel = ({
-  layerId,
-  family,
-  masks,
   anchorRect,
-  editingActive,
+  children,
+  remeasureKey,
+  editingActive = false,
+  testId = "mask-group-panel",
   onPointerEnter,
   onPointerLeave,
   onClose,
@@ -103,23 +131,6 @@ export const MaskGroupPanel = ({
   const panelRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
 
-  // Positioning timing. Unlike Popover (which places itself purely from the
-  // trigger rect plus a CSS transform), this panel must know its OWN rendered
-  // size before it can be placed: computePanelPosition flips it to the left
-  // side when it would overflow the right viewport edge and pulls it up when
-  // it would overflow the bottom, and both decisions need the panel's real
-  // width and height. So the panel mounts hidden (visibility: hidden,
-  // off-screen), is measured, then shown at the computed spot.
-  //
-  // The panel element lives in a portal root that EditorPortal attaches one
-  // effect after mount, so it can appear a render later than this component;
-  // a mount-time layout effect would find no element. Measurement therefore
-  // happens in a ref callback, which fires exactly when the element attaches.
-  // That callback MUST be referentially stable: an inline arrow is a new
-  // function every render, and React re-invokes a changed ref callback (null,
-  // then the element) on every commit — combined with the setPos below that
-  // is an infinite render loop. Hence useCallback with no dependencies, and
-  // anchorRect read through a ref instead of the closure.
   const anchorRectRef = useRef(anchorRect);
   const attachPanel = useCallback((el: HTMLDivElement | null) => {
     panelRef.current = el;
@@ -152,7 +163,7 @@ export const MaskGroupPanel = ({
         window.innerHeight,
       ),
     );
-  }, [anchorRect, masks.length]);
+  }, [anchorRect, remeasureKey]);
 
   // Auto-close triggers: layer list scroll (captured from any ancestor),
   // a pointer press outside the panel, or Escape. All of them are suspended
@@ -187,7 +198,7 @@ export const MaskGroupPanel = ({
     <EditorPortal>
       <div
         ref={attachPanel}
-        data-testid="mask-group-panel"
+        data-testid={testId}
         onPointerDown={stopPropagation}
         onClick={stopPropagation}
         onPointerEnter={onPointerEnter}
@@ -204,15 +215,7 @@ export const MaskGroupPanel = ({
         }}
         className="rounded-lg border border-[var(--border-light)] bg-[var(--bg-panel)] shadow-xl p-1 flex flex-col gap-0.5"
       >
-        {[...masks].reverse().map((mask) => (
-          <MaskItem
-            key={mask.id}
-            layerId={layerId}
-            family={family}
-            mask={mask}
-            index={masks.findIndex((m) => m.id === mask.id)}
-          />
-        ))}
+        {children}
       </div>
     </EditorPortal>
   );

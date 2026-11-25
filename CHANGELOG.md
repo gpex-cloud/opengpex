@@ -2,6 +2,13 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.70
+
+- Layers: new layer effects — give any layer a Stroke outline drawn around its visible content, with color, size and inside / center / outside placement, and a live preview that follows your slider drags in real time.
+- Layers: effects live in a dedicated panel — turn each effect on or off with an eye toggle, delete them, and switch between effect kinds from the panel header (each kind shows its on/off state at a glance, including the category dropdown).
+- Layers: effect rows appear next to masks in the layers list, with quick jump and add buttons per effect kind.
+- Effects: the effect list leads with the kinds that actually work today (Stroke, Shadow) instead of following the reference product's menu order.
+
 ## 2.0.69
 
 - Storage panel: the topology tree becomes searchable and gains an integrity audit, so storage problems can be diagnosed directly from the panel instead of cryptic console warnings.

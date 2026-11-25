@@ -45,6 +45,20 @@ import {
   buildFeatherCombineWgsl,
   GAUSS_UNIFORM_BUFFER_SIZE,
 } from '../shaders/gaussian';
+import {
+  buildEdtSeedWgsl,
+  buildEdtJfaWgsl,
+  EDT_SEED_UNIFORM_BUFFER_SIZE,
+  EDT_JFA_UNIFORM_BUFFER_SIZE,
+} from '../shaders/edtJfa';
+import {
+  buildStrokeComposeWgsl,
+  STROKE_COMPOSE_UNIFORM_BUFFER_SIZE,
+} from '../shaders/strokeCompose';
+import {
+  buildEffectMaskBakeWgsl,
+  EFFECT_MASK_BAKE_UNIFORM_BUFFER_SIZE,
+} from '../shaders/effectMaskBake';
 import { VMASK_WGSL, VMASK_UNIFORM_SIZE } from '../shaders/vmask';
 import { BMASK_COMBINE_WGSL, BMASK_COMBINE_UNIFORM_SIZE } from '../shaders/bmaskCombine';
 import { BLEND_UNIFORM_BUFFER_SIZE } from '../shaders/blend';
@@ -249,8 +263,14 @@ export class PipelineCache {
   private readonly filterBindGroupLayouts = new Map<string, GPUBindGroupLayout>();
   private readonly filterPipelineLayouts = new Map<string, GPUBindGroupLayout>();
   private readonly featherCombineBindGroupLayouts = new Map<string, GPUBindGroupLayout>();
-  private readonly featherCombinePipelineLayouts = new Map<string, GPUPipelineLayout>();
+  private readonly featherCombinePipelineLayouts = new Map<string, GPUBindGroupLayout>();
   private readonly featherCombineShaderModules = new Map<string, GPUShaderModule>();
+  private readonly edtBindGroupLayouts = new Map<string, GPUBindGroupLayout>();
+  private readonly edtShaderModules = new Map<string, GPUShaderModule>();
+  private readonly strokeComposeBindGroupLayouts = new Map<string, GPUBindGroupLayout>();
+  private readonly strokeComposeShaderModules = new Map<string, GPUShaderModule>();
+  private readonly effectMaskBakeBindGroupLayouts = new Map<string, GPUBindGroupLayout>();
+  private readonly effectMaskBakeShaderModules = new Map<string, GPUShaderModule>();
 
   constructor(readonly device: GPUDevice) {}
 
@@ -898,7 +918,226 @@ export class PipelineCache {
     return pipeline;
   }
 
+  // ──────────────────────────────────────────────────────────
+  // Dual-field 1+JFA EDT compute pipelines (cs_edt_seed, cs_edt_jfa)
+  // ──────────────────────────────────────────────────────────
 
+  getEdtSeedBindGroupLayout(
+    contentSampleType: 'float' | 'unfilterable-float' = 'float',
+  ): GPUBindGroupLayout {
+    const key = `edt-seed:${contentSampleType}`;
+    const cached = this.edtBindGroupLayouts.get(key);
+    if (cached) return cached;
+    const layout = this.device.createBindGroupLayout({
+      label: `EDT Seed Bind Group Layout [${contentSampleType}]`,
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: EDT_SEED_UNIFORM_BUFFER_SIZE },
+        },
+        { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: contentSampleType } },
+        {
+          binding: 2,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: { access: 'write-only', format: 'rgba16uint' },
+        },
+      ],
+    });
+    this.edtBindGroupLayouts.set(key, layout);
+    return layout;
+  }
+
+  getEdtSeedPipeline(
+    contentSampleType: 'float' | 'unfilterable-float' = 'float',
+  ): GPUComputePipeline {
+    const key = `edt-seed:${contentSampleType}`;
+    const cached = this.computePipelines.get(key);
+    if (cached) return cached;
+    let shaderModule = this.edtShaderModules.get('seed');
+    if (!shaderModule) {
+      shaderModule = this.device.createShaderModule({
+        code: buildEdtSeedWgsl(),
+        label: 'EDT Seed WGSL Module',
+      });
+      this.edtShaderModules.set('seed', shaderModule);
+    }
+    const pipeline = this.device.createComputePipeline({
+      label: `EDT Seed Compute Pipeline (${contentSampleType})`,
+      layout: this.device.createPipelineLayout({
+        bindGroupLayouts: [this.getEdtSeedBindGroupLayout(contentSampleType)],
+        label: `EDT Seed Pipeline Layout [${contentSampleType}]`,
+      }),
+      compute: { module: shaderModule, entryPoint: 'cs_edt_seed' },
+    });
+    this.computePipelines.set(key, pipeline);
+    return pipeline;
+  }
+
+  getEdtJfaBindGroupLayout(): GPUBindGroupLayout {
+    const key = 'edt-jfa';
+    const cached = this.edtBindGroupLayouts.get(key);
+    if (cached) return cached;
+    const layout = this.device.createBindGroupLayout({
+      label: 'EDT JFA Bind Group Layout',
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: EDT_JFA_UNIFORM_BUFFER_SIZE },
+        },
+        { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'uint' } },
+        {
+          binding: 2,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: { access: 'write-only', format: 'rgba16uint' },
+        },
+      ],
+    });
+    this.edtBindGroupLayouts.set(key, layout);
+    return layout;
+  }
+
+  getEdtJfaPipeline(): GPUComputePipeline {
+    const key = 'edt-jfa';
+    const cached = this.computePipelines.get(key);
+    if (cached) return cached;
+    let shaderModule = this.edtShaderModules.get('jfa');
+    if (!shaderModule) {
+      shaderModule = this.device.createShaderModule({
+        code: buildEdtJfaWgsl(),
+        label: 'EDT JFA WGSL Module',
+      });
+      this.edtShaderModules.set('jfa', shaderModule);
+    }
+    const pipeline = this.device.createComputePipeline({
+      label: 'EDT JFA Compute Pipeline',
+      layout: this.device.createPipelineLayout({
+        bindGroupLayouts: [this.getEdtJfaBindGroupLayout()],
+        label: 'EDT JFA Pipeline Layout',
+      }),
+      compute: { module: shaderModule, entryPoint: 'cs_edt_jfa' },
+    });
+    this.computePipelines.set(key, pipeline);
+    return pipeline;
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Stroke compose compute pipeline (cs_stroke_compose)
+  // ──────────────────────────────────────────────────────────
+
+  getStrokeComposeBindGroupLayout(
+    storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
+  ): GPUBindGroupLayout {
+    const cached = this.strokeComposeBindGroupLayouts.get(storageFormat);
+    if (cached) return cached;
+    const sampleType = storageFormat === 'rgba32float' ? 'unfilterable-float' : 'float';
+    const layout = this.device.createBindGroupLayout({
+      label: `Stroke Compose Bind Group Layout [${storageFormat}]`,
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: STROKE_COMPOSE_UNIFORM_BUFFER_SIZE },
+        },
+        { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'uint' } },
+        { binding: 2, visibility: GPUShaderStage.COMPUTE, texture: { sampleType } },
+        {
+          binding: 3,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: { access: 'write-only', format: storageFormat },
+        },
+      ],
+    });
+    this.strokeComposeBindGroupLayouts.set(storageFormat, layout);
+    return layout;
+  }
+
+  /** Stroke compose pipeline (pointwise, workgroup 8x8), one per working format. */
+  getStrokeComposePipeline(
+    storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
+  ): GPUComputePipeline {
+    const key = `stroke-compose:${storageFormat}`;
+    const cached = this.computePipelines.get(key);
+    if (cached) return cached;
+    let shaderModule = this.strokeComposeShaderModules.get(storageFormat);
+    if (!shaderModule) {
+      shaderModule = this.device.createShaderModule({
+        code: buildStrokeComposeWgsl(storageFormat),
+        label: `Stroke Compose WGSL Module (${storageFormat})`,
+      });
+      this.strokeComposeShaderModules.set(storageFormat, shaderModule);
+    }
+    const pipeline = this.device.createComputePipeline({
+      label: `Stroke Compose Compute Pipeline (${storageFormat})`,
+      layout: this.device.createPipelineLayout({
+        bindGroupLayouts: [this.getStrokeComposeBindGroupLayout(storageFormat)],
+        label: `Stroke Compose Pipeline Layout [${storageFormat}]`,
+      }),
+      compute: { module: shaderModule, entryPoint: 'cs_stroke_compose' },
+    });
+    this.computePipelines.set(key, pipeline);
+    return pipeline;
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Effect mask-bake compute pipeline (cs_effect_mask_bake)
+  // ──────────────────────────────────────────────────────────
+
+  getEffectMaskBakeBindGroupLayout(
+    storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
+  ): GPUBindGroupLayout {
+    const cached = this.effectMaskBakeBindGroupLayouts.get(storageFormat);
+    if (cached) return cached;
+    const contentSampleType = storageFormat === 'rgba32float' ? 'unfilterable-float' : 'float';
+    const layout = this.device.createBindGroupLayout({
+      label: `Effect Mask Bake Bind Group Layout [${storageFormat}]`,
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: EFFECT_MASK_BAKE_UNIFORM_BUFFER_SIZE },
+        },
+        { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: contentSampleType } },
+        { binding: 2, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } },
+        { binding: 3, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } },
+        { binding: 4, visibility: GPUShaderStage.COMPUTE, sampler: { type: 'filtering' } },
+        {
+          binding: 5,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: { access: 'write-only', format: storageFormat },
+        },
+      ],
+    });
+    this.effectMaskBakeBindGroupLayouts.set(storageFormat, layout);
+    return layout;
+  }
+
+  getEffectMaskBakePipeline(
+    storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
+  ): GPUComputePipeline {
+    const key = `effect-mask-bake:${storageFormat}`;
+    const cached = this.computePipelines.get(key);
+    if (cached) return cached;
+    let shaderModule = this.effectMaskBakeShaderModules.get(storageFormat);
+    if (!shaderModule) {
+      shaderModule = this.device.createShaderModule({
+        code: buildEffectMaskBakeWgsl(storageFormat),
+        label: `Effect Mask Bake WGSL Module (${storageFormat})`,
+      });
+      this.effectMaskBakeShaderModules.set(storageFormat, shaderModule);
+    }
+    const pipeline = this.device.createComputePipeline({
+      label: `Effect Mask Bake Compute Pipeline (${storageFormat})`,
+      layout: this.device.createPipelineLayout({
+        bindGroupLayouts: [this.getEffectMaskBakeBindGroupLayout(storageFormat)],
+        label: `Effect Mask Bake Pipeline Layout [${storageFormat}]`,
+      }),
+      compute: { module: shaderModule, entryPoint: 'cs_effect_mask_bake' },
+    });
+    this.computePipelines.set(key, pipeline);
+    return pipeline;
+  }
 
   getLayerPipelineLayout(): GPUPipelineLayout {
     if (this.layerPipelineLayout) return this.layerPipelineLayout;

@@ -81,7 +81,14 @@ export function runFilterChain(
     sourceIntentApplied: inputIntentApplied,
     // The output holds ONLY the window's content — the compositor's UV map
     // must re-express layer.crop relative to it (see resolveLayerGeometry).
-    contentWindow: window,
+    // Window coordinates are the OUTPUT texture's own texels (the window
+    // origin landed at texel (0,0)), i.e. asset basis.
+    contentWindow: window
+      ? { x: window.x, y: window.y, w: window.w, h: window.h, basis: 'asset' as const }
+      : undefined,
+    // The whole output texture is content (the window origin is texel (0,0)),
+    // so the effect prepass rings the full texture.
+    contentRectInTexture: { x: 0, y: 0, w: filtered.width, h: filtered.height },
     // A beyondSource window (alphaFeather's unclamped feather ring) is REAL
     // visible content — the drawn quad must cover the whole window, not just
     // the crop, or the feathered ring lands on no screen pixels.

@@ -345,12 +345,6 @@ export interface VectorSourceContributor {
   translate(layer: Layer, ctx: VectorSourceContext): LayerSource | undefined;
 }
 
-/** Engine-side extension slots carried on a plugin under
- *  `contributions.engine`. Each slot's registry anchor lives in this module
- *  (the seam that consumes it). */
-export interface EngineContribution {
-  readonly vectorSource?: VectorSourceContributor;
-}
 
 const contributors = new Map<string, VectorSourceContributor>();
 

@@ -34,6 +34,12 @@ export interface ActionOption {
   divider?: boolean;
   /** Show a checkmark on the right side of the option. */
   checked?: boolean;
+  /**
+   * Arbitrary status node rendered in the option's right slot (e.g. an eye
+   * badge that reflects on/off state) — display-only, carries no click
+   * semantics of its own.
+   */
+  trailing?: React.ReactNode;
   /** Sub-menu options — renders a nested fly-out on hover. */
   children?: ActionOption[];
   /**
@@ -70,6 +76,15 @@ interface ActionDropdownProps {
    * override — the chevron's right edge IS the compound control's right edge.
    */
   anchorRef?: React.RefObject<HTMLElement | null>;
+  /**
+   * OPT-IN hover-close: when true, an OPEN menu closes automatically once the
+   * pointer leaves BOTH the trigger and the menu (with a short bridging delay
+   * so crossing the gap between the two surfaces does not flicker it shut).
+   * Default FALSE — the click-toggle + click-outside contract stays untouched
+   * for every existing caller; only title-bar pickers that read as hover
+   * menus should turn this on.
+   */
+  closeOnMouseLeave?: boolean;
 }
 
 export default function ActionDropdown({
@@ -84,11 +99,34 @@ export default function ActionDropdown({
   maxVisibleItems,
   matchTriggerWidth = false,
   anchorRef,
+  closeOnMouseLeave = false,
 }: ActionDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [coords, setCoords] = useState({ top: 0, bottom: 0, left: 0, width: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const hoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** OPT-IN hover-close: leaving trigger OR menu arms a delayed close. */
+  const scheduleHoverClose = () => {
+    if (!closeOnMouseLeave) return;
+    if (hoverCloseTimerRef.current) clearTimeout(hoverCloseTimerRef.current);
+    hoverCloseTimerRef.current = setTimeout(() => setIsOpen(false), 120);
+  };
+
+  /** OPT-IN hover-close: re-entering trigger OR menu cancels the pending close. */
+  const cancelHoverClose = () => {
+    if (!closeOnMouseLeave) return;
+    if (hoverCloseTimerRef.current) {
+      clearTimeout(hoverCloseTimerRef.current);
+      hoverCloseTimerRef.current = null;
+    }
+  };
+
+  // Never leak a pending close timer across unmounts.
+  useEffect(() => () => {
+    if (hoverCloseTimerRef.current) clearTimeout(hoverCloseTimerRef.current);
+  }, []);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -130,7 +168,12 @@ export default function ActionDropdown({
   };
 
   return (
-    <div ref={containerRef} className={`relative inline-block select-none outline-none ${className}`}>
+    <div
+      ref={containerRef}
+      className={`relative inline-block select-none outline-none ${className}`}
+      onMouseEnter={cancelHoverClose}
+      onMouseLeave={scheduleHoverClose}
+    >
       {/* Trigger Area — suppress mousedown default so clickable trigger
           content (buttons, tabIndex spans) never takes focus on click;
           otherwise a subsequent Space/Enter re-fires the trigger instead of
@@ -149,6 +192,8 @@ export default function ActionDropdown({
           <EditorPortal segment="window">
             <motion.div
               ref={menuRef}
+              onMouseEnter={cancelHoverClose}
+              onMouseLeave={scheduleHoverClose}
               initial={{ opacity: 0, y: direction === 'up' ? -8 : 8, scale: 0.95 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: direction === 'up' ? -8 : 8, scale: 0.95 }}
@@ -281,6 +326,7 @@ export default function ActionDropdown({
                         <span>{opt.label}</span>
                       </div>
                       <div className="flex items-center gap-1.5">
+                        {opt.trailing && <span className="flex items-center">{opt.trailing}</span>}
                         {opt.description && (
                           <span className="text-[7.5px] font-bold opacity-40 tabular-nums">
                             {opt.description}
