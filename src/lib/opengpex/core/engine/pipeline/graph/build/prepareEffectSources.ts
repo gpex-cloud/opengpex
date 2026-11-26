@@ -75,6 +75,7 @@ import { GPUTextureUsage } from '@opengpex/editor/core/engine/gpu/constants';
 import { AdjustPrePass } from '../composite/AdjustPrePass';
 import { EffectStrokePass, sweepEdtCache } from '../composite/EffectStrokePass';
 import { EffectShadowPass } from '../composite/EffectShadowPass';
+import { EffectOverlayPass } from '../composite/EffectOverlayPass';
 import { resolveSourceGamutId } from '../support/sourceGamut';
 import { expandWindowForStroke, expandWindowForPads, effectWindowPadsPx, effectReachPx, strokeContentBase } from './support/effectRoi';
 import {
@@ -96,13 +97,17 @@ interface TexelRect {
   h: number;
 }
 
-/** The stroke / shadow stages carried by a layer's translated effect chain. */
+/** The stroke / shadow / color-overlay stages carried by a layer's translated effect chain. */
 function strokeStages(layer: CompiledScene['scene']['layers'][number]) {
   return (layer.effects ?? []).filter((s) => s.kind === 'stroke');
 }
 
 function shadowStages(layer: CompiledScene['scene']['layers'][number]) {
   return (layer.effects ?? []).filter((s) => s.kind === 'shadow');
+}
+
+function overlayStages(layer: CompiledScene['scene']['layers'][number]) {
+  return (layer.effects ?? []).filter((s) => s.kind === 'color-overlay');
 }
 
 export function prepareEffectSources(
@@ -122,7 +127,11 @@ export function prepareEffectSources(
   for (const layer of compiled.scene.layers) {
     const stages = strokeStages(layer);
     const shadows = shadowStages(layer);
-    if (stages.length === 0 && shadows.length === 0) continue;
+    const overlays = overlayStages(layer);
+    // ANY enabled effect category claims the prepass — the gate must not be
+    // pinned to the stroke/shadow pair, or an overlay-only layer would skip
+    // the prepass entirely and render un-overlaid.
+    if (stages.length === 0 && shadows.length === 0 && overlays.length === 0) continue;
     const prepared = sources.get(layer.id);
     if (!prepared) continue; // asset not resident yet — the layer skips this frame anyway
 
@@ -291,7 +300,10 @@ export function prepareEffectSources(
     // base-sized silhouette whose out-of-bounds is truthful transparency.
     const baseIsSubRect = !solidColor
       && (base.x > 0 || base.y > 0 || base.x + base.w < content.width || base.y + base.h < content.height);
-    const needsVisibilityCrop = shadows.length > 0 && baseIsSubRect;
+    // Not shadow-only: an overlay reads the content colour too, so a cropped
+    // shared-source fragment must give it the same truthful-transparency
+    // crop (opaque neighbor pixels would be dyed INTO the visible content).
+    const needsVisibilityCrop = (shadows.length > 0 || overlays.length > 0) && baseIsSubRect;
     if (bmaskTex || vmaskBake || needsVisibilityCrop) {
       const bx0 = solidColor ? 0 : Math.floor(base.x);
       const by0 = solidColor ? 0 : Math.floor(base.y);
@@ -396,6 +408,45 @@ export function prepareEffectSources(
     let currentIsLinear = contentIsLinear;
     let currentGamutId = gamutId;
     const baseAlphaKey = `${content.width}x${content.height}|b:${bmaskTex ? 1 : 0}|v:${vmaskBake ? 1 : 0}|a:${layer.adjustStages?.length ?? 0}|f:${prepared.contentWindow ? 1 : 0}`;
+
+    // ── 1c. Overlay chain (surface effects, BEFORE the stroke) ─────────
+    // EXECUTION ORDER vs VISUAL ORDER: this deliberately runs BEFORE the
+    // stroke chain even though the overlay stacks ABOVE the stroke visually.
+    // The stroke compose flattens its ring INTO the content colour
+    // (mix(c_rgb, stroke_color, ...) written straight into dst), so an
+    // overlay that ran on `current` after a stroke would dye the flattened
+    // ring pixels along with the content. Applied first, the overlay
+    // re-colours only the mask-baked content pixels (weight = opacity ·
+    // coverage, ALPHA untouched), and the stroke then rings the
+    // overlay-coloured content with a clean, undyed ring.
+    // GEOMETRY: the overlay output is WINDOW-ALIGNED at the same windowTexel
+    // the declaration reports (a content-sized output under a window-sized
+    // declaration would stretch the composite quad — the overlay-only
+    // "slightly enlarged content" incident). The first stage samples the
+    // content at the window offset; later stages consume the window-aligned
+    // previous output.
+    let overlayWindowAligned = false;
+    for (let i = 0; i < overlays.length; i++) {
+      const stage = overlays[i];
+      if (stage.kind !== 'color-overlay') continue;
+      current = EffectOverlayPass.run(encoder, ctx, {
+        layerId: layer.id,
+        current,
+        currentIsLinear,
+        gamutId: currentGamutId,
+        windowTexel: overlayWindowAligned
+          ? { x: 0, y: 0, w: windowTexel.w, h: windowTexel.h }
+          : windowTexel,
+        overlayColor: stage.color,
+        blendMode: stage.blendMode,
+        opacity: stage.opacity,
+      });
+      // The compose output is working-LINEAR in the working gamut,
+      // window-aligned.
+      overlayWindowAligned = true;
+      currentIsLinear = true;
+      currentGamutId = 0;
+    }
     for (let i = 0; i < stages.length; i++) {
       const stage = stages[i];
       if (stage.kind !== 'stroke') continue;
@@ -403,8 +454,12 @@ export function prepareEffectSources(
       activeEdtKeys.add(cacheId);
       // Only the FIRST instance faces the original content (window offset
       // inside it); later instances consume the previous window-aligned
-      // output, whose origin IS the window origin.
-      const windowInContent: TexelRect = i === 0
+      // output, whose origin IS the window origin. When an overlay ran, the
+      // "original content" IS already window-aligned (the overlay output),
+      // so the first stroke stage reads it at zero offset too — and its
+      // visible sub-rect re-bases into window coordinates.
+      const overlayRan = overlays.length > 0;
+      const windowInContent: TexelRect = i === 0 && !overlayRan
         ? windowTexel
         : { x: 0, y: 0, w: windowTexel.w, h: windowTexel.h };
       current = EffectStrokePass.run(encoder, ctx, {
@@ -417,7 +472,11 @@ export function prepareEffectSources(
         strokeColor: stage.color,
         widthTexels: stage.widthPx * density,
         position: stage.position,
-        contentVisibleTexel: i === 0 ? base : undefined,
+        contentVisibleTexel: i === 0
+          ? (overlayRan
+            ? { x: base.x - windowTexel.x, y: base.y - windowTexel.y, w: base.w, h: base.h }
+            : base)
+          : undefined,
         edtAlphaKey: i === 0 ? baseAlphaKey : undefined,
       });
       // Subsequent instances compose over the previous output: already
@@ -442,7 +501,7 @@ export function prepareEffectSources(
     // not). Only the FOREGROUND side of the compose switches coordinates: the
     // raw content's top-left sits at -windowTexel inside the window, while a
     // stroke-composed foreground is already window-aligned.
-    let currentAligned = stages.length > 0;
+    let currentAligned = stages.length > 0 || overlays.length > 0;
     for (let i = 0; i < shadows.length; i++) {
       const stage = shadows[i];
       if (stage.kind !== 'shadow') continue;

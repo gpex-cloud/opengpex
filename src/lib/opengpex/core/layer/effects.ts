@@ -46,6 +46,7 @@
  */
 
 import type {
+  ColorOverlayParams,
   EffectCategory,
   EffectInstance,
   Layer,
@@ -64,6 +65,7 @@ import { fromHex } from '@opengpex/editor/core/engine/color';
 export const EFFECT_CATEGORY_LABELS: Readonly<Record<string, string>> = {
   stroke: 'Stroke',
   shadow: 'Shadow',
+  colorOverlay: 'Color Overlay',
 };
 
 // ─── Defaults ─────────────────────────────────────────────────────────────────
@@ -91,9 +93,20 @@ export function defaultShadowParams(): ShadowParams {
   };
 }
 
+/**
+ * First-release color-overlay defaults: red at Multiply, full opacity — the
+ * Photoshop Color Overlay dialog's own factory state (the same "one-shot
+ * success" contract as the stroke/shadow defaults).
+ */
+export function defaultColorOverlayParams(): ColorOverlayParams {
+  return { color: fromHex('#ff0000'), blendMode: 'multiply', opacity: 1 };
+}
+
 /** Category-specific default parameters (used by append + enable-create paths). */
-export function defaultParamsFor(category: EffectCategory): StrokeParams | ShadowParams {
-  return category === 'stroke' ? defaultStrokeParams() : defaultShadowParams();
+export function defaultParamsFor(category: EffectCategory): StrokeParams | ShadowParams | ColorOverlayParams {
+  if (category === 'stroke') return defaultStrokeParams();
+  if (category === 'colorOverlay') return defaultColorOverlayParams();
+  return defaultShadowParams();
 }
 
 /**
@@ -108,7 +121,7 @@ export function newEffectInstanceId(): string {
 /** Create one detached chain instance for `category` with default parameters. */
 export function createEffectInstance(
   category: EffectCategory,
-  opts: { params?: StrokeParams | ShadowParams; id?: string; enabled?: boolean } = {},
+  opts: { params?: StrokeParams | ShadowParams | ColorOverlayParams; id?: string; enabled?: boolean } = {},
 ): EffectInstance {
   return {
     id: opts.id ?? newEffectInstanceId(),
@@ -174,6 +187,13 @@ export function isCategoryFloorInstance(layer: Layer, id: string): boolean {
 export const EFFECT_RENDER_RANK: Readonly<Record<EffectCategory, number>> = {
   shadow: 0,
   stroke: 1,
+  // The overlay lives ON the content surface (beneath the stroke visually):
+  // rank 2 keeps the chain evaluation order stable for the translator and the
+  // layers-list rows; the prepass executes the overlay BEFORE the stroke
+  // regardless (surface effects act on the mask-baked content, stroke then
+  // rings the overlay-colored pixels — visual stacking and execution order
+  // are deliberately different axes).
+  colorOverlay: 2,
 };
 
 export function sortEffectInstancesForRender(chain: EffectInstance[]): EffectInstance[] {
@@ -200,7 +220,7 @@ export function appendEffectInstance(
   category: EffectCategory,
   opts: {
     afterId?: string;
-    params?: StrokeParams | ShadowParams;
+    params?: StrokeParams | ShadowParams | ColorOverlayParams;
     /**
      * Caller-supplied id (the drawer generates one so it can activate the new
      * tab immediately — the patch return value alone cannot carry the id).
@@ -281,7 +301,7 @@ export function removeEffectInstance(layer: Layer, id: string): Partial<Layer> |
 export function updateEffectParams(
   layer: Layer,
   id: string,
-  params: StrokeParams | ShadowParams,
+  params: StrokeParams | ShadowParams | ColorOverlayParams,
 ): Partial<Layer> | null {
   const chain = getEffectChain(layer);
   const at = chain.findIndex((e) => e.id === id);
@@ -308,4 +328,16 @@ export function setEffectInstanceEnabled(
   const next = [...chain];
   next[at] = { ...next[at], enabled };
   return { effects: next };
+}
+
+/**
+ * Disable every effect instance on the layer in ONE patch (the drawer's
+ * "disable all" action). Returns null when there is nothing to do — no chain,
+ * or every instance is already disabled — so callers keep the patch channel's
+ * no-op-write hygiene (a null patch never lands a Redux write).
+ */
+export function disableAllEffectInstances(layer: Layer): Partial<Layer> | null {
+  const chain = getEffectChain(layer);
+  if (chain.length === 0 || chain.every((e) => !e.enabled)) return null;
+  return { effects: chain.map((e) => ({ ...e, enabled: false })) };
 }

@@ -231,8 +231,8 @@ export const MAX_ADJUSTMENT_MASKS_PER_LAYER = 16;
 
 // ─── Layer render effects (A8) ───────────────────────────────────────────────
 
-/** Supported render-effect categories. First release ships stroke + shadow; the chain model admits future categories (glow / inner shadow / overlay / bevel) without migration. */
-export type EffectCategory = 'stroke' | 'shadow';
+/** Supported render-effect categories. Shipped: stroke, shadow, colorOverlay; the chain model admits future categories (glow / inner shadow / gradient / pattern / bevel) without migration. */
+export type EffectCategory = 'stroke' | 'shadow' | 'colorOverlay';
 
 /**
  * Outward stroke parameters. The first release renders OUTWARD strokes only
@@ -283,6 +283,26 @@ export interface ShadowParams {
 }
 
 /**
+ * Color-overlay parameters: a solid colour blended INTO the layer's own
+ * visible pixels (a surface effect — the overlay never extends the content's
+ * silhouette and keeps the content alpha untouched).
+ *
+ * `blendMode` reuses {@link LayerBlendMode} (the full 16-mode set — no new
+ * enum members). Both optional fields tolerate documents written before the
+ * effect existed or before the fields were added: absent `blendMode` reads
+ * as `'multiply'` (the Photoshop Color Overlay default) and absent `opacity`
+ * reads as 1.
+ */
+export interface ColorOverlayParams {
+  /** TRC-encoded overlay colour (same currency as fillColor / penStyle). */
+  color: ColorValue;
+  /** How the overlay colour combines with the content colour (default `'multiply'`). */
+  blendMode?: LayerBlendMode;
+  /** Overlay strength 0..1 (UI range 0–100). Default 1. */
+  opacity?: number;
+}
+
+/**
  * One non-destructive render-effect instance on a layer — the chain-item
  * sibling of {@link AdjustmentMask} (same structural vocabulary: id /
  * category / params / enabled / optional coverage shape / preset provenance).
@@ -309,8 +329,8 @@ export interface EffectInstance {
   id: string;
   category: EffectCategory;
   enabled: boolean;
-  /** Discriminated by `category`: stroke → {@link StrokeParams}, shadow → {@link ShadowParams}. */
-  params: StrokeParams | ShadowParams;
+  /** Discriminated by `category`: stroke → {@link StrokeParams}, shadow → {@link ShadowParams}, colorOverlay → {@link ColorOverlayParams}. */
+  params: StrokeParams | ShadowParams | ColorOverlayParams;
   /** Reserved future scoping seam (first release: never written, never read). */
   shape?: LocalPolygon;
   /** Reserved future scoping seam — feather radius (px) for the shape edge. */

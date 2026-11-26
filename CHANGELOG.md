@@ -2,6 +2,13 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.72
+
+- Layers: new Color Overlay effect — tint any layer's visible content with a single color while keeping every detail edge, with the full set of 16 blend modes (grouped like the reference product's menu) and a strength slider.
+- Layers: the effects panel now lists only the effects that actually work (Stroke, Shadow, Color Overlay) — future effects join the list as they ship, instead of showing empty placeholders.
+- Layers: the effects panel header gains a disable-all button that turns every effect off in one click (nothing is removed — each effect stays in its list and can be re-enabled).
+- Brush: fix strokes with taper off occasionally failing to draw after a saved document is reopened (a frozen point list could block new strokes).
+
 ## 2.0.71
 
 - Layers: new Drop Shadow effect — add a shadow behind any layer's visible content, with color, offset (drag the angle dial to point the shadow in any direction), softness, spread and strength.

@@ -100,19 +100,14 @@ export interface EffectTabDef {
 }
 
 export const EFFECT_TABS: readonly EffectTabDef[] = [
-  // Display order follows the IMPLEMENTATION order (user ruling 20261126:
-  // shipped categories lead; the remaining eight keep their Photoshop Layer
-  // Style menu order), not the PS dialog order.
+  // Only SHIPPED categories are listed (user ruling 20261126: the rail shows
+  // implemented effects only; each future effect joins this list — third slot
+  // onward, in ship order — when its render pipeline lands, by adding one
+  // entry with `available: true`). The rail machinery keeps the `available`
+  // flag so that future list growth needs no plumbing changes.
   { id: 'stroke', label: 'Stroke', available: true },
   { id: 'shadow', label: 'Shadow', available: true },
-  { id: 'bevel', label: 'Bevel & Emboss', available: false },
-  { id: 'innerShadow', label: 'Inner Shadow', available: false },
-  { id: 'innerGlow', label: 'Inner Glow', available: false },
-  { id: 'satin', label: 'Satin', available: false },
-  { id: 'colorOverlay', label: 'Color Overlay', available: false },
-  { id: 'gradientOverlay', label: 'Gradient Overlay', available: false },
-  { id: 'patternOverlay', label: 'Pattern Overlay', available: false },
-  { id: 'outerGlow', label: 'Outer Glow', available: false },
+  { id: 'colorOverlay', label: 'Color Overlay', available: true },
 ] as const;
 
 /** The shipped (chain-model-backed) categories, in tab display order. */
@@ -120,13 +115,14 @@ export const AVAILABLE_TAB_IDS: readonly EffectTabId[] = EFFECT_TABS
   .filter((t) => t.available)
   .map((t) => t.id as EffectTabId);
 
-export type EffectTabId = 'shadow' | 'stroke';
+export type EffectTabId = 'shadow' | 'stroke' | 'colorOverlay';
 
 /**
  * Categories the "+" accepts, per implementation phase. P3 ships stroke's
- * parameter pipeline; shadow joins at P5.
+ * parameter pipeline; shadow joins at P5; color overlay joins with its
+ * pipeline.
  */
-export const ADDABLE_CATEGORIES: readonly EffectTabId[] = ['stroke'];
+export const ADDABLE_CATEGORIES: readonly EffectTabId[] = ['stroke', 'colorOverlay'];
 
 /**
  * A category tab with NO instance yet carries this virtual id — a TRANSIENT

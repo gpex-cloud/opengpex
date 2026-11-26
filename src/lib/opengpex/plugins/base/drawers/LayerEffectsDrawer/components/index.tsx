@@ -63,6 +63,7 @@ import { ChevronDown } from "lucide-react";
 import type { EffectCategory, EffectInstance } from "@opengpex/editor/core/types/models";
 import {
   appendEffectInstance,
+  disableAllEffectInstances,
   ensureEffectCategoryInstance,
   effectInstanceOrdinal,
   getEffectChain,
@@ -72,6 +73,7 @@ import {
 import type { LayerEffectsDrawerCommandsMap, LayerEffectsDrawerSignalsMap } from "../commands.d";
 import { StrokePanel } from "./panels/StrokePanel";
 import { ShadowPanel } from "./panels/ShadowPanel";
+import { ColorOverlayPanel } from "./panels/ColorOverlayPanel";
 import { EmptyCategoryPanel } from "./panels/shared";
 import {
   ADDABLE_CATEGORIES,
@@ -115,10 +117,10 @@ function categoryLabel(base: string, chain: readonly EffectInstance[], instanceI
 }
 
 /**
- * Build the rail: all ten categories in PS order; every available category
- * contributes max(1, instances) tabs at its menu position (the first anchors
- * the category slot, extras follow); unavailable categories contribute one
- * placeholder tab.
+ * Build the rail: every listed category (shipped ones only — see EFFECT_TABS)
+ * contributes max(1, instances) tabs at its list position (the first anchors
+ * the category slot, extras follow); a category with no instance on this
+ * layer contributes one virtual tab (eye click creates the first instance).
  */
 function buildRail(chain: readonly EffectInstance[]): RailTab[] {
   const tabs: RailTab[] = [];
@@ -339,6 +341,8 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
   }, [rail, activeLayer, actions, removeEffectInstanceCmd]);
 
   const isDisabled = !activeLayer;
+  // The disable-all header action only matters while at least one instance is on.
+  const hasEnabledInstances = rail.some((t) => t.instance?.enabled === true);
 
   return (
     <div className="flex flex-col gap-1 pt-1 pb-1">
@@ -412,24 +416,46 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
             </div>
           }
           actions={
-            <button
-              disabled={!canAdd}
-              title={canAdd
-                ? `Add ${EFFECT_CATEGORY_LABELS[activeCategory] ?? activeCategory} instance (inserted beneath the active tab)`
-                : "Adding arrives with the shadow pipeline (P5)"}
-              onClick={() => {
-                if (!activeLayer || !applyEffectPatchCmd || !canAdd) return;
-                const id = newEffectInstanceId();
-                const patch = appendEffectInstance(activeLayer, activeCategory as EffectCategory, { afterId: activeRailTab?.instance?.id, id });
-                applyEffectPatchCmd.execute({ patch });
-                selectTab(id);
-              }}
-              className={`p-1 rounded outline-none ${canAdd
-                ? "cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-main)]"
-                : "text-[var(--text-muted)] opacity-40 cursor-not-allowed"}`}
-            >
-              <Plus size={12} />
-            </button>
+            <>
+              {/* Disable-all: one patch turns every instance off (instances
+                  stay listed — same semantics as a per-instance eye toggle,
+                  never a removal). Always visible next to the add button;
+                  dimmed while nothing is enabled (no-op by contract). */}
+              <button
+                disabled={!hasEnabledInstances}
+                title={hasEnabledInstances
+                  ? "Disable all effects on this layer"
+                  : "No enabled effects to disable"}
+                onClick={() => {
+                  if (!activeLayer || !applyEffectPatchCmd) return;
+                  const patch = disableAllEffectInstances(activeLayer);
+                  if (patch) applyEffectPatchCmd.execute({ patch });
+                }}
+                className={`p-1 rounded outline-none ${hasEnabledInstances
+                  ? "cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                  : "text-[var(--text-muted)] opacity-40 cursor-not-allowed"}`}
+              >
+                <EyeOff size={12} />
+              </button>
+              <button
+                disabled={!canAdd}
+                title={canAdd
+                  ? `Add ${EFFECT_CATEGORY_LABELS[activeCategory] ?? activeCategory} instance (inserted beneath the active tab)`
+                  : "Adding arrives with the shadow pipeline (P5)"}
+                onClick={() => {
+                  if (!activeLayer || !applyEffectPatchCmd || !canAdd) return;
+                  const id = newEffectInstanceId();
+                  const patch = appendEffectInstance(activeLayer, activeCategory as EffectCategory, { afterId: activeRailTab?.instance?.id, id });
+                  applyEffectPatchCmd.execute({ patch });
+                  selectTab(id);
+                }}
+                className={`p-1 rounded outline-none ${canAdd
+                  ? "cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                  : "text-[var(--text-muted)] opacity-40 cursor-not-allowed"}`}
+              >
+                <Plus size={12} />
+              </button>
+            </>
           }
           actionsClassName="gap-1"
         />
@@ -469,6 +495,12 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
                   />
                 ) : activeRailTab.instance.category === "shadow" ? (
                   <ShadowPanel
+                    key={activeRailTab.instance.id}
+                    layer={activeLayer}
+                    instance={activeRailTab.instance}
+                  />
+                ) : activeRailTab.instance.category === "colorOverlay" ? (
+                  <ColorOverlayPanel
                     key={activeRailTab.instance.id}
                     layer={activeLayer}
                     instance={activeRailTab.instance}

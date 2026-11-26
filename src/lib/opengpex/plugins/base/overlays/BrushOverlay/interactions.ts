@@ -25,14 +25,14 @@
  * @module plugins/base/overlays/BrushOverlay/interactions
  */
 
-import {InteractionHandler, InteractionEvent, Layer, StrokeData, StrokePoint, asLocalShape} from '@opengpex/editor/core/types';
-import {LayerFactory} from '@opengpex/editor/core/layer';
-import {fromHex, type ColorValue} from '@opengpex/editor/core/engine/color';
-import {PERF_MON} from '@opengpex/editor/core/helpers/config';
-import {InteractionTransaction} from '@opengpex/editor/stage/interaction/Transaction';
-import {CraftDrawerAPI} from '../../drawers/CraftDrawer/protocols';
-import {ColorOptionsAPI} from '../../options/ColorOptions/protocols';
-import {advanceRope, applyTaper, densifyTaperZones, taperZones, tightenStroke} from './geometry';
+import { InteractionHandler, InteractionEvent, Layer, StrokeData, StrokePoint, asLocalShape } from '@opengpex/editor/core/types';
+import { LayerFactory } from '@opengpex/editor/core/layer';
+import { fromHex, type ColorValue } from '@opengpex/editor/core/engine/color';
+import { PERF_MON } from '@opengpex/editor/core/helpers/config';
+import { InteractionTransaction } from '@opengpex/editor/stage/interaction/Transaction';
+import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
+import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
+import { advanceRope, applyTaper, densifyTaperZones, taperZones, tightenStroke } from './geometry';
 import * as P from './protocols';
 
 const ACTIVE_CRAFT_KEY = CraftDrawerAPI.signals.activeCraft;
@@ -128,15 +128,19 @@ const buildStrokeData = (
   // One clamped zone set for BOTH passes: the densifier and the envelope
   // locate the taper regions by arc distance and must agree on where each
   // ends. Head and tail are independent (per-end sliders, linkable in the UI).
+  // Shallow-copy `points` so Immer/Redux freezing committed layer payloads
+  // never freezes the mutable trajectory array still being extended on move
+  // (when taper is off, densifyTaperZones/applyTaper return their input as-is).
+  const srcPoints = [...points];
   const { head, tail } = taperZones(
-    points,
+    srcPoints,
     params.size * P.TAPER_LENGTH_PER_SIZE,
     params.taperHead,
     params.taperTail,
   );
   return {
     points: applyTaper(
-      densifyTaperZones(points, head, tail, P.MIN_SAMPLE_DISTANCE_PX),
+      densifyTaperZones(srcPoints, head, tail, P.MIN_SAMPLE_DISTANCE_PX),
       head,
       tail,
       params.pressureOpacity === true,
@@ -497,11 +501,11 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
       const featherPad = confinement?.feather ? Math.ceil(confinement.feather) : 0;
       const clipRect = confinement
         ? {
-            x: confinement.rect.x - featherPad - 1,
-            y: confinement.rect.y - featherPad - 1,
-            w: confinement.rect.w + 2 * featherPad + 2,
-            h: confinement.rect.h + 2 * featherPad + 2,
-          }
+          x: confinement.rect.x - featherPad - 1,
+          y: confinement.rect.y - featherPad - 1,
+          w: confinement.rect.w + 2 * featherPad + 2,
+          h: confinement.rect.h + 2 * featherPad + 2,
+        }
         : undefined;
       const tight = tightenStroke(strokePoints, params.size, frame.canvas, clipRect);
 

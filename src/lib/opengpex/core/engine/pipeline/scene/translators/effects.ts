@@ -36,7 +36,7 @@
  *     collapses back to `undefined` and the composite signature reverts to the
  *     historical no-effects token.
  *
- * Scope: `stroke` and `shadow` stages are emitted (P2 + P5); categories
+ * Scope: `stroke`, `shadow` and `color-overlay` stages are emitted; categories
  * without a render pipeline yet are skipped here — their enabled/disabled
  * state does not change pixels, the honest render behaviour for an
  * unimplemented category (the chain keeps the instance; the drawer keeps the tab).
@@ -46,7 +46,7 @@
  * @module core/engine/pipeline/scene/translators/effects
  */
 
-import type { Layer, StrokeParams, ShadowParams } from '@opengpex/editor/core/types';
+import type { Layer, StrokeParams, ShadowParams, ColorOverlayParams, LayerBlendMode } from '@opengpex/editor/core/types';
 import type { ColorValue } from '@opengpex/editor/core/engine/color/ColorValue';
 import { toWorkingLinearRgba } from '@opengpex/editor/core/engine/color';
 import type { WorkingColorSpace } from '@opengpex/editor/core/types';
@@ -72,6 +72,21 @@ function clampShadowOffset(v: number): number {
   if (!Number.isFinite(v)) return 0;
   // Guard against absurd deltas that would explode the ROI window.
   return Math.min(1000, Math.max(-1000, v));
+}
+
+/**
+ * Guard the overlay blend mode: only the 16 `LayerBlendMode` members render;
+ * anything else (corrupted document, hand-edited JSON) falls back to the
+ * Multiply default — the same Photoshop factory default the chain uses.
+ */
+function sanitizeOverlayBlendMode(mode: unknown): LayerBlendMode {
+  const KNOWN: readonly LayerBlendMode[] = [
+    'source-over', 'multiply', 'screen', 'overlay',
+    'darken', 'lighten', 'color-dodge', 'color-burn',
+    'hard-light', 'soft-light', 'difference', 'exclusion',
+    'hue', 'saturation', 'color', 'luminosity',
+  ];
+  return KNOWN.includes(mode as LayerBlendMode) ? (mode as LayerBlendMode) : 'multiply';
 }
 
 /**
@@ -106,6 +121,16 @@ export function translateLayerEffects(
         blurRadius: clampShadowScalar(params.blurRadius, 0, 0, 100),
         spreadPx: params.spreadPx === undefined ? undefined : clampShadowScalar(params.spreadPx, 0, 0, 1000),
         opacity: clampShadowScalar(params.opacity, 1, 0, 1),
+      });
+    } else if (instance.category === 'colorOverlay') {
+      // Optional-tolerant: documents written before the fields existed read
+      // blendMode as Multiply and opacity as full strength.
+      const params = instance.params as ColorOverlayParams;
+      stages.push({
+        kind: 'color-overlay',
+        color: toWorkingLinearRgba(params.color as ColorValue, workingSpace),
+        blendMode: sanitizeOverlayBlendMode(params.blendMode),
+        opacity: params.opacity === undefined ? 1 : clampShadowScalar(params.opacity, 1, 0, 1),
       });
     }
   }

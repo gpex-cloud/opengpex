@@ -710,6 +710,25 @@ export type EffectStageDesc =
     readonly spreadPx?: number;
     /** Shadow opacity 0..1 (the UI's "strength"). */
     readonly opacity: number;
+  }
+  /**
+   * COLOR OVERLAY (surface effect): the solid `color` blended into the
+   * content's own visible pixels by `blendMode` (the full 16-mode
+   * LayerBlendMode set), weighted by `opacity` and the per-texel content
+   * coverage. The content ALPHA is never changed — the overlay re-colours
+   * the surface without altering the silhouette. The prepass executes this
+   * stage on the mask-baked content BEFORE any stroke (the stroke then rings
+   * the overlay-coloured pixels), although the chain evaluation order ranks
+   * the category above the stroke.
+   */
+  | {
+    readonly kind: 'color-overlay';
+    /** Overlay colour: working-gamut LINEAR straight-alpha RGBA (0..1). */
+    readonly color: readonly [number, number, number, number];
+    /** How the overlay colour combines with the content colour (16 modes). */
+    readonly blendMode: LayerBlendMode;
+    /** Overlay strength 0..1. */
+    readonly opacity: number;
   };
 
 // ────────────────────────────────────────────────────────────

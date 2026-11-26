@@ -67,6 +67,10 @@ import {
   buildEffectShadowSpreadWgsl,
   EFFECT_SHADOW_SPREAD_UNIFORM_BUFFER_SIZE,
 } from '../shaders/effectShadowSpread';
+import {
+  buildEffectOverlayComposeWgsl,
+  EFFECT_OVERLAY_UNIFORM_BUFFER_SIZE,
+} from '../shaders/effectOverlayCompose';
 import { VMASK_WGSL, VMASK_UNIFORM_SIZE } from '../shaders/vmask';
 import { BMASK_COMBINE_WGSL, BMASK_COMBINE_UNIFORM_SIZE } from '../shaders/bmaskCombine';
 import { BLEND_UNIFORM_BUFFER_SIZE } from '../shaders/blend';
@@ -276,7 +280,7 @@ export class PipelineCache {
   private readonly edtBindGroupLayouts = new Map<string, GPUBindGroupLayout>();
   private readonly strokeComposeBindGroupLayouts = new Map<string, GPUBindGroupLayout>();
   private readonly effectMaskBakeBindGroupLayouts = new Map<string, GPUBindGroupLayout>();
-  private readonly effectShadowBindGroupLayouts = new Map<string, GPUBindGroupLayout>();
+  private readonly effectBindGroupLayouts = new Map<string, GPUBindGroupLayout>();
   /**
    * Shared WGSL module cache for the generic simple-compute-pipeline template
    * (`getOrCreateComputePipeline`) — keyed by caller-chosen module keys so
@@ -1145,7 +1149,7 @@ export class PipelineCache {
   getEffectShadowBindGroupLayout(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUBindGroupLayout {
-    const cached = this.effectShadowBindGroupLayouts.get(storageFormat);
+    const cached = this.effectBindGroupLayouts.get(storageFormat);
     if (cached) return cached;
     const currentSampleType = storageFormat === 'rgba32float' ? 'unfilterable-float' : 'float';
     const layout = this.device.createBindGroupLayout({
@@ -1165,7 +1169,7 @@ export class PipelineCache {
         },
       ],
     });
-    this.effectShadowBindGroupLayouts.set(storageFormat, layout);
+    this.effectBindGroupLayouts.set(storageFormat, layout);
     return layout;
   }
 
@@ -1186,7 +1190,7 @@ export class PipelineCache {
   getEffectShadowSpreadBindGroupLayout(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUBindGroupLayout {
-    const cached = this.effectShadowBindGroupLayouts.get(`spread:${storageFormat}`);
+    const cached = this.effectBindGroupLayouts.get(`spread:${storageFormat}`);
     if (cached) return cached;
     const currentSampleType = storageFormat === 'rgba32float' ? 'unfilterable-float' : 'float';
     const layout = this.device.createBindGroupLayout({
@@ -1206,7 +1210,7 @@ export class PipelineCache {
         },
       ],
     });
-    this.effectShadowBindGroupLayouts.set(`spread:${storageFormat}`, layout);
+    this.effectBindGroupLayouts.set(`spread:${storageFormat}`, layout);
     return layout;
   }
 
@@ -1221,6 +1225,50 @@ export class PipelineCache {
       wgsl: buildEffectShadowSpreadWgsl(storageFormat),
       entryPoint: 'cs_effect_shadow_spread',
       bindGroupLayout: this.getEffectShadowSpreadBindGroupLayout(storageFormat),
+    });
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Effect color-overlay compose compute pipeline (cs_effect_overlay_compose)
+  // ──────────────────────────────────────────────────────────
+
+  getEffectOverlayBindGroupLayout(
+    storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
+  ): GPUBindGroupLayout {
+    const cached = this.effectBindGroupLayouts.get(`overlay:${storageFormat}`);
+    if (cached) return cached;
+    const currentSampleType = storageFormat === 'rgba32float' ? 'unfilterable-float' : 'float';
+    const layout = this.device.createBindGroupLayout({
+      label: `Effect Overlay Bind Group Layout [${storageFormat}]`,
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: EFFECT_OVERLAY_UNIFORM_BUFFER_SIZE },
+        },
+        { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: currentSampleType } },
+        {
+          binding: 2,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: { access: 'write-only', format: storageFormat },
+        },
+      ],
+    });
+    this.effectBindGroupLayouts.set(`overlay:${storageFormat}`, layout);
+    return layout;
+  }
+
+  /** Overlay compose pipeline (pointwise, workgroup 8x8), one per working format. */
+  getEffectOverlayPipeline(
+    storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
+  ): GPUComputePipeline {
+    return this.getOrCreateComputePipeline({
+      cacheKey: `effect-overlay:${storageFormat}`,
+      label: `Effect Overlay [${storageFormat}]`,
+      moduleKey: `effect-overlay:${storageFormat}`,
+      wgsl: buildEffectOverlayComposeWgsl(storageFormat),
+      entryPoint: 'cs_effect_overlay_compose',
+      bindGroupLayout: this.getEffectOverlayBindGroupLayout(storageFormat),
     });
   }
 

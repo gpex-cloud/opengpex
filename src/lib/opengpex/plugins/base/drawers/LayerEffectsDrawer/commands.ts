@@ -45,7 +45,7 @@
  */
 
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
-import type { Layer, StrokeParams, ShadowParams } from '@opengpex/editor/core/types/models';
+import type { Layer, StrokeParams, ShadowParams, ColorOverlayParams } from '@opengpex/editor/core/types/models';
 import {
   removeEffectInstance,
   updateEffectParams,
@@ -69,7 +69,7 @@ export const EFFECT_COMMANDS = {
     name: 'Fast-Track Effect Params',
     execute: (
       ctx: EditorContextValue,
-      payload: { instanceId: string; params: StrokeParams | ShadowParams },
+      payload: { instanceId: string; params: StrokeParams | ShadowParams | ColorOverlayParams },
     ) => {
       const { activeFrame, activeLayer, actions } = ctx;
       if (!activeFrame || !activeLayer) return;
@@ -78,7 +78,7 @@ export const EFFECT_COMMANDS = {
       const patch = updateEffectParams(latest, payload.instanceId, payload.params);
       if (patch) actions.fast.overrideLayer(activeFrame.id, activeLayer.id, patch);
     },
-  } as EditorCommand<{ instanceId: string; params: StrokeParams | ShadowParams }, void>,
+  } as EditorCommand<{ instanceId: string; params: StrokeParams | ShadowParams | ColorOverlayParams }, void>,
 
   commitEffectParams: {
     id: P.CMD_COMMIT_EFFECT,

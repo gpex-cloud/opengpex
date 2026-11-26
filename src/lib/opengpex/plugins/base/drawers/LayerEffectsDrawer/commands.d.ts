@@ -8,13 +8,13 @@
  */
 
 import type { CommandInstance, InteractionSignalValue } from '@opengpex/editor/core/types';
-import type { StrokeParams, ShadowParams, Layer } from '@opengpex/editor/core/types/models';
+import type { StrokeParams, ShadowParams, ColorOverlayParams, Layer } from '@opengpex/editor/core/types/models';
 
 /** Type map for usePluginCommands<LayerEffectsDrawerCommandsMap>() */
 export interface LayerEffectsDrawerCommandsMap {
   [key: string]: { execute: (payload: never) => unknown; readonly name: string; readonly shortcutLabel: string };
   beginEffectEditCmd: CommandInstance;
-  fastUpdateEffectCmd: CommandInstance<{ instanceId: string; params: StrokeParams | ShadowParams }>;
+  fastUpdateEffectCmd: CommandInstance<{ instanceId: string; params: StrokeParams | ShadowParams | ColorOverlayParams }>;
   commitEffectCmd: CommandInstance;
   applyEffectPatchCmd: CommandInstance<{ patch: Partial<Layer> }>;
   removeEffectInstanceCmd: CommandInstance<{ instanceId: string }>;

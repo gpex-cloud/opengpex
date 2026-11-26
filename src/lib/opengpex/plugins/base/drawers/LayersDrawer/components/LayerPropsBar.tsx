@@ -22,86 +22,10 @@
 import React, { useMemo, useCallback, useRef } from "react";
 import { useEditorState, useEditorServices, usePluginCommands } from "@opengpex/editor/core/context";
 import type { LayerBlendMode } from "@opengpex/editor/core/types";
-import ActionDropdown, { type ActionOption } from "@opengpex/editor/widgets/ActionDropdown";
+import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
+import { BLEND_MODE_DROPDOWN_OPTIONS, BLEND_MODE_LABEL_MAP } from "@opengpex/editor/widgets/blendModes";
 import type { LayersDrawerCommandsMap } from "../commands.d";
 
-// ─── Blend Mode Configuration ────────────────────────────────────────────────
-
-interface BlendModeEntry {
-  value: LayerBlendMode;
-  label: string;
-}
-
-interface BlendModeGroup {
-  modes: BlendModeEntry[];
-}
-
-const BLEND_MODE_GROUPS: BlendModeGroup[] = [
-  {
-    modes: [
-      { value: 'source-over', label: 'Normal' },
-    ]
-  },
-  {
-    modes: [
-      { value: 'multiply', label: 'Multiply' },
-      { value: 'darken', label: 'Darken' },
-      { value: 'color-burn', label: 'Color Burn' },
-    ]
-  },
-  {
-    modes: [
-      { value: 'screen', label: 'Screen' },
-      { value: 'lighten', label: 'Lighten' },
-      { value: 'color-dodge', label: 'Color Dodge' },
-    ]
-  },
-  {
-    modes: [
-      { value: 'overlay', label: 'Overlay' },
-      { value: 'soft-light', label: 'Soft Light' },
-      { value: 'hard-light', label: 'Hard Light' },
-    ]
-  },
-  {
-    modes: [
-      { value: 'difference', label: 'Difference' },
-      { value: 'exclusion', label: 'Exclusion' },
-    ]
-  },
-  {
-    modes: [
-      { value: 'hue', label: 'Hue' },
-      { value: 'saturation', label: 'Saturation' },
-      { value: 'color', label: 'Color' },
-      { value: 'luminosity', label: 'Luminosity' },
-    ]
-  },
-];
-
-// Flat lookup for label display
-const BLEND_MODE_LABEL_MAP = new Map<string, string>();
-for (const group of BLEND_MODE_GROUPS) {
-  for (const mode of group.modes) {
-    BLEND_MODE_LABEL_MAP.set(mode.value, mode.label);
-  }
-}
-
-// Build ActionDropdown options with dividers between groups
-function buildDropdownOptions(): ActionOption[] {
-  const options: ActionOption[] = [];
-  for (let gi = 0; gi < BLEND_MODE_GROUPS.length; gi++) {
-    if (gi > 0) {
-      options.push({ divider: true });
-    }
-    for (const mode of BLEND_MODE_GROUPS[gi].modes) {
-      options.push({ label: mode.label, value: mode.value });
-    }
-  }
-  return options;
-}
-
-const DROPDOWN_OPTIONS = buildDropdownOptions();
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -209,7 +133,7 @@ export const LayerPropsBar = React.memo(function LayerPropsBar() {
         </span>
         <ActionDropdown
           trigger={blendTrigger}
-          options={DROPDOWN_OPTIONS}
+          options={BLEND_MODE_DROPDOWN_OPTIONS}
           onSelect={handleBlendModeSelect}
           disabled={disabled}
           cols={3}
