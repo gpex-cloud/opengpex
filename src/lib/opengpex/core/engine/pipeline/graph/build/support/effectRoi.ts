@@ -131,6 +131,18 @@ export function effectWindowPadsPx(stages: readonly EffectStageDesc[] | undefine
         top = Math.max(top, blur + spread);
         right = Math.max(right, blur + spread);
         bottom = Math.max(bottom, blur + spread);
+      } else if (s.kind === 'inner-glow' || s.kind === 'inner-shadow') {
+        // ⚠️ DELIBERATE ZERO: inner-edge effects clip INSIDE the content
+        // silhouette, so they never extend the OUTPUT window — this branch
+        // exists to DOCUMENT that, not to pad. Do NOT "fix" this into a
+        // real pad: the inner pipeline's internal blur/dilate TEMP textures
+        // carry their own ≥ (blurReach + spread + slack) headroom with a
+        // truthful 1.0 out-of-bounds fill (the inverted silhouette's true
+        // value beyond the content is 1, not 0 — a zero-OOB blur would eat
+        // the effect on full-bleed layers). The split is:
+        //   output window  — content extent (this zero),
+        //   internal temps — self-managed headroom (EffectInnerEdgePass).
+        void s;
       }
     }
   }

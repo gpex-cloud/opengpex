@@ -73,8 +73,16 @@ export interface SplitButtonProps {
   dropdownAlign?: 'left' | 'right';
   /** Border radius shape. 'rounded' = rounded-md (matches ActionGroup), 'pill' = rounded-full. Default 'rounded'. */
   shape?: 'rounded' | 'pill';
-  /** Disabled state for the entire control. */
+  /** Disabled state for the entire control (both halves). */
   disabled?: boolean;
+  /** Disable ONLY the primary action — the dropdown chevron stays active.
+   * Use when the main action is unavailable but the menu items still apply
+   * (e.g. "add another instance" is capped, but reset/disable-all still
+   * work). Implied by `disabled`. */
+  primaryDisabled?: boolean;
+  /** Disable ONLY the dropdown chevron — the primary action stays active.
+   * Symmetric counterpart of `primaryDisabled`; implied by `disabled`. */
+  secondaryDisabled?: boolean;
   /** Additional className for the outer container. */
   className?: string;
   /** Position for the tooltip. Default 'bottom'. */
@@ -98,6 +106,8 @@ export default function SplitButton({
   dropdownAlign = 'right',
   shape = 'rounded',
   disabled = false,
+  primaryDisabled = false,
+  secondaryDisabled = false,
   className = '',
 }: SplitButtonProps) {
   const isPill = shape === 'pill';
@@ -107,6 +117,10 @@ export default function SplitButton({
   // h-5 (20px) matches ActionGroup; h-6 (24px) for pill/standalone use
   const height = isPill ? 'h-6' : 'h-5';
 
+  // Per-half gates: the primary answers to disabled|primaryDisabled, the
+  // chevron to disabled|secondaryDisabled.
+  const primaryDead = disabled || primaryDisabled;
+  const secondaryDead = disabled || secondaryDisabled;
   const isMemorized = Boolean(memorize || value !== undefined || defaultValue !== undefined);
   const [internalValue, setInternalValue] = React.useState<string | undefined>(defaultValue);
   const currentValue = value !== undefined ? value : internalValue;
@@ -147,7 +161,7 @@ export default function SplitButton({
   const primaryButton = (
     <button
       type="button"
-      disabled={disabled}
+      disabled={primaryDead}
       onClick={(e) => {
         e.stopPropagation();
         onClick(e, currentValue);
@@ -156,9 +170,8 @@ export default function SplitButton({
         relative flex items-center justify-center
         ${borderless ? 'h-full' : height} ${compact ? 'px-1.5' : 'w-6'} ${leftRadius}
         ${active ? 'text-amber-500 bg-[var(--bg-stage)]' : 'text-[var(--text-muted)] hover:text-[var(--text-main)] hover:bg-zinc-100 dark:hover:bg-white/8'}
-        active:scale-[0.96]
+        ${primaryDead ? 'opacity-30 cursor-not-allowed' : 'active:scale-[0.96]'}
         transition-all duration-150
-        disabled:opacity-30 disabled:cursor-not-allowed
         cursor-pointer select-none outline-none focus:outline-none focus-visible:outline-none
       `}
       aria-label={displayTooltip}
@@ -170,16 +183,15 @@ export default function SplitButton({
   const chevronTrigger = (
     <button
       type="button"
-      disabled={disabled}
+      disabled={secondaryDead}
       className={`
         relative flex items-center justify-center
         ${borderless ? 'h-full' : height} ${compact ? 'px-1 -ml-0.5' : 'w-3.5'} ${rightRadius}
         text-[var(--text-muted)] hover:text-[var(--text-main)]
         ${active ? 'text-amber-500/80 hover:text-amber-500 hover:bg-zinc-100 dark:hover:bg-white/8' : 'hover:bg-zinc-100 dark:hover:bg-white/8'}
         ${compact ? 'opacity-60 hover:opacity-100' : ''}
-        active:scale-[0.96]
+        ${secondaryDead ? 'opacity-30 cursor-not-allowed' : 'active:scale-[0.96]'}
         transition-all duration-150
-        disabled:opacity-30 disabled:cursor-not-allowed
         cursor-pointer select-none outline-none focus:outline-none focus-visible:outline-none
       `}
       aria-label="More options"

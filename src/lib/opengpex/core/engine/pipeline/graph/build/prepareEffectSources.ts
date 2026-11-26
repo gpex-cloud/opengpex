@@ -77,6 +77,7 @@ import { EffectStrokePass, sweepEdtCache } from '../composite/EffectStrokePass';
 import { EffectShadowPass } from '../composite/EffectShadowPass';
 import { EffectOverlayPass } from '../composite/EffectOverlayPass';
 import { EffectGradientPass } from '../composite/EffectGradientPass';
+import { EffectInnerEdgePass } from '../composite/EffectInnerEdgePass';
 import { resolveSourceGamutId } from '../support/sourceGamut';
 import { expandWindowForStroke, expandWindowForPads, effectWindowPadsPx, effectReachPx, strokeContentBase } from './support/effectRoi';
 import {
@@ -119,6 +120,14 @@ function gradientStages(layer: CompiledScene['scene']['layers'][number]) {
   return (layer.effects ?? []).filter((s) => s.kind === 'gradient-overlay');
 }
 
+function innerGlowStages(layer: CompiledScene['scene']['layers'][number]) {
+  return (layer.effects ?? []).filter((s) => s.kind === 'inner-glow');
+}
+
+function innerShadowStages(layer: CompiledScene['scene']['layers'][number]) {
+  return (layer.effects ?? []).filter((s) => s.kind === 'inner-shadow');
+}
+
 export function prepareEffectSources(
   encoder: GPUCommandEncoder,
   compiled: CompiledScene,
@@ -139,10 +148,12 @@ export function prepareEffectSources(
     const overlays = overlayStages(layer);
     const glows = glowStages(layer);
     const gradients = gradientStages(layer);
+    const innerGlows = innerGlowStages(layer);
+    const innerShadows = innerShadowStages(layer);
     // ANY enabled effect category claims the prepass — the gate must not be
-    // pinned to a specific category subset, or a gradient-only layer would
-    // skip the prepass entirely and render without its ramp.
-    if (stages.length === 0 && shadows.length === 0 && overlays.length === 0 && glows.length === 0 && gradients.length === 0) continue;
+    // pinned to a specific category subset, or an inner-only layer would
+    // skip the prepass entirely and render without its inner band.
+    if (stages.length === 0 && shadows.length === 0 && overlays.length === 0 && glows.length === 0 && gradients.length === 0 && innerGlows.length === 0 && innerShadows.length === 0) continue;
     const prepared = sources.get(layer.id);
     if (!prepared) continue; // asset not resident yet — the layer skips this frame anyway
 
@@ -175,7 +186,7 @@ export function prepareEffectSources(
       // The solid arm pre-expands its own window, so its reach must count
       // EVERY outward-reaching category (stroke, shadow, outer glow) — not
       // just the stroke stages.
-      const reach = effectReachPx([...stages, ...shadows, ...glows, ...gradients]);
+      const reach = effectReachPx([...stages, ...shadows, ...glows, ...gradients, ...innerGlows, ...innerShadows]);
       const windowRect = expandWindowForStroke(logical, reach);
       base = { x: logical.x - windowRect.x, y: logical.y - windowRect.y, w: logical.w, h: logical.h };
       const raw = ctx.texturePool.acquire({
@@ -318,7 +329,11 @@ export function prepareEffectSources(
     // the silhouette, so a cropped shared-source fragment must give both the
     // same truthful-transparency crop (opaque neighbor pixels would be dyed
     // INTO the visible content or smeared into the halo).
-    const needsVisibilityCrop = (shadows.length > 0 || overlays.length > 0 || glows.length > 0 || gradients.length > 0) && baseIsSubRect;
+    // Inner kinds are included: their invert pass guards the visible rect, and
+    // the crop also gives the compose's silhouette clip truthful transparency
+    // in the window's slack ring (opaque neighbor pixels would otherwise get
+    // a painted band).
+    const needsVisibilityCrop = (shadows.length > 0 || overlays.length > 0 || glows.length > 0 || gradients.length > 0 || innerGlows.length > 0 || innerShadows.length > 0) && baseIsSubRect;
     if (bmaskTex || vmaskBake || needsVisibilityCrop) {
       const bx0 = solidColor ? 0 : Math.floor(base.x);
       const by0 = solidColor ? 0 : Math.floor(base.y);
@@ -648,6 +663,96 @@ export function prepareEffectSources(
       });
       // The compose output is working-LINEAR in the working gamut,
       // window-aligned — later stages and the output declaration agree.
+      currentIsLinear = true;
+      currentGamutId = 0;
+      currentAligned = true;
+    }
+
+    // ── 2d. Inner-edge chain (Inner Glow / Inner Shadow) ────────────────
+    // EXECUTION POSITION: runs on the FINAL foreground, after the stroke and
+    // shadow chains — the inner band composites ON the accumulated result
+    // and never feeds another family's EDT, so composing last keeps every
+    // silhouette-derived effect unpolluted. Visual stacking (§3): the inner
+    // band sits ABOVE the surface overlays (which live in the content
+    // colour) and BELOW a future bevel — same window geometry, so the next
+    // family consumes the output unchanged. GEOMETRY: the inner effects'
+    // OUTPUT window stays windowTexel-extent (pad contribution 0 — they
+    // clip inside the content; effectWindowPadsPx documents the zero), and
+    // the output is WINDOW-ALIGNED (the batch-1 contract). The band's
+    // internal blur/dilate temps carry their own ≥ (blurReach + spread +
+    // slack) truthful-1.0 headroom inside EffectInnerEdgePass (the
+    // full-bleed border incident's fix). Each effect owns its EDT cache
+    // slot per instance, registered in the sweep guard.
+    innerGlows.forEach((_, i) => activeEdtKeys.add(`${layer.id}:inner-glow#${i}`));
+    innerShadows.forEach((_, i) => activeEdtKeys.add(`${layer.id}:inner-shadow#${i}`));
+    for (let i = 0; i < innerGlows.length; i++) {
+      const stage = innerGlows[i];
+      if (stage.kind !== 'inner-glow') continue;
+      const currentOrigin: TexelRect = currentAligned
+        ? { x: 0, y: 0, w: current.width, h: current.height }
+        : { x: -windowTexel.x, y: -windowTexel.y, w: current.width, h: current.height };
+      current = EffectInnerEdgePass.run(encoder, ctx, {
+        layerId: layer.id,
+        effectKey: 'inner-glow',
+        instanceIndex: i,
+        edtAlphaKey: baseAlphaKey,
+        current,
+        currentOriginTexel: currentOrigin,
+        silhouette,
+        silOriginTexel: { x: -windowTexel.x, y: -windowTexel.y, w: silhouette.width, h: silhouette.height },
+        windowTexel,
+        visibleRect: {
+          x: base.x + windowTexel.x,
+          y: base.y + windowTexel.y,
+          w: base.w,
+          h: base.h,
+        },
+        currentIsLinear,
+        gamutId: currentGamutId,
+        effectColor: stage.color,
+        blendMode: stage.blendMode,
+        opacity: stage.strength,
+        blurRadius: stage.blurRadius * density,
+        spreadTexels: (stage.spreadPx ?? 0) * density,
+        offsetX: 0,
+        offsetY: 0,
+      });
+      currentIsLinear = true;
+      currentGamutId = 0;
+      currentAligned = true;
+    }
+    for (let i = 0; i < innerShadows.length; i++) {
+      const stage = innerShadows[i];
+      if (stage.kind !== 'inner-shadow') continue;
+      const currentOrigin: TexelRect = currentAligned
+        ? { x: 0, y: 0, w: current.width, h: current.height }
+        : { x: -windowTexel.x, y: -windowTexel.y, w: current.width, h: current.height };
+      current = EffectInnerEdgePass.run(encoder, ctx, {
+        layerId: layer.id,
+        effectKey: 'inner-shadow',
+        instanceIndex: i,
+        edtAlphaKey: baseAlphaKey,
+        current,
+        currentOriginTexel: currentOrigin,
+        silhouette,
+        silOriginTexel: { x: -windowTexel.x, y: -windowTexel.y, w: silhouette.width, h: silhouette.height },
+        windowTexel,
+        visibleRect: {
+          x: base.x + windowTexel.x,
+          y: base.y + windowTexel.y,
+          w: base.w,
+          h: base.h,
+        },
+        currentIsLinear,
+        gamutId: currentGamutId,
+        effectColor: stage.color,
+        blendMode: stage.blendMode,
+        opacity: stage.strength,
+        blurRadius: stage.blurRadius * density,
+        spreadTexels: (stage.spreadPx ?? 0) * density,
+        offsetX: stage.offsetX * density,
+        offsetY: stage.offsetY * density,
+      });
       currentIsLinear = true;
       currentGamutId = 0;
       currentAligned = true;

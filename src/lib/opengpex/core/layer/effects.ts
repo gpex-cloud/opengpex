@@ -50,6 +50,8 @@ import type {
   EffectCategory,
   EffectInstance,
   GradientOverlayParams,
+  InnerGlowParams,
+  InnerShadowParams,
   Layer,
   OuterGlowParams,
   ShadowParams,
@@ -69,7 +71,9 @@ export const EFFECT_CATEGORY_LABELS: Readonly<Record<string, string>> = {
   shadow: 'Shadow',
   colorOverlay: 'Color Overlay',
   outerGlow: 'Outer Glow',
-  gradientOverlay: 'Gradient Overlay',
+  gradientOverlay: 'Grad Overlay',
+  innerGlow: 'Inner Glow',
+  innerShadow: 'Inner Shadow',
 };
 
 // ─── Defaults ─────────────────────────────────────────────────────────────────
@@ -172,11 +176,46 @@ export const GRADIENT_PRESETS: readonly GradientPreset[] = [
 ] as const;
 
 /** Category-specific default parameters (used by append + enable-create paths). */
-export function defaultParamsFor(category: EffectCategory): StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams | GradientOverlayParams {
+/**
+ * First-release inner-glow defaults: the reference product's Inner Glow
+ * dialog factory state — a pale yellow (the same factory glow colour the
+ * outer glow ships), Screen blend (the factory brightening default), 5px
+ * blur (the factory "size"), no choke/spread, 50% strength (the factory
+ * opacity). The same "one-shot success" contract as the other categories.
+ */
+export function defaultInnerGlowParams(): InnerGlowParams {
+  return { color: fromHex('#ffffbe'), blurRadius: 5, spreadPx: 0, strength: 0.5, blendMode: 'screen' };
+}
+
+/**
+ * First-release inner-shadow defaults: the reference product's Inner Shadow
+ * dialog factory state — black at Multiply, 120° light (offset computed from
+ * distance 5 at 120°: (-5·cos120°, -(-5·sin120°)) in canvas y-down deltas —
+ * the ring darkens the upper-left inner edge, the factory look), 5px blur,
+ * no spread, full strength.
+ */
+export function defaultInnerShadowParams(): InnerShadowParams {
+  const distance = 5;
+  const rad = (120 * Math.PI) / 180;
+  return {
+    color: fromHex('#000000'),
+    offsetX: distance * Math.cos(rad),
+    offsetY: -distance * Math.sin(rad),
+    blurRadius: 5,
+    spreadPx: 0,
+    strength: 1,
+    blendMode: 'multiply',
+  };
+}
+
+/** Category-specific default parameters (used by append + enable-create paths). */
+export function defaultParamsFor(category: EffectCategory): StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams | GradientOverlayParams | InnerGlowParams | InnerShadowParams {
   if (category === 'stroke') return defaultStrokeParams();
   if (category === 'colorOverlay') return defaultColorOverlayParams();
   if (category === 'outerGlow') return defaultOuterGlowParams();
   if (category === 'gradientOverlay') return defaultGradientOverlayParams();
+  if (category === 'innerGlow') return defaultInnerGlowParams();
+  if (category === 'innerShadow') return defaultInnerShadowParams();
   return defaultShadowParams();
 }
 
@@ -192,7 +231,7 @@ export function newEffectInstanceId(): string {
 /** Create one detached chain instance for `category` with default parameters. */
 export function createEffectInstance(
   category: EffectCategory,
-  opts: { params?: StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams | GradientOverlayParams; id?: string; enabled?: boolean } = {},
+  opts: { params?: StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams | GradientOverlayParams | InnerGlowParams | InnerShadowParams; id?: string; enabled?: boolean } = {},
 ): EffectInstance {
   return {
     id: opts.id ?? newEffectInstanceId(),
@@ -273,6 +312,13 @@ export const EFFECT_RENDER_RANK: Readonly<Record<EffectCategory, number>> = {
   // so the later pass reads the earlier one's result.
   colorOverlay: 3,
   gradientOverlay: 4,
+  // The inner-edge band: glow beneath shadow (the reference dialog order).
+  // Both clip INSIDE the content silhouette — the prepass executes them on
+  // the FINAL foreground (after the stroke and shadow chains), and their
+  // output stays window-aligned content-extent (no ROI growth), so the next
+  // family (future bevel) consumes the same geometry.
+  innerGlow: 5,
+  innerShadow: 6,
 };
 
 export function sortEffectInstancesForRender(chain: EffectInstance[]): EffectInstance[] {
@@ -299,7 +345,7 @@ export function appendEffectInstance(
   category: EffectCategory,
   opts: {
     afterId?: string;
-    params?: StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams | GradientOverlayParams;
+    params?: StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams | GradientOverlayParams | InnerGlowParams | InnerShadowParams;
     /**
      * Caller-supplied id (the drawer generates one so it can activate the new
      * tab immediately — the patch return value alone cannot carry the id).
@@ -380,7 +426,7 @@ export function removeEffectInstance(layer: Layer, id: string): Partial<Layer> |
 export function updateEffectParams(
   layer: Layer,
   id: string,
-  params: StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams | GradientOverlayParams,
+  params: StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams | GradientOverlayParams | InnerGlowParams | InnerShadowParams,
 ): Partial<Layer> | null {
   const chain = getEffectChain(layer);
   const at = chain.findIndex((e) => e.id === id);

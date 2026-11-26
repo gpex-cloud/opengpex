@@ -206,23 +206,28 @@ export function ShadowPanel({
           onValueCommit={handleColorCommit}
         />
       </div>
-      <PanelSection label="Offset">
-        {/* pl-16 = the ColorSwatchRow label width (w-14) + its gap — the dial
-            left-aligns with the color palette button, not the Color label. */}
-        <div className="flex items-center gap-3 pl-16">
+      {/* Zero-gap offset block: the dial's top edge sits FLUSH with the
+            label line (96px dial makes PanelSection's space-y-1 seam
+            visible), mirroring the InnerShadowPanel placement. */}
+      <div>
+        <span className="block text-[9px] leading-none font-bold text-[var(--text-muted)] uppercase tracking-tight">
+          Offset
+        </span>
+        <div className="flex items-start gap-3 pl-16">
           <AngleDial
+            size={96}
             offsetX={offset.x}
             offsetY={offset.y}
             onDragStart={handleOffsetDragStart}
             onChange={handleOffsetChange}
             onDragEnd={handleOffsetDragEnd}
           />
-          <div className="flex flex-col text-[10px] tabular-nums text-[var(--text-secondary)] leading-tight">
+          <div className="flex flex-col text-[10px] tabular-nums text-[var(--text-secondary)] leading-tight pt-1">
             <span>Distance {Math.round(polar.distance)} px</span>
             <span className="text-[var(--text-muted)]">Angle {Math.round(polar.angleDeg)}°</span>
           </div>
         </div>
-      </PanelSection>
+      </div>
       <PanelSection label="Softness">
         {/* The unit sits inline after the slider's numeric field (house
             pattern). Kernel-capped at σ=20 — past it the separable Gaussian's

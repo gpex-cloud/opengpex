@@ -75,6 +75,12 @@ import {
   buildEffectGradientComposeWgsl,
   EFFECT_GRADIENT_UNIFORM_BUFFER_SIZE,
 } from '../shaders/effectGradientCompose';
+import {
+  buildEffectInnerInvertWgsl,
+  buildEffectInnerComposeWgsl,
+  EFFECT_INNER_INVERT_UNIFORM_BUFFER_SIZE,
+  EFFECT_INNER_UNIFORM_BUFFER_SIZE,
+} from '../shaders/effectInnerCompose';
 import { VMASK_WGSL, VMASK_UNIFORM_SIZE } from '../shaders/vmask';
 import { BMASK_COMBINE_WGSL, BMASK_COMBINE_UNIFORM_SIZE } from '../shaders/bmaskCombine';
 import { BLEND_UNIFORM_BUFFER_SIZE } from '../shaders/blend';
@@ -1317,6 +1323,92 @@ export class PipelineCache {
       wgsl: buildEffectGradientComposeWgsl(storageFormat),
       entryPoint: 'cs_effect_gradient_compose',
       bindGroupLayout: this.getEffectGradientBindGroupLayout(storageFormat),
+    });
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Effect inner-edge family (Inner Glow / Inner Shadow): invert + compose
+  // ──────────────────────────────────────────────────────────
+
+  getEffectInnerInvertBindGroupLayout(
+    storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
+  ): GPUBindGroupLayout {
+    const cached = this.effectBindGroupLayouts.get(`inner-invert:${storageFormat}`);
+    if (cached) return cached;
+    const silSampleType = storageFormat === 'rgba32float' ? 'unfilterable-float' : 'float';
+    const layout = this.device.createBindGroupLayout({
+      label: `Effect Inner Invert Bind Group Layout [${storageFormat}]`,
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: EFFECT_INNER_INVERT_UNIFORM_BUFFER_SIZE },
+        },
+        { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: silSampleType } },
+        {
+          binding: 2,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: { access: 'write-only', format: storageFormat },
+        },
+      ],
+    });
+    this.effectBindGroupLayouts.set(`inner-invert:${storageFormat}`, layout);
+    return layout;
+  }
+
+  /** Inner invert pipeline (padded inverted silhouette, truthful 1.0 border). */
+  getEffectInnerInvertPipeline(
+    storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
+  ): GPUComputePipeline {
+    return this.getOrCreateComputePipeline({
+      cacheKey: `effect-inner-invert:${storageFormat}`,
+      label: `Effect Inner Invert [${storageFormat}]`,
+      moduleKey: `effect-inner-invert:${storageFormat}`,
+      wgsl: buildEffectInnerInvertWgsl(storageFormat),
+      entryPoint: 'cs_effect_inner_invert',
+      bindGroupLayout: this.getEffectInnerInvertBindGroupLayout(storageFormat),
+    });
+  }
+
+  getEffectInnerComposeBindGroupLayout(
+    storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
+  ): GPUBindGroupLayout {
+    const cached = this.effectBindGroupLayouts.get(`inner-compose:${storageFormat}`);
+    if (cached) return cached;
+    const sampleType = storageFormat === 'rgba32float' ? 'unfilterable-float' : 'float';
+    const layout = this.device.createBindGroupLayout({
+      label: `Effect Inner Compose Bind Group Layout [${storageFormat}]`,
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: EFFECT_INNER_UNIFORM_BUFFER_SIZE },
+        },
+        { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType } },
+        { binding: 2, visibility: GPUShaderStage.COMPUTE, texture: { sampleType } },
+        { binding: 3, visibility: GPUShaderStage.COMPUTE, texture: { sampleType } },
+        {
+          binding: 4,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: { access: 'write-only', format: storageFormat },
+        },
+      ],
+    });
+    this.effectBindGroupLayouts.set(`inner-compose:${storageFormat}`, layout);
+    return layout;
+  }
+
+  /** Inner compose pipeline (band blended onto the foreground, silhouette-clipped). */
+  getEffectInnerComposePipeline(
+    storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
+  ): GPUComputePipeline {
+    return this.getOrCreateComputePipeline({
+      cacheKey: `effect-inner-compose:${storageFormat}`,
+      label: `Effect Inner Compose [${storageFormat}]`,
+      moduleKey: `effect-inner-compose:${storageFormat}`,
+      wgsl: buildEffectInnerComposeWgsl(storageFormat),
+      entryPoint: 'cs_effect_inner_compose',
+      bindGroupLayout: this.getEffectInnerComposeBindGroupLayout(storageFormat),
     });
   }
 

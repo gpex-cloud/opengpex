@@ -211,22 +211,42 @@ export function GradientOverlayPanel({
 
   return (
     <div className="flex flex-col gap-3 px-3 pt-2 pb-3">
-      {/* Preset chips: the frozen GRADIENT_PRESETS table — one click fills
-          start/end + style; the other parameters stay untouched. */}
-      <PanelSection label="Presets">
-        <div className="flex flex-wrap gap-1">
+      {/* Blend mode rides on TOP of the panel (house standard): inline
+          label, 16-mode shared seat, popup opens DOWNWARD. */}
+      <div className="flex items-center gap-2">
+        <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-tight w-14 shrink-0">
+          Blend
+        </span>
+        <ActionDropdown
+          trigger={blendTrigger}
+          options={BLEND_MODE_DROPDOWN_OPTIONS}
+          onSelect={handleBlendSelect}
+          cols={3}
+          align="right"
+          className="flex-1"
+        />
+      </div>
+      {/* Preset chips on ONE row with the inline label (house pattern):
+          the frozen GRADIENT_PRESETS table — one click fills start/end +
+          style; the other parameters stay untouched. Chips share the line
+          evenly (flex-1) so all six fit beside the label. */}
+      <div className="flex items-center gap-2">
+        <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-tight w-14 shrink-0">
+          Presets
+        </span>
+        <div className="flex flex-1 items-center gap-1 min-w-0">
           {GRADIENT_PRESETS.map((preset, i) => (
             <button
               key={preset.id}
               title={preset.label}
               aria-label={`Gradient preset ${preset.label}`}
               onClick={() => handlePreset(i)}
-              className="w-10 h-5 rounded outline-none cursor-pointer border border-[var(--border-subtle)] hover:border-[var(--border-light)] transition-colors shrink-0"
+              className="flex-1 min-w-0 h-4 rounded outline-none cursor-pointer border border-[var(--border-subtle)] hover:border-[var(--border-light)] transition-colors"
               style={{ background: `linear-gradient(90deg, ${preset.start.hex}, ${preset.end.hex})` }}
             />
           ))}
         </div>
-      </PanelSection>
+      </div>
       <ColorSwatchRow
         label="From"
         className="px-0"
@@ -321,24 +341,6 @@ export function GradientOverlayPanel({
           {...strengthChannel}
         />
       </PanelSection>
-      {/* Single-row layout, the ColorOverlayPanel house pattern: the label
-          sits inline LEFT of the control. The popup opens UPWARD — the
-          gradient panel stacks tall and the dropdown would otherwise clip
-          against the drawer's bottom edge. */}
-      <div className="flex items-center gap-2">
-        <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-tight w-14 shrink-0">
-          Blend
-        </span>
-        <ActionDropdown
-          trigger={blendTrigger}
-          options={BLEND_MODE_DROPDOWN_OPTIONS}
-          onSelect={handleBlendSelect}
-          cols={3}
-          align="right"
-          direction="up"
-          className="flex-1"
-        />
-      </div>
     </div>
   );
 }

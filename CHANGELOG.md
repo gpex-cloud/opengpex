@@ -2,6 +2,11 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.1.0
+
+- Layers: two new effects complete the glow family — Inner Glow tints the inner edge of any layer's visible content with a soft luminous band, and Inner Shadow presses a shaded ring into the inner edge (with an offset dial, blur, spread and strength).
+- Layers: the layer effects suite is here — seven effects (Stroke, Shadow, Inner Shadow, Outer Glow, Inner Glow, Color Overlay, Grad Overlay) cover the everyday styling set, each with its own panel, blend modes and per-effect controls. Ready for real-world use.
+
 ## 2.0.74
 
 - Layers: new Gradient Overlay effect — tint a layer's visible content with a two-color gradient (From / To), with Linear and Radial styles, an angle control for any direction, scale, strength and the full 16-mode blend picker.

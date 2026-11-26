@@ -70,10 +70,12 @@ interface AngleDialProps {
   disabled?: boolean;
   className?: string;
   ariaLabel?: string;
+  /** Rendered diameter in px (default 64). Pointer math and the handle
+      position scale with it — the 250 px offset range always fits. */
+  size?: number;
 }
 
-const DIAL_SIZE = 64;
-const DIAL_RADIUS = DIAL_SIZE / 2;
+const DEFAULT_DIAL_SIZE = 64;
 const HANDLE_RADIUS = 5;
 /** Visual padding so the handle at max distance stays inside the dial. */
 const DIAL_INSET = HANDLE_RADIUS + 2;
@@ -87,7 +89,9 @@ export default function AngleDial({
   disabled = false,
   className = '',
   ariaLabel = 'Shadow direction and distance',
+  size = DEFAULT_DIAL_SIZE,
 }: AngleDialProps) {
+  const dialRadius = size / 2;
   const ref = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef(false);
   // Fast-drag mirror: while a gesture runs the store is frozen, so the knob
@@ -103,12 +107,12 @@ export default function AngleDial({
     const cy = rect.top + rect.height / 2;
     // Dial-local px → offset px: the usable visual radius maps linearly onto
     // [0, MAX_DISTANCE].
-    const usable = DIAL_RADIUS - DIAL_INSET;
+    const usable = dialRadius - DIAL_INSET;
     const dx = (clientX - cx) * (ANGLE_DIAL_MAX_DISTANCE_PX / usable);
     const dy = (clientY - cy) * (ANGLE_DIAL_MAX_DISTANCE_PX / usable);
     const { angleDeg, distance } = angleDistanceFromOffset(dx, dy);
     return offsetFromAngleDistance(angleDeg, distance);
-  }, []);
+  }, [dialRadius]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
     if (disabled) return;
@@ -142,9 +146,9 @@ export default function AngleDial({
 
   // Handle placement: canvas offset → dial-local visual px (inverse of the
   // pointer mapping — usable radius spans [0, MAX_DISTANCE]).
-  const usable = DIAL_RADIUS - DIAL_INSET;
-  const hx = DIAL_RADIUS + (shown.x / ANGLE_DIAL_MAX_DISTANCE_PX) * usable;
-  const hy = DIAL_RADIUS + (shown.y / ANGLE_DIAL_MAX_DISTANCE_PX) * usable;
+  const usable = dialRadius - DIAL_INSET;
+  const hx = dialRadius + (shown.x / ANGLE_DIAL_MAX_DISTANCE_PX) * usable;
+  const hy = dialRadius + (shown.y / ANGLE_DIAL_MAX_DISTANCE_PX) * usable;
   const dist = Math.hypot(shown.x, shown.y);
 
   return (
@@ -162,7 +166,7 @@ export default function AngleDial({
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
       className={`relative select-none touch-none rounded-full border border-[var(--border-subtle)] bg-[var(--bg-stage)] shadow-inner ${disabled ? 'opacity-40 cursor-not-allowed' : 'cursor-crosshair'} ${className}`}
-      style={{ width: DIAL_SIZE, height: DIAL_SIZE }}
+      style={{ width: size, height: size }}
     >
       {/* Crosshair guides */}
       <div className="absolute left-1/2 top-1.5 bottom-1.5 w-px -translate-x-1/2 bg-[var(--border-subtle)]" />

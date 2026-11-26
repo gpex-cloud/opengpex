@@ -174,6 +174,21 @@ export function ColorOverlayPanel({
 
   return (
     <div className="flex flex-col gap-3 px-3 pt-2 pb-3">
+      {/* Blend mode rides on TOP of the panel (house standard): inline
+          label, 16-mode shared seat, popup opens DOWNWARD. */}
+      <div className="flex items-center gap-2">
+        <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-tight w-14 shrink-0">
+          Blend
+        </span>
+        <ActionDropdown
+          trigger={blendTrigger}
+          options={BLEND_MODE_DROPDOWN_OPTIONS}
+          onSelect={handleBlendSelect}
+          cols={3}
+          align="right"
+          className="flex-1"
+        />
+      </div>
       {/* Single-row layout: the label sits inline LEFT of the swatch control
           (ColorSwatchRow's built-in label — the house row pattern). The
           trailing reset restores this category's factory defaults with ONE
@@ -186,21 +201,6 @@ export function ColorOverlayPanel({
           value={fastColor ?? params.color}
           onValueChange={handleColorChange}
           onValueCommit={handleColorCommit}
-        />
-      </div>
-      {/* Single-row layout, same house pattern as the Color row above: the
-          label sits inline LEFT of the control (not stacked in a section). */}
-      <div className="flex items-center gap-2">
-        <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-tight w-14 shrink-0">
-          Blend
-        </span>
-        <ActionDropdown
-          trigger={blendTrigger}
-          options={BLEND_MODE_DROPDOWN_OPTIONS}
-          onSelect={handleBlendSelect}
-          cols={3}
-          align="right"
-          className="flex-1"
         />
       </div>
       <PanelSection label="Strength">

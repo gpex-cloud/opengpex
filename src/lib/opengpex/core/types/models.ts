@@ -231,8 +231,8 @@ export const MAX_ADJUSTMENT_MASKS_PER_LAYER = 16;
 
 // ─── Layer render effects (A8) ───────────────────────────────────────────────
 
-/** Supported render-effect categories. Shipped: stroke, shadow, colorOverlay, outerGlow, gradientOverlay; the chain model admits future categories (inner shadow / inner glow / pattern / bevel) without migration. */
-export type EffectCategory = 'stroke' | 'shadow' | 'colorOverlay' | 'outerGlow' | 'gradientOverlay';
+/** Supported render-effect categories. Shipped: stroke, shadow, outerGlow, innerShadow, innerGlow, colorOverlay, gradientOverlay; the chain model admits future categories (pattern / bevel) without migration. */
+export type EffectCategory = 'stroke' | 'shadow' | 'outerGlow' | 'innerShadow' | 'innerGlow' | 'colorOverlay' | 'gradientOverlay';
 
 /** Gradient-overlay geometry style. First release ships the two PS styles; optional-tolerant (absent = `'linear'`). */
 export type GradientOverlayStyle = 'linear' | 'radial';
@@ -364,6 +364,63 @@ export interface GradientOverlayParams {
 }
 
 /**
+ * Inner-glow parameters: a glow INSIDE the content silhouette — the inverted
+ * content alpha (`1 − c.a`), optionally dilated by `spreadPx`, blurred with
+ * `blurRadius`, and composited ON the content clipped by its own alpha (the
+ * effect never extends the silhouette).
+ *
+ * Optional-tolerant: absent `spreadPx` reads 0, absent `strength` reads 1,
+ * absent `blendMode` reads `'screen'` — the reference product's Inner Glow
+ * factory blend mode (the brightening default; the full 16-mode set is
+ * exposed because the blend target is the layer's own content, a layer-local
+ * operation — unlike the outer glow, whose Screen semantics were a
+ * backdrop-blend approximation and therefore not exposed).
+ */
+export interface InnerGlowParams {
+  /** TRC-encoded glow colour (same currency as fillColor / penStyle). */
+  color: ColorValue;
+  /** Gaussian sigma in canvas px (UI range 0–50). */
+  blurRadius: number;
+  /** Inverted-region dilation before the blur, in canvas px (UI range 0–50). Absent = 0. */
+  spreadPx?: number;
+  /** Glow strength 0..1 (UI range 0–100). Absent = 1. */
+  strength?: number;
+  /** How the glow colour combines with the content colour (16 modes; default `'screen'`). */
+  blendMode?: LayerBlendMode;
+}
+
+/**
+ * Inner-shadow parameters: a shadow INSIDE the content silhouette — the
+ * inverted content alpha shifted by `(offsetX, offsetY)`, optionally dilated
+ * by `spreadPx`, blurred, and composited ON the content clipped by its own
+ * alpha. The offset reuses the outer-shadow AngleDial vocabulary (canvas-px
+ * deltas, positive y = down); the ring lands ON THE SIDE THE OFFSET POINTS
+ * TO (drag down → the bottom inner edge darkens) — the reference product's
+ * inner-shadow convention, where the offset points from the light source
+ * toward the shadowed wall.
+ *
+ * Optional-tolerant: absent `spreadPx` reads 0, absent `strength` reads 1,
+ * absent `blendMode` reads `'multiply'` — the reference product's Inner
+ * Shadow factory blend mode.
+ */
+export interface InnerShadowParams {
+  /** TRC-encoded shadow colour (same currency as fillColor / penStyle). */
+  color: ColorValue;
+  /** Offset in canvas px; positive x = right (the ring darkens the right inner edge). */
+  offsetX: number;
+  /** Offset in canvas px; positive y = down (the ring darkens the bottom inner edge). */
+  offsetY: number;
+  /** Gaussian sigma in canvas px (UI range 0–50). */
+  blurRadius: number;
+  /** Inverted-region dilation before the blur, in canvas px (UI range 0–50). Absent = 0. */
+  spreadPx?: number;
+  /** Shadow strength 0..1 (UI range 0–100). Absent = 1. */
+  strength?: number;
+  /** How the shadow colour combines with the content colour (16 modes; default `'multiply'`). */
+  blendMode?: LayerBlendMode;
+}
+
+/**
  * One non-destructive render-effect instance on a layer — the chain-item
  * sibling of {@link AdjustmentMask} (same structural vocabulary: id /
  * category / params / enabled / optional coverage shape / preset provenance).
@@ -390,8 +447,8 @@ export interface EffectInstance {
   id: string;
   category: EffectCategory;
   enabled: boolean;
-  /** Discriminated by `category`: stroke → {@link StrokeParams}, shadow → {@link ShadowParams}, colorOverlay → {@link ColorOverlayParams}, outerGlow → {@link OuterGlowParams}, gradientOverlay → {@link GradientOverlayParams}. */
-  params: StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams | GradientOverlayParams;
+  /** Discriminated by `category`: stroke → {@link StrokeParams}, shadow → {@link ShadowParams}, outerGlow → {@link OuterGlowParams}, innerShadow → {@link InnerShadowParams}, innerGlow → {@link InnerGlowParams}, colorOverlay → {@link ColorOverlayParams}, gradientOverlay → {@link GradientOverlayParams}. */
+  params: StrokeParams | ShadowParams | OuterGlowParams | InnerShadowParams | InnerGlowParams | ColorOverlayParams | GradientOverlayParams;
   /** Reserved future scoping seam (first release: never written, never read). */
   shape?: LocalPolygon;
   /** Reserved future scoping seam — feather radius (px) for the shape edge. */

@@ -36,7 +36,7 @@
  *     collapses back to `undefined` and the composite signature reverts to the
  *     historical no-effects token.
  *
- * Scope: `stroke`, `shadow`, `color-overlay`, `outer-glow` and `gradient-overlay` stages are emitted; categories
+ * Scope: `stroke`, `shadow`, the two surface overlays, the outer glow and the inner-edge family are emitted; categories
  * without a render pipeline yet are skipped here — their enabled/disabled
  * state does not change pixels, the honest render behaviour for an
  * unimplemented category (the chain keeps the instance; the drawer keeps the tab).
@@ -46,7 +46,7 @@
  * @module core/engine/pipeline/scene/translators/effects
  */
 
-import type { Layer, StrokeParams, ShadowParams, ColorOverlayParams, OuterGlowParams, GradientOverlayParams, LayerBlendMode } from '@opengpex/editor/core/types';
+import type { Layer, StrokeParams, ShadowParams, ColorOverlayParams, OuterGlowParams, GradientOverlayParams, InnerGlowParams, InnerShadowParams, LayerBlendMode } from '@opengpex/editor/core/types';
 import type { ColorValue } from '@opengpex/editor/core/engine/color/ColorValue';
 import { toWorkingLinearRgba } from '@opengpex/editor/core/engine/color';
 import type { WorkingColorSpace } from '@opengpex/editor/core/types';
@@ -160,6 +160,32 @@ export function translateLayerEffects(
         scale: clampShadowScalar(params.scale === undefined ? 100 : params.scale, 100, 1, 1000),
         opacity: params.opacity === undefined ? 1 : clampShadowScalar(params.opacity, 1, 0, 1),
         blendMode: params.blendMode === undefined ? 'source-over' : sanitizeOverlayBlendMode(params.blendMode),
+      });
+    } else if (instance.category === 'innerGlow') {
+      // Optional-tolerant: absent spreadPx reads 0, absent strength reads 1,
+      // absent blendMode reads the reference factory default (Screen).
+      const params = instance.params as InnerGlowParams;
+      stages.push({
+        kind: 'inner-glow',
+        color: toWorkingLinearRgba(params.color as ColorValue, workingSpace),
+        blurRadius: clampShadowScalar(params.blurRadius, 0, 0, 50),
+        spreadPx: params.spreadPx === undefined ? undefined : clampShadowScalar(params.spreadPx, 0, 0, 50),
+        strength: params.strength === undefined ? 1 : clampShadowScalar(params.strength, 1, 0, 1),
+        blendMode: params.blendMode === undefined ? 'screen' : sanitizeOverlayBlendMode(params.blendMode),
+      });
+    } else if (instance.category === 'innerShadow') {
+      // The OFFSET keeps its sign (a delta, like the outer shadow's) and
+      // drops non-finites; magnitudes clamp to the UI ranges.
+      const params = instance.params as InnerShadowParams;
+      stages.push({
+        kind: 'inner-shadow',
+        color: toWorkingLinearRgba(params.color as ColorValue, workingSpace),
+        offsetX: clampShadowOffset(params.offsetX),
+        offsetY: clampShadowOffset(params.offsetY),
+        blurRadius: clampShadowScalar(params.blurRadius, 0, 0, 50),
+        spreadPx: params.spreadPx === undefined ? undefined : clampShadowScalar(params.spreadPx, 0, 0, 50),
+        strength: params.strength === undefined ? 1 : clampShadowScalar(params.strength, 1, 0, 1),
+        blendMode: params.blendMode === undefined ? 'multiply' : sanitizeOverlayBlendMode(params.blendMode),
       });
     }
   }

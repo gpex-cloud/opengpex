@@ -106,18 +106,20 @@ export const EFFECT_TABS: readonly EffectTabDef[] = [
   // order is stable across future growth). The `available` flag machinery
   // stays so that list growth needs no plumbing changes.
   //
-  // Tab order groups effects BY NATURE (20261126 ruling, revised: Stroke
-  // leads — it is the flagship outline effect and the family users reach
-  // for first): outline (Stroke), outer halo (Shadow, Outer Glow, then
-  // Inner Shadow / Inner Glow), surface overlays (Color / Gradient / Pattern
-  // Overlay). NOTE: this is the DISPLAY order only — the on-canvas render
-  // stacking is a separate order carried by EFFECT_RENDER_RANK in
-  // core/layer/effects.ts and never follows tabs.
+  // Tab order groups effects BY NATURE (20261126 ruling, revised twice:
+  // Stroke leads — the flagship outline effect; the shadow family pairs
+  // outer/inner per the reference dialog order Shadow → Inner Shadow →
+  // Outer Glow → Inner Glow; surface overlays follow). NOTE: this is the
+  // DISPLAY order only — the on-canvas render stacking is a separate order
+  // carried by EFFECT_RENDER_RANK in core/layer/effects.ts and never
+  // follows tabs.
   { id: 'stroke', label: 'Stroke', available: true },
   { id: 'shadow', label: 'Shadow', available: true },
+  { id: 'innerShadow', label: 'Inner Shadow', available: true },
   { id: 'outerGlow', label: 'Outer Glow', available: true },
+  { id: 'innerGlow', label: 'Inner Glow', available: true },
   { id: 'colorOverlay', label: 'Color Overlay', available: true },
-  { id: 'gradientOverlay', label: 'Gradient Overlay', available: true },
+  { id: 'gradientOverlay', label: 'Grad Overlay', available: true },
 ] as const;
 
 /** The shipped (chain-model-backed) categories, in tab display order. */
@@ -125,14 +127,18 @@ export const AVAILABLE_TAB_IDS: readonly EffectTabId[] = EFFECT_TABS
   .filter((t) => t.available)
   .map((t) => t.id as EffectTabId);
 
-export type EffectTabId = 'shadow' | 'stroke' | 'colorOverlay' | 'outerGlow' | 'gradientOverlay';
+export type EffectTabId = 'shadow' | 'stroke' | 'colorOverlay' | 'outerGlow' | 'gradientOverlay' | 'innerGlow' | 'innerShadow';
 
 /**
- * Categories the "+" accepts, per implementation phase. P3 ships stroke's
- * parameter pipeline; shadow joins at P5; the surface effects (color
- * overlay, outer glow, gradient overlay) join with their pipelines.
+ * Categories where the "+" may create ANOTHER instance (per-effect multi/
+ * single ruling 20261126, from the reference product's Layer Style panel:
+ * the "+" appears on Stroke / Inner Shadow / Color Overlay / Gradient
+ * Overlay / Drop Shadow only — Bevel, Inner Glow, Satin, Pattern Overlay
+ * and Outer Glow are single-instance). Categories NOT listed here are
+ * capped at one instance: their rail tab still exists (kept alive by the
+ * lazy floor), but the "+" stays disabled on them.
  */
-export const ADDABLE_CATEGORIES: readonly EffectTabId[] = ['stroke', 'colorOverlay', 'outerGlow', 'gradientOverlay'];
+export const ADDABLE_CATEGORIES: readonly EffectTabId[] = ['stroke', 'shadow', 'innerShadow', 'colorOverlay', 'gradientOverlay'];
 
 /**
  * A category tab with NO instance yet carries this virtual id — a TRANSIENT

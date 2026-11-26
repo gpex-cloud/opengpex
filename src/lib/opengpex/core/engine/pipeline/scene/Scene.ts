@@ -784,6 +784,53 @@ export type EffectStageDesc =
     readonly opacity: number;
     /** How the ramp colour combines with the content colour (16 modes). */
     readonly blendMode: LayerBlendMode;
+  }
+  /**
+   * INNER GLOW (inner-edge family): a glow INSIDE the content silhouette —
+   * the inverted content alpha, optionally dilated by `spreadPx`, blurred,
+   * and composited ON the final foreground clipped by the silhouette. The
+   * blurred band temp carries ≥ (blurReach + spread + slack) truthful-1.0
+   * headroom (the full-bleed border incident), so the effect survives at
+   * full bleed. The blend target is the layer's own content (layer-local),
+   * so the full 16-mode set is exposed.
+   */
+  | {
+    readonly kind: 'inner-glow';
+    /** Glow colour: working-gamut LINEAR straight-alpha RGBA (0..1). */
+    readonly color: readonly [number, number, number, number];
+    /** Gaussian sigma in logical px (the UI's "blur"). */
+    readonly blurRadius: number;
+    /** Inverted-region dilation before the blur, in logical px. Absent = 0. */
+    readonly spreadPx?: number;
+    /** Glow strength 0..1. */
+    readonly strength: number;
+    /** How the glow colour combines with the content colour (16 modes). */
+    readonly blendMode: LayerBlendMode;
+  }
+  /**
+   * INNER SHADOW (inner-edge family): the same inverted-silhouette band as
+   * the inner glow, shifted by `(offsetX, offsetY)` so the ring lands ON
+   * the offset's side (offset down → the bottom inner edge darkens — the
+   * reference product's convention: the offset points from the light source
+   * toward the shadowed wall). Composited ON the final foreground clipped
+   * by the silhouette; the blend target is layer-local, full 16 modes.
+   */
+  | {
+    readonly kind: 'inner-shadow';
+    /** Shadow colour: working-gamut LINEAR straight-alpha RGBA (0..1). */
+    readonly color: readonly [number, number, number, number];
+    /** Band shift in logical px; positive x = the RIGHT inner edge darkens. */
+    readonly offsetX: number;
+    /** Band shift in logical px; positive y = the BOTTOM inner edge darkens. */
+    readonly offsetY: number;
+    /** Gaussian sigma in logical px (the UI's "blur"). */
+    readonly blurRadius: number;
+    /** Inverted-region dilation before the blur, in logical px. Absent = 0. */
+    readonly spreadPx?: number;
+    /** Shadow strength 0..1. */
+    readonly strength: number;
+    /** How the shadow colour combines with the content colour (16 modes). */
+    readonly blendMode: LayerBlendMode;
   };
 
 // ────────────────────────────────────────────────────────────

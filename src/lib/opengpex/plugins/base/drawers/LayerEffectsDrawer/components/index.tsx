@@ -79,6 +79,8 @@ import { ShadowPanel } from "./panels/ShadowPanel";
 import { ColorOverlayPanel } from "./panels/ColorOverlayPanel";
 import { OuterGlowPanel } from "./panels/OuterGlowPanel";
 import { GradientOverlayPanel } from "./panels/GradientOverlayPanel";
+import { InnerGlowPanel } from "./panels/InnerGlowPanel";
+import { InnerShadowPanel } from "./panels/InnerShadowPanel";
 import { EmptyCategoryPanel } from "./panels/shared";
 import {
   ADDABLE_CATEGORIES,
@@ -354,8 +356,6 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
   }, [rail, activeLayer, actions, removeEffectInstanceCmd]);
 
   const isDisabled = !activeLayer;
-  // The disable-all header action only matters while at least one instance is on.
-  const hasEnabledInstances = rail.some((t) => t.instance?.enabled === true);
 
   return (
     <div className="flex flex-col gap-1 pt-1 pb-1">
@@ -436,10 +436,14 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
                 (layer-scoped, one patch) and per-instance factory reset. */}
             <SplitButton
               icon={<Plus size={12} />}
+              // The drawer hugs the window edge: a centered tooltip overflows
+              // and clips — anchor it to the LEFT of the button instead.
+              tooltipPosition="left"
               tooltip={canAdd
-                ? `Add ${EFFECT_CATEGORY_LABELS[activeCategory] ?? activeCategory} instance (inserted beneath the active tab)`
-                : "No layer selected"}
-              disabled={!canAdd}
+                ? `Add ${EFFECT_CATEGORY_LABELS[activeCategory] ?? activeCategory} instance`
+                : undefined}
+              disabled={!activeLayer}
+              primaryDisabled={!canAdd}
               onClick={() => {
                 if (!activeLayer || !applyEffectPatchCmd || !canAdd) return;
                 const id = newEffectInstanceId();
@@ -527,6 +531,18 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
                   />
                 ) : activeRailTab.instance.category === "gradientOverlay" ? (
                   <GradientOverlayPanel
+                    key={activeRailTab.instance.id}
+                    layer={activeLayer}
+                    instance={activeRailTab.instance}
+                  />
+                ) : activeRailTab.instance.category === "innerGlow" ? (
+                  <InnerGlowPanel
+                    key={activeRailTab.instance.id}
+                    layer={activeLayer}
+                    instance={activeRailTab.instance}
+                  />
+                ) : activeRailTab.instance.category === "innerShadow" ? (
+                  <InnerShadowPanel
                     key={activeRailTab.instance.id}
                     layer={activeLayer}
                     instance={activeRailTab.instance}
