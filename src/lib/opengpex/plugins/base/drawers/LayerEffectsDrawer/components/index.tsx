@@ -64,12 +64,14 @@ import type { EffectCategory, EffectInstance } from "@opengpex/editor/core/types
 import {
   appendEffectInstance,
   ensureEffectCategoryInstance,
+  effectInstanceOrdinal,
   getEffectChain,
   isCategoryFloorInstance,
   newEffectInstanceId,
 } from "@opengpex/editor/core/layer/effects";
 import type { LayerEffectsDrawerCommandsMap, LayerEffectsDrawerSignalsMap } from "../commands.d";
 import { StrokePanel } from "./panels/StrokePanel";
+import { ShadowPanel } from "./panels/ShadowPanel";
 import { EmptyCategoryPanel } from "./panels/shared";
 import {
   ADDABLE_CATEGORIES,
@@ -106,8 +108,9 @@ interface RailTab {
 
 type EffectTabCategory = EffectTabId | (string & {});
 
-/** Ordinal labels across one category's tab run ("Stroke", "Stroke 2", …). */
-function categoryLabel(base: string, ordinal: number): string {
+/** Ordinal label ("Stroke", "Stroke 2", …) — core's single numbering authority. */
+function categoryLabel(base: string, chain: readonly EffectInstance[], instanceId: string): string {
+  const ordinal = effectInstanceOrdinal(chain, instanceId);
   return ordinal === 1 ? base : `${base} ${ordinal}`;
 }
 
@@ -129,10 +132,10 @@ function buildRail(chain: readonly EffectInstance[]): RailTab[] {
       tabs.push({ id: virtualTabId(def.id as EffectTabId), label: def.label, category: def.id, available: true, instance: null });
       continue;
     }
-    instances.forEach((instance, i) => {
+    instances.forEach((instance) => {
       tabs.push({
         id: instance.id,
-        label: categoryLabel(def.label, i + 1),
+        label: categoryLabel(def.label, chain, instance.id),
         category: def.id,
         available: true,
         instance,
@@ -168,6 +171,15 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
     [activeLayer],
   );
   const rail = useMemo(() => buildRail(chain), [chain]);
+  // [A8-DEBUG-RAILLABEL] temporary diagnosis log — remove once the
+  // "Stroke 2 shows as Stroke" mismatch is closed.
+  React.useEffect(() => {
+    console.debug(
+      `[A8 rail] layer=${activeLayer?.id ?? "none"} chainLen=${chain.length}`
+      + ` chain=[${chain.map((i) => `${i.category}:${i.id}:${i.enabled}`).join(", ")}]`
+      + ` rail=[${rail.map((t) => `${t.label}<${t.id.slice(0, 10)}${t.instance ? "inst" : "virt"}>`).join(", ")}]`,
+    );
+  }, [activeLayer, chain, rail]);
 
   // Active-tab resolution, fully render-derived (no effects, no
   // set-state-in-effect), three inputs in priority order:
@@ -197,6 +209,12 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
     : signalTab ?? defaultTabId;
   const activeRailTab = rail.find((t) => t.id === resolvedActiveId) ?? null;
   const activeCategory = activeRailTab?.category ?? "stroke";
+  // [A8-DEBUG-RAILLABEL] temporary diagnosis log — remove with the block above.
+  console.debug(
+    `[A8 rail] resolved=${resolvedActiveId.slice(0, 10)} override=${override ? `${override.id.slice(0, 10)}@${override.nonce}` : "null"}`
+    + ` jumpNonce=${jumpNonce} signalTab=${signalTab?.slice(0, 10) ?? "null"}`
+    + ` activeLabel=${activeRailTab?.label ?? "none"}`,
+  );
   const canAdd = !!activeLayer
     && activeRailTab?.available === true
     && (ADDABLE_CATEGORIES as readonly string[]).includes(activeCategory);
@@ -248,7 +266,9 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
     }
     if (!isVirtualTabId(railTab.id)) return;
     const id = newEffectInstanceId();
-    const patch = appendEffectInstance(activeLayer, virtualTabCategory(railTab.id), { id });
+    // The eye on a virtual floor is an explicit ON request — land the
+    // instance enabled (PS checkbox semantics).
+    const patch = appendEffectInstance(activeLayer, virtualTabCategory(railTab.id), { id, enabled: true });
     applyEffectPatchCmd.execute({ patch });
     selectTab(id);
   };
@@ -335,46 +355,42 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
               </span>
               <ActionDropdown
                 closeOnMouseLeave
-                options={(EFFECT_TABS as readonly EffectTabDef[]).map((t) => {
-                  // Status-only eye badge in each row's RIGHT slot (no click
-                  // semantics — the option still just activates the category):
-                  // the same colour language as the rail tabs. Category with
-                  // an enabled instance → ON; instances exist but all disabled
-                  // → OFF; no instance yet (virtual floor) → muted OFF.
-                  const catTabs = rail.filter((rt) => rt.category === t.id);
-                  const hasOn = catTabs.some((rt) => rt.instance?.enabled);
-                  const hasAny = catTabs.some((rt) => rt.instance);
-                  const eye = hasOn
+                // The dropdown lists the RAIL'S OWN TABS — same data, same
+                // entry-point contract, and the same per-instance ordinal
+                // names ("Stroke", "Stroke 2", …) instead of bare category
+                // labels. A per-INSTANCE eye (not per-category): the eye's
+                // colour is exactly that instance's on/off state.
+                options={rail.map((rt) => {
+                  const eye = rt.instance?.enabled
                     ? <Eye size={10} className="text-cyan-500 dark:text-cyan-400" />
                     : <EyeOff
                         size={10}
-                        className={hasAny
+                        className={rt.instance
                           ? "text-red-500 dark:text-red-400"
                           : "text-[var(--text-muted)] opacity-50"}
                       />;
                   return {
-                    value: t.id,
-                    label: t.label,
+                    value: rt.id,
+                    label: rt.label,
                     trailing: <span className="mr-0.5">{eye}</span>,
                   };
                 })}
                 onSelect={(value) => {
-                  // Activate that category's first rail tab (its virtual tab
-                  // when the category has no instances yet).
-                  const target = rail.find((t) => t.category === value);
-                  if (target) selectTab(target.id);
+                  // Activate that rail tab directly (instance id or the
+                  // virtual category floor — the rail id IS the target).
+                  selectTab(value);
                 }}
                 trigger={(isOpen) => {
-                  // The closed trigger mirrors the rows' status eye for the
-                  // ACTIVE category (display-only, same colour language).
-                  const activeTabs = rail.filter((rt) => rt.category === activeCategory);
-                  const activeHasOn = activeTabs.some((rt) => rt.instance?.enabled);
-                  const activeHasAny = activeTabs.some((rt) => rt.instance);
+                  // The closed trigger names the ACTIVE rail tab (its
+                  // instance ordinal name, or the category for a placeholder)
+                  // with that tab's own status eye (display-only).
+                  const activeHasOn = !!activeRailTab?.instance?.enabled;
+                  const activeHasAny = !!activeRailTab?.instance;
                   return (
-                    <div className="flex items-center gap-1 group cursor-pointer" title="Switch effect category">
+                    <div className="flex items-center gap-1 group cursor-pointer" title="Switch effect instance">
                       <span className="text-[10px] font-black uppercase tracking-[0.15em] text-[var(--text-main)]">
-                        {EFFECT_CATEGORY_LABELS[activeCategory]
-                          ?? (EFFECT_TABS as readonly EffectTabDef[]).find((t) => t.id === activeCategory)?.label
+                        {activeRailTab?.label
+                          ?? EFFECT_CATEGORY_LABELS[activeCategory]
                           ?? activeCategory}
                       </span>
                       {activeHasOn
@@ -409,7 +425,7 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
                 selectTab(id);
               }}
               className={`p-1 rounded outline-none ${canAdd
-                ? "text-[var(--text-muted)] hover:text-[var(--text-main)]"
+                ? "cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-main)]"
                 : "text-[var(--text-muted)] opacity-40 cursor-not-allowed"}`}
             >
               <Plus size={12} />
@@ -447,6 +463,12 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
               {activeRailTab?.instance ? (
                 activeRailTab.instance.category === "stroke" ? (
                   <StrokePanel
+                    key={activeRailTab.instance.id}
+                    layer={activeLayer}
+                    instance={activeRailTab.instance}
+                  />
+                ) : activeRailTab.instance.category === "shadow" ? (
+                  <ShadowPanel
                     key={activeRailTab.instance.id}
                     layer={activeLayer}
                     instance={activeRailTab.instance}

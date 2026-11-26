@@ -672,8 +672,7 @@ export type EffectStageDesc =
   /**
    * OUTWARD stroke: the prepass dilates the content alpha by `radiusPx`
    * (half the stroke width, rounded up), tints the ring outside the original
-   * alpha with `color`, and composites it beneath the content. P2 ships the
-   * stroke arm; shadow joins the union when its pipeline lands.
+   * alpha with `color`, and composites it beneath the content.
    */
   | {
     readonly kind: 'stroke';
@@ -683,6 +682,34 @@ export type EffectStageDesc =
     readonly widthPx: number;
     /** Placement relative to the alpha contour. */
     readonly position: 'outside' | 'center' | 'inside';
+  }
+  /**
+   * DROP SHADOW (P5): the content silhouette offset by `(offsetX, offsetY)`,
+   * blurred with a Gaussian of sigma `blurRadius`, tinted `color` at
+   * `opacity`, composited BENEATH the content (and beneath any stroke ring —
+   * the cross-category render order is shadow beneath stroke beneath content).
+   * The offset rides in canvas-px deltas (positive y = down) so the render
+   * pass needs no trig; the AngleDial writes its drag vector directly.
+   */
+  | {
+    readonly kind: 'shadow';
+    /** Shadow colour: working-gamut LINEAR straight-alpha RGBA (0..1). */
+    readonly color: readonly [number, number, number, number];
+    /** Offset in logical px; positive x = right. */
+    readonly offsetX: number;
+    /** Offset in logical px; positive y = down. */
+    readonly offsetY: number;
+    /** Gaussian sigma in logical px (the UI's "softness"). */
+    readonly blurRadius: number;
+    /**
+     * Silhouette dilation before the blur, in logical px (the UI's
+     * "spread" — PS Layer Style vocabulary). Grows the shadow without
+     * softening it; non-negative (PS's Spread has no negative range).
+     * Absent = 0.
+     */
+    readonly spreadPx?: number;
+    /** Shadow opacity 0..1 (the UI's "strength"). */
+    readonly opacity: number;
   };
 
 // ────────────────────────────────────────────────────────────

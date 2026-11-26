@@ -35,7 +35,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ArrowUpRight, Eye } from 'lucide-react';
 import type { EffectInstance } from '@opengpex/editor/core/types/models';
-import { EFFECT_CATEGORY_LABELS } from '@opengpex/editor/core/layer/effects';
+import { EFFECT_CATEGORY_LABELS, effectInstanceOrdinal } from '@opengpex/editor/core/layer/effects';
 import { useEditorServices } from '@opengpex/editor/core/context';
 // Cross-plugin invocation per the facade spec (20260628): the producing
 // plugin's XxxAPI carries the registered uid; the consumer dispatches by
@@ -129,7 +129,17 @@ export function EffectMemberRow({
   );
 }
 
-export function EffectGroupItem({ layerId, instances }: { layerId: string; instances: EffectInstance[] }) {
+export function EffectGroupItem({
+  layerId,
+  instances,
+  chain,
+}: {
+  layerId: string;
+  instances: EffectInstance[];
+  /** The layer's FULL effect chain (enabled or not) — the ordinal authority
+   *  numbers within the category over ALL instances, never the enabled subset. */
+  chain: EffectInstance[];
+}) {
   const rowRef = useRef<HTMLDivElement>(null);
   const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -219,8 +229,8 @@ export function EffectGroupItem({ layerId, instances }: { layerId: string; insta
           }}
           onClose={() => setOpen(false)}
         >
-          {instances.map((instance, i) => (
-            <EffectMemberRow key={instance.id} layerId={layerId} instance={instance} ordinal={i + 1} />
+          {instances.map((instance) => (
+            <EffectMemberRow key={instance.id} layerId={layerId} instance={instance} ordinal={effectInstanceOrdinal(chain, instance.id)} />
           ))}
         </MaskGroupPanel>
       )}

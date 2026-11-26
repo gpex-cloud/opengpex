@@ -317,7 +317,7 @@ export const CraftDrawerComponent = React.memo(function CraftDrawerComponent() {
             <CraftPanelButtonGroup />
             <button
               onClick={handleOpenSettings}
-              className="p-1 rounded hover:bg-white/5 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
+              className="p-1 rounded cursor-pointer hover:bg-white/5 text-[var(--text-muted)] hover:text-[var(--text-main)] transition-colors"
               title="Font Settings"
             >
               <Settings size={12} />

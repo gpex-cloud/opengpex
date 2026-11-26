@@ -37,7 +37,7 @@
  *     end. The undo step is owned by the `beginEffectEdit` checkpoint
  *     (undoable, empty body) fired at pointerdown — the same three-piece
  *     contract the adjustments sliders run on. The payload carries the FULL
- *     StrokeParams, computed by the panel against
+ *     params union (StrokeParams | ShadowParams), computed by the panel against
  *     `actions.fast.latestLayer` (the FRESHEST draft: the gesture's draft
  *     replaces the chain wholesale, so a Redux baseline would resurrect last
  *     frame's values mid-gesture — exactly the adjustment fast path's
@@ -45,7 +45,7 @@
  */
 
 import { EditorContextValue, EditorCommand } from '@opengpex/editor/core/types';
-import type { Layer, StrokeParams } from '@opengpex/editor/core/types/models';
+import type { Layer, StrokeParams, ShadowParams } from '@opengpex/editor/core/types/models';
 import {
   removeEffectInstance,
   updateEffectParams,
@@ -69,7 +69,7 @@ export const EFFECT_COMMANDS = {
     name: 'Fast-Track Effect Params',
     execute: (
       ctx: EditorContextValue,
-      payload: { instanceId: string; params: StrokeParams },
+      payload: { instanceId: string; params: StrokeParams | ShadowParams },
     ) => {
       const { activeFrame, activeLayer, actions } = ctx;
       if (!activeFrame || !activeLayer) return;
@@ -78,7 +78,7 @@ export const EFFECT_COMMANDS = {
       const patch = updateEffectParams(latest, payload.instanceId, payload.params);
       if (patch) actions.fast.overrideLayer(activeFrame.id, activeLayer.id, patch);
     },
-  } as EditorCommand<{ instanceId: string; params: StrokeParams }, void>,
+  } as EditorCommand<{ instanceId: string; params: StrokeParams | ShadowParams }, void>,
 
   commitEffectParams: {
     id: P.CMD_COMMIT_EFFECT,

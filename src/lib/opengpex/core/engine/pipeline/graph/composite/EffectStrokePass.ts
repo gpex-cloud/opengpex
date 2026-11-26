@@ -31,9 +31,6 @@
  */
 
 import { LayerTexture } from '@opengpex/editor/core/engine/gpu/resources/LayerTexture';
-import { snapToPowerOfTwo } from '@opengpex/editor/core/engine/gpu/resources/TexturePool';
-import { isOversizedTransient } from '@opengpex/editor/core/engine/gpu/resources/oversizedTransient';
-import type { ResidentTransientDesc } from '@opengpex/editor/core/engine/gpu/resources/ResidentTransientCache';
 import { GPUTextureUsage } from '@opengpex/editor/core/engine/gpu/constants';
 import {
   EDT_WORKGROUP_SIZE,
@@ -49,7 +46,7 @@ import {
   STROKE_COMPOSE_WORKGROUP,
 } from '@opengpex/editor/core/engine/gpu/shaders/strokeCompose';
 import type { StrokePosition } from '@opengpex/editor/core/types/models';
-import { FILTER_TRANSIENT_USAGE, type FilterPassContext } from './FilterPass';
+import { acquireEffectOutputTransient, type FilterPassContext } from './FilterPass';
 
 interface TexelRect {
   readonly x: number;
@@ -128,19 +125,20 @@ export function sweepEdtCache(activeKeys: ReadonlySet<string>): void {
 }
 
 export class EffectStrokePass {
-  static run(
+  /**
+   * The shared dual-field 1+JFA EDT: seed the content silhouette inside the
+   * window, then flood. Used by the stroke compose AND (P5) by the shadow's
+   * spread stage — one distance field, two consumers.
+   */
+  static computeEdt(
     encoder: GPUCommandEncoder,
     ctx: FilterPassContext,
     p: {
       readonly layerId: string;
-      readonly instanceIndex: number;
+      /** Cache slot id (per consumer — stroke instances and shadow spreads differ). */
+      readonly cacheId: string;
       readonly content: LayerTexture;
       readonly windowTexel: TexelRect;
-      readonly contentIsLinear: boolean;
-      readonly gamutId: number;
-      readonly strokeColor: readonly [number, number, number, number];
-      readonly widthTexels: number;
-      readonly position: StrokePosition;
       readonly contentVisibleTexel?: TexelRect;
       /** Alpha-only cache key for cross-frame EDT reuse. */
       readonly edtAlphaKey?: string;
@@ -148,7 +146,7 @@ export class EffectStrokePass {
   ): LayerTexture {
     const width = Math.max(1, p.windowTexel.w);
     const height = Math.max(1, p.windowTexel.h);
-    const cacheId = `${p.layerId}#${p.instanceIndex}`;
+    const cacheId = p.cacheId;
     const vis = p.contentVisibleTexel;
     const visKey = vis ? `${Math.floor(vis.x)},${Math.floor(vis.y)},${Math.ceil(vis.w)},${Math.ceil(vis.h)}` : 'full';
     const fullEdtKey = p.edtAlphaKey
@@ -256,8 +254,39 @@ export class EffectStrokePass {
         edtResult = srcTex;
       }
     }
+    return edtResult;
+  }
 
-    const out = EffectStrokePass.acquireOutputTransient(ctx, p.layerId, width, height);
+  static run(
+    encoder: GPUCommandEncoder,
+    ctx: FilterPassContext,
+    p: {
+      readonly layerId: string;
+      readonly instanceIndex: number;
+      readonly content: LayerTexture;
+      readonly windowTexel: TexelRect;
+      readonly contentIsLinear: boolean;
+      readonly gamutId: number;
+      readonly strokeColor: readonly [number, number, number, number];
+      readonly widthTexels: number;
+      readonly position: StrokePosition;
+      readonly contentVisibleTexel?: TexelRect;
+      /** Alpha-only cache key for cross-frame EDT reuse. */
+      readonly edtAlphaKey?: string;
+    },
+  ): LayerTexture {
+    const width = Math.max(1, p.windowTexel.w);
+    const height = Math.max(1, p.windowTexel.h);
+    const edtResult = EffectStrokePass.computeEdt(encoder, ctx, {
+      layerId: p.layerId,
+      cacheId: `${p.layerId}#${p.instanceIndex}`,
+      content: p.content,
+      windowTexel: p.windowTexel,
+      contentVisibleTexel: p.contentVisibleTexel,
+      edtAlphaKey: p.edtAlphaKey,
+    });
+
+    const out = acquireEffectOutputTransient(ctx, p.layerId, 'stroke', width, height);
     const uniform = packStrokeComposeUniform(width, height, {
       contentIsLinear: p.contentIsLinear,
       gamutId: p.gamutId,
@@ -298,48 +327,4 @@ export class EffectStrokePass {
     return out;
   }
 
-  private static acquireOutputTransient(
-    ctx: FilterPassContext,
-    layerId: string,
-    width: number,
-    height: number,
-  ): LayerTexture {
-    if (isOversizedTransient(width, height)) {
-      const desc: ResidentTransientDesc = {
-        width,
-        height,
-        format: ctx.workingFormat,
-        usage: FILTER_TRANSIENT_USAGE,
-        label: `EffectStrokePass Oversized Transient (${layerId})`,
-      };
-      const raw = ctx.acquireResidentTransient
-        ? ctx.acquireResidentTransient(`effect:${layerId}:stroke-out`, desc)
-        : ctx.device.createTexture({ size: [width, height, 1], format: ctx.workingFormat, usage: FILTER_TRANSIENT_USAGE, label: desc.label });
-      if (!ctx.acquireResidentTransient) ctx.scratch.push(raw);
-      return new LayerTexture({
-        texture: raw,
-        width,
-        height,
-        allocatedWidth: width,
-        allocatedHeight: height,
-        format: ctx.workingFormat,
-      });
-    }
-    const raw = ctx.texturePool.acquire({
-      width,
-      height,
-      format: ctx.workingFormat,
-      usage: FILTER_TRANSIENT_USAGE,
-      label: `Stroke Output (${layerId})`,
-    });
-    ctx.scratch.push(raw);
-    return new LayerTexture({
-      texture: raw,
-      width,
-      height,
-      allocatedWidth: snapToPowerOfTwo(width),
-      allocatedHeight: snapToPowerOfTwo(height),
-      format: ctx.workingFormat,
-    });
-  }
 }

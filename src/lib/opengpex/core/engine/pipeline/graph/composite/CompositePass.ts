@@ -41,8 +41,8 @@ import {
   LAYER_RENDER_INTENT_SHIFT,
 } from '@opengpex/editor/core/engine/gpu/shaders/layer';
 import { resolveAdjustBindGroup as resolveAdjust, type AdjustCoverageBinding } from '../support/adjustBindGroup';
-import { resolveLayerGeometry, resolveLayerDprScale, effectiveScale } from '../support/layerGeometry';
-import { resolveVmaskUniform } from '../support/vmaskUniform';
+import { effectiveScale } from '../support/layerGeometry';
+import { resolveLayerDrawGeometry } from '../build/support/resolveDrawSource';
 import { isSourceLinear } from '../support/sourceDomain';
 import { resolveSourceGamutId } from '../support/sourceGamut';
 import { resolveSourceRawIntentNibble, resolveSourceRawWhiteDomain } from '../support/sourceIntent';
@@ -345,42 +345,11 @@ export class CompositePass {
     const rawWhiteDomain = resolveSourceRawWhiteDomain(layer, params.sourceIntentApplied);
     flags |= resolveSourceRawIntentNibble(layer, params.sourceIntentApplied) << LAYER_RENDER_INTENT_SHIFT;
 
-    const { contentWidth, contentHeight, localOffset, uvRect } = resolveLayerGeometry(
-      layer,
-      texture.width,
-      texture.height,
-      resolveLayerDprScale(layer, texture.width, params.vectorTransient),
-      params.contentWindow,
-      params.expandQuadToWindow === true,
-      // The window's reporting basis is producer-stamped: 'asset' windows
-      // convert to logical px through dprScale, 'content-local' windows
-      // (vector/solid effect transients) are already logical.
-      params.contentWindow?.basis ?? 'asset',
-    );
-
-    // ⚠️ POT-BUCKET UV FIX: `resolveLayerGeometry` computes UVs in CONTENT-relative
-    // space (i.e. normalised over `texture.width × texture.height`). When the physical
-    // GPUTexture is larger than the content (POT-bucketed pool textures from FilterPass
-    // or AdjustPrePass), `textureSample` normalises over the ALLOCATED size, so we must
-    // scale the UVs by `maxU/maxV` (= content / allocated). For exact-size textures
-    // (WebGpuEngine-uploaded assets, maxU=maxV=1) this is a no-op.
-    const physicalUvRect: readonly [number, number, number, number] = [
-      uvRect[0] * texture.maxU,
-      uvRect[1] * texture.maxV,
-      uvRect[2] * texture.maxU,
-      uvRect[3] * texture.maxV,
-    ];
-
-    // Resolve the vmask uniform triple (analytic → SDF params; polygon →
-    // just the HAS_TEX bit, invert/hard already baked into vmaskTexture).
-    // Mask-free prepass outputs skip vmask completely (already baked in).
-    const vmaskU = resolveVmaskUniform(
-      params.maskFree ? undefined : layer.vmask,
-      contentWidth,
-      contentHeight,
-      !!vmaskTexture,
-      params.vmaskWindow,
-    );
+    // Geometry + POT-bucket UVs + vmask uniform triple: computed by the shared
+    // resolveDrawSource seam so the separable and non-separable passes cannot
+    // drift apart (see that module for the POT-bucket UV rationale).
+    const { contentWidth, contentHeight, localOffset, physicalUvRect, vmaskU } =
+      resolveLayerDrawGeometry(layer, texture, params);
 
     // 1. Pack uniforms
     packLayerUniforms(

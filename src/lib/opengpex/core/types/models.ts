@@ -270,6 +270,14 @@ export interface ShadowParams {
   offsetY: number;
   /** Gaussian sigma in canvas px (UI label: softness). */
   blurRadius: number;
+  /**
+   * Silhouette dilation before the blur, in canvas px — the PS "Spread" job:
+   * it makes the shadow BIGGER without making it softer (unlike blurRadius,
+   * which grows the area by smearing the edge). Non-negative (PS's Spread has
+   * no negative range; a shadow narrower than the content is not offered).
+   * Absent = 0 = no spread (older documents hydrate with zero migration).
+   */
+  spreadPx?: number;
   /** Shadow opacity 0..1 (UI label: strength). */
   opacity: number;
 }

@@ -139,7 +139,7 @@ export default function ActionGroup<K extends string = string>({
               //               activeTone: 'inverted'
               //   inferred -> neutral fill+ring ("related, not engaged")
               //   default  -> muted text + hover-stage bg + hover-brighten
-              className={`relative flex items-center justify-center w-6 h-full transition-all outline-none select-none focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0
+              className={`relative flex items-center justify-center w-6 h-full cursor-pointer transition-all outline-none select-none focus:outline-none focus:ring-0 focus-visible:outline-none focus-visible:ring-0
                 ${scheme}`}
               // Triple-defense against the UA "click-focus outline":
               //   1. Tailwind classes above zero out :focus / :focus-visible

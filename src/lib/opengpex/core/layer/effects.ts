@@ -130,6 +130,29 @@ export function findEffectInstance(layer: Layer, id: string): EffectInstance | n
   return getEffectChain(layer).find((e) => e.id === id) ?? null;
 }
 
+/**
+ * 1-based ordinal of one instance WITHIN its category, counting every
+ * instance (enabled or not) in chain array order — the SINGLE numbering
+ * authority behind the per-instance display names ("Stroke", "Stroke 2", …).
+ * Every surface that labels an effect instance (drawer rail, drawer header
+ * dropdown, layers-list family rows) must derive its ordinal HERE, never
+ * from a filtered or render-sorted sub-list: an enabled-only or
+ * cross-category count shifts the numbers and two surfaces name the same
+ * instance differently.
+ */
+export function effectInstanceOrdinal(chain: readonly EffectInstance[], instanceId: string): number {
+  const instance = chain.find((i) => i.id === instanceId);
+  if (!instance) return 1;
+  return chain.filter((i) => i.category === instance.category).findIndex((i) => i.id === instanceId) + 1;
+}
+
+/** Display name for one instance: the category label plus its within-category ordinal ("Stroke 2"). */
+export function effectInstanceLabel(chain: readonly EffectInstance[], instanceId: string, categoryLabels: Readonly<Record<string, string>>): string {
+  const instance = chain.find((i) => i.id === instanceId);
+  const base = instance ? (categoryLabels[instance.category] ?? instance.category) : "";
+  return effectInstanceOrdinal(chain, instanceId) === 1 ? base : `${base} ${effectInstanceOrdinal(chain, instanceId)}`;
+}
+
 /** Count of instances (enabled or not) for one category — the removal floor is 1. */
 export function countEffectInstances(layer: Layer, category: EffectCategory): number {
   return getEffectChain(layer).filter((e) => e.category === category).length;
@@ -184,10 +207,18 @@ export function appendEffectInstance(
      * Omitted → a fresh generated id, the historical behaviour.
      */
     id?: string;
+    /**
+     * New instances arrive DISABLED (default): "+" adds a parametric shell the
+     * user turns on deliberately — an off-by-default effect can never surprise
+     * by re-painting pixels the moment it lands. The ONE exception is the
+     * virtual-floor eye create, which IS an explicit on-request and passes
+     * `enabled: true` (PS checkbox semantics: the click itself is the on).
+     */
+    enabled?: boolean;
   } = {},
 ): Partial<Layer> {
   const chain = getEffectChain(layer);
-  const instance = createEffectInstance(category, { params: opts.params, id: opts.id });
+  const instance = createEffectInstance(category, { params: opts.params, id: opts.id, enabled: opts.enabled ?? false });
   if (opts.afterId) {
     const at = chain.findIndex((e) => e.id === opts.afterId);
     if (at >= 0) {

@@ -60,6 +60,7 @@ import { prepareAdjustCoverage } from './build/prepareAdjustCoverage';
 import type { AdjustCoverageBinding } from './support/adjustBindGroup';
 import { prepareBmaskCombineSources } from './build/prepareBmaskCombine';
 import type { BuildContext, PreparedSource } from './build/types';
+import { resolveDrawSourceParams } from './build/support/resolveDrawSource';
 
 /** Context for the compositing half (camera-independent, document space). */
 export interface CompositeContext {
@@ -413,27 +414,12 @@ export class RenderGraph {
           // vector transients, resident assets, the solid white formality);
           // absent = nothing to draw this frame.
           const src = sources.get(layer.id);
-          const texture = src?.texture;
-          if (!texture) continue;
-          const maskTex = src?.maskFree ? undefined : bmaskSources.get(layer.id);
-          const vmaskBake = src?.maskFree ? undefined : vmaskSources.get(layer.id);
+          const draw = resolveDrawSourceParams(src, layer, { bmaskSources, vmaskSources }, adjustCoverageSources.get(layer.id));
+          if (!draw) continue;
           CompositePass.drawLayer(renderPass, passCtx, {
             layer,
-            texture,
-            maskTexture: maskTex,
-            vmaskTexture: vmaskBake?.texture,
-            vmaskWindow: vmaskBake?.window,
-            adjustCoverage: adjustCoverageSources.get(layer.id),
+            ...draw,
             isBottomOpaque: false,
-            solidUniform: src?.solidUniform === true,
-            suppressAdjust: src?.suppressAdjust,
-            vectorTransient: src?.vectorTransient,
-            sourceIsLinear: src?.sourceIsLinear,
-            sourceIsWorkingGamut: src?.sourceIsWorkingGamut,
-            sourceIntentApplied: src?.sourceIntentApplied,
-            contentWindow: src?.contentWindow,
-            expandQuadToWindow: src?.expandQuadToWindow,
-            maskFree: src?.maskFree,
           });
         }
       }
@@ -579,27 +565,12 @@ export class RenderGraph {
           // vector transients, resident assets, the solid white formality);
           // absent = nothing to draw this frame.
           const src = sources.get(layer.id);
-          const texture = src?.texture;
-          if (!texture) continue;
-          const maskTex = src?.maskFree ? undefined : bmaskSources.get(layer.id);
-          const vmaskBake = src?.maskFree ? undefined : vmaskSources.get(layer.id);
+          const draw = resolveDrawSourceParams(src, layer, { bmaskSources, vmaskSources }, adjustCoverageSources.get(layer.id));
+          if (!draw) continue;
           CompositePass.drawLayer(renderPass, passCtx, {
             layer,
-            texture,
-            maskTexture: maskTex,
-            vmaskTexture: vmaskBake?.texture,
-            vmaskWindow: vmaskBake?.window,
-            adjustCoverage: adjustCoverageSources.get(layer.id),
+            ...draw,
             isBottomOpaque: false,
-            solidUniform: src?.solidUniform === true,
-            suppressAdjust: src?.suppressAdjust,
-            vectorTransient: src?.vectorTransient,
-            sourceIsLinear: src?.sourceIsLinear,
-            sourceIsWorkingGamut: src?.sourceIsWorkingGamut,
-            sourceIntentApplied: src?.sourceIntentApplied,
-            contentWindow: src?.contentWindow,
-            expandQuadToWindow: src?.expandQuadToWindow,
-            maskFree: src?.maskFree,
           });
         }
 
@@ -611,10 +582,9 @@ export class RenderGraph {
         // filtered transients, vector transients, resident assets and the
         // solid white formality); absent = nothing to draw this frame.
         const src = sources.get(layer.id);
-        const fgTexture = src?.texture;
-        if (!fgTexture) continue;
-        const maskTex = src?.maskFree ? undefined : bmaskSources.get(layer.id);
-        const vmaskBake = src?.maskFree ? undefined : vmaskSources.get(layer.id);
+        const fgDraw = resolveDrawSourceParams(src, layer, { bmaskSources, vmaskSources }, adjustCoverageSources.get(layer.id));
+        if (!fgDraw) continue;
+        const fgTexture = fgDraw.texture;
 
         if (isFirstStep) {
           // First step is non-separable: seed the accumulator. Normally an
@@ -661,19 +631,7 @@ export class RenderGraph {
           layer,
           fgTexture,
           bgTexture: currentAccumulator,
-          maskTexture: maskTex,
-          vmaskTexture: vmaskBake?.texture,
-            vmaskWindow: vmaskBake?.window,
-            adjustCoverage: adjustCoverageSources.get(layer.id),
-          solidUniform: src?.solidUniform === true,
-          suppressAdjust: src?.suppressAdjust,
-          vectorTransient: src?.vectorTransient,
-          sourceIsLinear: src?.sourceIsLinear,
-          sourceIsWorkingGamut: src?.sourceIsWorkingGamut,
-          sourceIntentApplied: src?.sourceIntentApplied,
-          contentWindow: src?.contentWindow,
-          expandQuadToWindow: src?.expandQuadToWindow,
-          maskFree: src?.maskFree,
+          ...fgDraw,
         });
         blendPass.end();
 

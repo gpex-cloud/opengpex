@@ -36,17 +36,17 @@
  *     collapses back to `undefined` and the composite signature reverts to the
  *     historical no-effects token.
  *
- * P2 scope: only `stroke` stages are emitted. Shadow instances ride the chain
- * and are simply skipped here until the shadow pipeline lands (P5) — their
- * enabled/disabled state therefore does not change pixels yet, which is the
- * honest render behaviour for an unimplemented category.
+ * Scope: `stroke` and `shadow` stages are emitted (P2 + P5); categories
+ * without a render pipeline yet are skipped here — their enabled/disabled
+ * state does not change pixels, the honest render behaviour for an
+ * unimplemented category (the chain keeps the instance; the drawer keeps the tab).
  *
  * Pure + stateless: same chain + same working space ⇒ deep-equal output.
  *
  * @module core/engine/pipeline/scene/translators/effects
  */
 
-import type { Layer, StrokeParams } from '@opengpex/editor/core/types';
+import type { Layer, StrokeParams, ShadowParams } from '@opengpex/editor/core/types';
 import type { ColorValue } from '@opengpex/editor/core/engine/color/ColorValue';
 import { toWorkingLinearRgba } from '@opengpex/editor/core/engine/color';
 import type { WorkingColorSpace } from '@opengpex/editor/core/types';
@@ -56,6 +56,22 @@ import type { EffectStageDesc } from '../Scene';
 function clampStrokeWidth(widthPx: number): number {
   if (!Number.isFinite(widthPx) || widthPx <= 0) return 0;
   return widthPx;
+}
+
+/**
+ * Sanitize one shadow scalar: non-finite → fallback, negatives clamped for
+ * the magnitude-style fields (sigma / opacity); the OFFSET components keep
+ * their sign (they are deltas, not magnitudes) and only drop non-finites.
+ */
+function clampShadowScalar(v: number, fallback: number, min = 0, max = Infinity): number {
+  if (!Number.isFinite(v)) return fallback;
+  return Math.min(max, Math.max(min, v));
+}
+
+function clampShadowOffset(v: number): number {
+  if (!Number.isFinite(v)) return 0;
+  // Guard against absurd deltas that would explode the ROI window.
+  return Math.min(1000, Math.max(-1000, v));
 }
 
 /**
@@ -80,9 +96,18 @@ export function translateLayerEffects(
         widthPx: clampStrokeWidth(params.widthPx),
         position: params.position ?? 'outside',
       });
+    } else if (instance.category === 'shadow') {
+      const params = instance.params as ShadowParams;
+      stages.push({
+        kind: 'shadow',
+        color: toWorkingLinearRgba(params.color as ColorValue, workingSpace),
+        offsetX: clampShadowOffset(params.offsetX),
+        offsetY: clampShadowOffset(params.offsetY),
+        blurRadius: clampShadowScalar(params.blurRadius, 0, 0, 100),
+        spreadPx: params.spreadPx === undefined ? undefined : clampShadowScalar(params.spreadPx, 0, 0, 1000),
+        opacity: clampShadowScalar(params.opacity, 1, 0, 1),
+      });
     }
-    // 'shadow' stages wait for the shadow pipeline (P5) — skipped, not dropped
-    // from the data model (the chain keeps the instance; the drawer keeps the tab).
   }
   return { effects: stages.length ? stages : undefined };
 }

@@ -137,11 +137,16 @@ export const VerticalTabs = React.memo(function VerticalTabs({
     closeTimerRef.current = setTimeout(() => setOpen(false), CLOSE_DELAY_MS);
   }, [cancelClose]);
 
+  /** Re-measure the anchor rect (deduped below 0.5px — cheap per pointermove). */
+  const measureAnchor = useCallback(() => {
+    setAnchorRect(anchorRef.current?.getBoundingClientRect() ?? null);
+  }, []);
+
   const openNow = useCallback(() => {
     cancelClose();
-    setAnchorRect(anchorRef.current?.getBoundingClientRect() ?? null);
+    measureAnchor();
     setOpen(true);
-  }, [cancelClose]);
+  }, [cancelClose, measureAnchor]);
 
   /**
    * Hover keep-alive. `mouseenter` alone is not sufficient: transient layout
@@ -157,7 +162,14 @@ export const VerticalTabs = React.memo(function VerticalTabs({
       return;
     }
     cancelClose();
-  }, [open, openNow, cancelClose]);
+    // Re-measure on every pointer move over the panel: the owning drawer
+    // animates its own mount and content layout (framer-motion `layout`), so
+    // a rail opened MID-FLIGHT anchors on a transient rect and would stay
+    // pinned there — the scroll/resize listeners never fire for an animation
+    // (no scroll, no resize), and only a close/reopen cycle used to correct
+    // it (the "tabs land misplaced on a fresh page load" incident).
+    measureAnchor();
+  }, [open, openNow, cancelClose, measureAnchor]);
 
   // Reposition the fixed rail while open (drawer scroll, window resize).
   useEffect(() => {

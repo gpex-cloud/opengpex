@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.71
+
+- Layers: new Drop Shadow effect — add a shadow behind any layer's visible content, with color, offset (drag the angle dial to point the shadow in any direction), softness, spread and strength.
+- Layers: shadow spread grows the shadow outward before it softens, so tight halos and wide soft shadows stay distinct at the same size.
+- Layers: effects with shadows stay sharp where masks, non-destructive erasures and cropped fragments cut the layer — outlines and shadows now follow the true visible edge everywhere.
+
 ## 2.0.70
 
 - Layers: new layer effects — give any layer a Stroke outline drawn around its visible content, with color, size and inside / center / outside placement, and a live preview that follows your slider drags in real time.

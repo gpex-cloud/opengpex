@@ -74,8 +74,9 @@ import { LayerTexture } from '@opengpex/editor/core/engine/gpu/resources/LayerTe
 import { GPUTextureUsage } from '@opengpex/editor/core/engine/gpu/constants';
 import { AdjustPrePass } from '../composite/AdjustPrePass';
 import { EffectStrokePass, sweepEdtCache } from '../composite/EffectStrokePass';
+import { EffectShadowPass } from '../composite/EffectShadowPass';
 import { resolveSourceGamutId } from '../support/sourceGamut';
-import { expandWindowForStroke, effectReachPx, strokeContentBase } from './support/effectRoi';
+import { expandWindowForStroke, expandWindowForPads, effectWindowPadsPx, effectReachPx, strokeContentBase } from './support/effectRoi';
 import {
   EFFECT_MASK_BAKE_UNIFORM_BUFFER_SIZE,
   EFFECT_MASK_BAKE_WORKGROUP,
@@ -95,9 +96,13 @@ interface TexelRect {
   h: number;
 }
 
-/** The stroke stages carried by a layer's translated effect chain. */
+/** The stroke / shadow stages carried by a layer's translated effect chain. */
 function strokeStages(layer: CompiledScene['scene']['layers'][number]) {
   return (layer.effects ?? []).filter((s) => s.kind === 'stroke');
+}
+
+function shadowStages(layer: CompiledScene['scene']['layers'][number]) {
+  return (layer.effects ?? []).filter((s) => s.kind === 'shadow');
 }
 
 export function prepareEffectSources(
@@ -116,7 +121,8 @@ export function prepareEffectSources(
   const activeEdtKeys = new Set<string>();
   for (const layer of compiled.scene.layers) {
     const stages = strokeStages(layer);
-    if (stages.length === 0) continue;
+    const shadows = shadowStages(layer);
+    if (stages.length === 0 && shadows.length === 0) continue;
     const prepared = sources.get(layer.id);
     if (!prepared) continue; // asset not resident yet — the layer skips this frame anyway
 
@@ -277,7 +283,16 @@ export function prepareEffectSources(
     // feathered edges) and the output declares `maskFree: true`.
     const bmaskTex = bmaskSources?.get(layer.id);
     const vmaskBake = vmaskSources?.get(layer.id);
-    if (bmaskTex || vmaskBake) {
+    // A cropped logical fragment sharing a larger source asset (G2): the blur
+    // taps of a shadow legitimately reach outside the visible crop, where the
+    // shared asset's neighbor pixels are OPAQUE and would smear into the
+    // shadow. The mask-bake pass doubles as a visibility crop (both mask flags
+    // off = guarded copy of the base rect), so the shadow blur reads a
+    // base-sized silhouette whose out-of-bounds is truthful transparency.
+    const baseIsSubRect = !solidColor
+      && (base.x > 0 || base.y > 0 || base.x + base.w < content.width || base.y + base.h < content.height);
+    const needsVisibilityCrop = shadows.length > 0 && baseIsSubRect;
+    if (bmaskTex || vmaskBake || needsVisibilityCrop) {
       const bx0 = solidColor ? 0 : Math.floor(base.x);
       const by0 = solidColor ? 0 : Math.floor(base.y);
       const dstW = solidColor ? content.width : Math.max(1, Math.ceil(base.x + base.w) - bx0);
@@ -357,10 +372,25 @@ export function prepareEffectSources(
     //     through layer.dprScale, the same contract filter windows run
     //     under); logical px for vector (window/density) and solid (the
     //     materialized texture is already the expanded window).
-    const reachTexels = effectReachPx(stages) * density;
+    const pads = effectWindowPadsPx([...stages, ...shadows]);
     const windowTexel: TexelRect = solidColor
       ? { x: 0, y: 0, w: content.width, h: content.height }
-      : expandWindowForStroke(base, reachTexels);
+      : expandWindowForPads(
+          base,
+          {
+            left: pads.left * density,
+            top: pads.top * density,
+            right: pads.right * density,
+            bottom: pads.bottom * density,
+          },
+        );
+
+    // The shadow silhouette derives from the ORIGINAL content (never from the
+    // stroke output — a stroke ring must not fatten the shadow), so capture
+    // the post-mask-bake texture + geometry before the stroke chain reassigns
+    // `current`. The visibility crop above already shrank this texture to the
+    // base rect when the layer is a cropped shared-asset fragment.
+    const silhouette = content;
 
     let current = content;
     let currentIsLinear = contentIsLinear;
@@ -394,6 +424,53 @@ export function prepareEffectSources(
       // working-LINEAR in the working gamut.
       currentIsLinear = true;
       currentGamutId = 0;
+    }
+
+    // The shadow spread's EDT lives in its own cache slot per instance —
+    // register it in the sweep guard or the sweep destroys the entry every
+    // frame (the cache would never survive past one frame).
+    shadows.forEach((_, i) => activeEdtKeys.add(`${layer.id}:shadow-spread#${i}`));
+
+    // ── 2b. Shadow chain ────────────────────────────────────────────────
+    // Runs AFTER the strokes: each shadow composites BENEATH the accumulated
+    // foreground, giving the fixed cross-category z-order shadow beneath
+    // stroke beneath content. The blur taps read the SILHOUETTE captured
+    // above; SRC_ZERO_OOB makes taps beyond a cropped silhouette truthful
+    // transparency (a full-content silhouette's own bounds already are).
+    // The blur ALWAYS samples the captured silhouette at the window offset
+    // (the silhouette never becomes window-aligned — strokes do, shadows do
+    // not). Only the FOREGROUND side of the compose switches coordinates: the
+    // raw content's top-left sits at -windowTexel inside the window, while a
+    // stroke-composed foreground is already window-aligned.
+    let currentAligned = stages.length > 0;
+    for (let i = 0; i < shadows.length; i++) {
+      const stage = shadows[i];
+      if (stage.kind !== 'shadow') continue;
+      const currentOrigin: TexelRect = currentAligned
+        ? { x: 0, y: 0, w: current.width, h: current.height }
+        : { x: -windowTexel.x, y: -windowTexel.y, w: current.width, h: current.height };
+      current = EffectShadowPass.run(encoder, ctx, {
+        layerId: layer.id,
+        current,
+        silhouette,
+        windowTexel,
+        currentIsLinear,
+        gamutId: currentGamutId,
+        currentOriginTexel: currentOrigin,
+        offsetX: stage.offsetX * density,
+        offsetY: stage.offsetY * density,
+        blurRadius: stage.blurRadius * density,
+        spreadTexels: (stage.spreadPx ?? 0) * density,
+        instanceIndex: i,
+        edtAlphaKey: baseAlphaKey,
+        shadowColor: stage.color,
+        opacity: stage.opacity,
+      });
+      // The compose output is working-LINEAR in the working gamut,
+      // window-aligned — later stages and the output declaration agree.
+      currentIsLinear = true;
+      currentGamutId = 0;
+      currentAligned = true;
     }
 
     // ── 3. Output declaration ───────────────────────────────────────────

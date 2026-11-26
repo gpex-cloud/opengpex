@@ -88,6 +88,59 @@ import {
 export const FILTER_TRANSIENT_USAGE =
   GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.COPY_SRC;
 
+/**
+ * Acquire a window-sized effect-output transient (the EffectStrokePass /
+ * EffectShadowPass shared tail): oversized extents bypass the POT pool into an
+ * engine-owned resident slot, everything else comes from the pool with
+ * power-of-two allocation metadata. The two effect passes used to carry
+ * byte-identical copies of this — one drift and their outputs diverge.
+ */
+export function acquireEffectOutputTransient(
+  ctx: FilterPassContext,
+  layerId: string,
+  slotKey: string,
+  width: number,
+  height: number,
+): LayerTexture {
+  if (isOversizedTransient(width, height)) {
+    const desc: ResidentTransientDesc = {
+      width,
+      height,
+      format: ctx.workingFormat,
+      usage: FILTER_TRANSIENT_USAGE,
+      label: `Effect Output Oversized Transient (${layerId} ${slotKey})`,
+    };
+    const raw = ctx.acquireResidentTransient
+      ? ctx.acquireResidentTransient(`effect:${layerId}:${slotKey}`, desc)
+      : ctx.device.createTexture({ size: [width, height, 1], format: ctx.workingFormat, usage: FILTER_TRANSIENT_USAGE, label: desc.label });
+    if (!ctx.acquireResidentTransient) ctx.scratch.push(raw);
+    return new LayerTexture({
+      texture: raw,
+      width,
+      height,
+      allocatedWidth: width,
+      allocatedHeight: height,
+      format: ctx.workingFormat,
+    });
+  }
+  const raw = ctx.texturePool.acquire({
+    width,
+    height,
+    format: ctx.workingFormat,
+    usage: FILTER_TRANSIENT_USAGE,
+    label: `Effect Output (${layerId} ${slotKey})`,
+  });
+  ctx.scratch.push(raw);
+  return new LayerTexture({
+    texture: raw,
+    width,
+    height,
+    allocatedWidth: snapToPowerOfTwo(width),
+    allocatedHeight: snapToPowerOfTwo(height),
+    format: ctx.workingFormat,
+  });
+}
+
 export interface FilterPassContext {
   readonly device: GPUDevice;
   readonly pipelineCache: PipelineCache;
@@ -318,6 +371,9 @@ export class FilterPass {
 
   /**
    * Separable Gaussian: two compute dispatches (H then V) through one transient.
+   * Public (not `private`) because the SHADOW effect prepass (A8 P5) blurs the
+   * content silhouette through this exact premultiply pipeline before its
+   * compose dispatch — one blur implementation, two consumers.
    *
    * ALPHA: premultiply on the FIRST pass's load and un-premultiply on the LAST
    * pass's store, so the convolution runs entirely in premultiplied space (no dark
@@ -329,10 +385,10 @@ export class FilterPass {
    * `GAUSS_FLAG_SRC_LINEAR` because its input is pass H's linear output — decoding
    * twice would darken the result. The returned texture holds LINEAR light.
    */
-  private static gaussianBlur(
+  static gaussianBlur(
     encoder: GPUCommandEncoder,
     ctx: FilterPassContext,
-    layer: LayerNode,
+    layer: Pick<LayerNode, 'id'>,
     source: LayerTexture,
     sigma: number,
     sourceIsLinear: boolean,
@@ -601,7 +657,7 @@ export class FilterPass {
   private static dispatchGaussian(
     encoder: GPUCommandEncoder,
     ctx: FilterPassContext,
-    layer: LayerNode,
+    layer: Pick<LayerNode, 'id'>,
     p: {
       src: LayerTexture;
       dst: LayerTexture;

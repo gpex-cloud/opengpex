@@ -33,8 +33,8 @@ import type { BufferRing } from '@opengpex/editor/core/engine/gpu/resources/Buff
 import { BLEND_MODE_MAP, BLEND_UNIFORM_BUFFER_SIZE } from '@opengpex/editor/core/engine/gpu/shaders/blend';
 import { packLayerUniforms } from './CompositePass';
 import { resolveAdjustBindGroup as resolveAdjust, type AdjustCoverageBinding } from '../support/adjustBindGroup';
-import { resolveLayerGeometry, resolveLayerDprScale, effectiveScale } from '../support/layerGeometry';
-import { resolveVmaskUniform } from '../support/vmaskUniform';
+import { effectiveScale } from '../support/layerGeometry';
+import { resolveLayerDrawGeometry } from '../build/support/resolveDrawSource';
 import {
   LAYER_FLAG_HAS_MASK,
   LAYER_FLAG_CLIP,
@@ -208,38 +208,12 @@ export class BlendPass {
 
     const blendModeIndex = BLEND_MODE_MAP[layer.blendMode] ?? 0;
 
-    const { contentWidth, contentHeight, localOffset, uvRect } = resolveLayerGeometry(
-      layer,
-      fgTexture.width,
-      fgTexture.height,
-      resolveLayerDprScale(layer, fgTexture.width, params.vectorTransient),
-      params.contentWindow,
-      params.expandQuadToWindow === true,
-      // The window's reporting basis is producer-stamped: 'asset' windows
-      // convert to logical px through dprScale, 'content-local' windows
-      // (vector/solid effect transients) are already logical.
-      params.contentWindow?.basis ?? 'asset',
-    );
-
-    // ⚠️ POT-BUCKET UV FIX: same rationale as CompositePass — scale content-relative
-    // UVs into physical-texture space for POT-bucketed pool textures.
-    const physicalUvRect: readonly [number, number, number, number] = [
-      uvRect[0] * fgTexture.maxU,
-      uvRect[1] * fgTexture.maxV,
-      uvRect[2] * fgTexture.maxU,
-      uvRect[3] * fgTexture.maxV,
-    ];
-
-    // Resolve vmask uniform triple (shared with CompositePass). Packed at
-    // slots 19..27; the transform overwrite below only touches slots 0..11, so the
-    // vmask fields survive untouched. Mask-free prepass outputs skip vmask.
-    const vmaskU = resolveVmaskUniform(
-      params.maskFree ? undefined : layer.vmask,
-      contentWidth,
-      contentHeight,
-      !!vmaskTexture,
-      params.vmaskWindow,
-    );
+    // Geometry + POT-bucket UVs + vmask uniform triple: computed by the shared
+    // resolveDrawSource seam (same values CompositePass derives — the two
+    // passes must agree bit-for-bit). Packed at slots 19..27; the transform
+    // overwrite below only touches slots 0..11, so the vmask fields survive.
+    const { contentWidth, contentHeight, localOffset, physicalUvRect, vmaskU } =
+      resolveLayerDrawGeometry(layer, fgTexture, params);
 
     // Pack uv_rect / opacity / blend_mode / flags at their fixed offsets
     // (12..18) plus vmask (19..27); slot 0..11 is OVERWRITTEN below with the

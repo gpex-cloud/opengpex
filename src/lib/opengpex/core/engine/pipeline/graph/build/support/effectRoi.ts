@@ -62,20 +62,88 @@ export interface EffectWindow {
 
 /**
  * Union of every EFFECT stage's outward reach for one layer, in logical px.
- * P2 only emits stroke stages; the max keeps the shape honest when shadow
- * (offset + blur reach) joins the union.
+ * The max keeps the shape honest across stroke (placement-dependent reach)
+ * and shadow (offset + blur reach) stages.
  */
 export function effectReachPx(stages: readonly EffectStageDesc[] | undefined): number {
-  if (!stages || stages.length === 0) return 0;
-  let reach = 0;
-  for (const s of stages) {
-    if (s.kind === 'stroke') {
-      const w = Number.isFinite(s.widthPx) && s.widthPx > 0 ? s.widthPx : 0;
-      const outReach = s.position === 'inside' ? 0 : s.position === 'center' ? w * 0.5 : w;
-      reach = Math.max(reach, outReach);
+  const pads = effectWindowPadsPx(stages);
+  return Math.max(pads.left, pads.top, pads.right, pads.bottom);
+}
+
+/**
+ * Gaussian kernel half-width in logical px: `ceil(3σ)` clamped to 60 — the
+ * SAME clamp the separable-Gaussian kernel applies (`gaussianKernelRadius`),
+ * so the ROI never pads less than the blur can actually spread.
+ */
+export function shadowBlurReachPx(sigma: number): number {
+  const s = Number.isFinite(sigma) && sigma > 0 ? sigma : 0;
+  return Math.min(60, Math.ceil(3 * s));
+}
+
+/**
+ * Per-edge outward reach of every EFFECT stage, in logical px. Stroke pads
+ * uniformly; a shadow shifts its blurred silhouette by (offsetX, offsetY) and
+ * spreads it `3σ` further on every side, so each edge pads
+ * `blurReach + max(offsetComponent, 0)` — the blurred copy legitimately lands
+ * beyond the content on the offset's positive side, and the blur halo leaks
+ * `3σ` past it on BOTH sides of the shifted rect.
+ */
+export function effectWindowPadsPx(stages: readonly EffectStageDesc[] | undefined): {
+  readonly left: number;
+  readonly top: number;
+  readonly right: number;
+  readonly bottom: number;
+} {
+  let left = 0;
+  let top = 0;
+  let right = 0;
+  let bottom = 0;
+  if (stages) {
+    for (const s of stages) {
+      if (s.kind === 'stroke') {
+        const w = Number.isFinite(s.widthPx) && s.widthPx > 0 ? s.widthPx : 0;
+        const outReach = s.position === 'inside' ? 0 : s.position === 'center' ? w * 0.5 : w;
+        left = Math.max(left, outReach);
+        top = Math.max(top, outReach);
+        right = Math.max(right, outReach);
+        bottom = Math.max(bottom, outReach);
+      } else if (s.kind === 'shadow') {
+        const ox = Number.isFinite(s.offsetX) ? s.offsetX : 0;
+        const oy = Number.isFinite(s.offsetY) ? s.offsetY : 0;
+        const blur = shadowBlurReachPx(s.blurRadius);
+        // Positive spread dilates the silhouette before the blur — the halo
+        // rides on the DILATED rect, so the pad grows by the spread (the
+        // translator clamps it non-negative; PS's Spread has no erosion).
+        const spreadRaw = s.spreadPx;
+        const spread = typeof spreadRaw === 'number' && Number.isFinite(spreadRaw) ? spreadRaw : 0;
+        left = Math.max(left, blur + spread + Math.max(-ox, 0));
+        top = Math.max(top, blur + spread + Math.max(-oy, 0));
+        right = Math.max(right, blur + spread + Math.max(ox, 0));
+        bottom = Math.max(bottom, blur + spread + Math.max(oy, 0));
+      }
     }
   }
-  return reach;
+  return { left, top, right, bottom };
+}
+
+/**
+ * Pad `base` into the effect render window with per-edge pads, rounded
+ * OUTWARD (floor on the min side, ceil on the max side) so a fractional
+ * content rect never clips a coverage ramp landing on a boundary texel. NOT
+ * clamped to any source bounds — the effect transient is a fresh allocation
+ * the prepass owns, and effect pixels legitimately land outside the content
+ * rect (negative window origins are expected, mirroring the alphaFeather
+ * `beyondSource` posture).
+ */
+export function expandWindowForPads(
+  base: EffectWindow,
+  pads: { readonly left: number; readonly top: number; readonly right: number; readonly bottom: number },
+): EffectWindow {
+  const x0 = Math.floor(base.x - pads.left - STROKE_ROI_AA_SLACK_PX);
+  const y0 = Math.floor(base.y - pads.top - STROKE_ROI_AA_SLACK_PX);
+  const x1 = Math.ceil(base.x + base.w + pads.right + STROKE_ROI_AA_SLACK_PX);
+  const y1 = Math.ceil(base.y + base.h + pads.bottom + STROKE_ROI_AA_SLACK_PX);
+  return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
 /**

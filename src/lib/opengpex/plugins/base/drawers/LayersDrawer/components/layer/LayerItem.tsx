@@ -53,6 +53,7 @@ import { LayerMenu } from "./LayerMenu";
 import { hasLayerAdjustments } from "../../utils";
 import { getEffectChain, sortEffectInstancesForRender } from '@opengpex/editor/core/layer/effects';
 import { EffectGroupItem, EffectMemberRow } from '../mask/EffectGroupItem';
+import { effectInstanceOrdinal } from '@opengpex/editor/core/layer/effects';
 import type { LayersDrawerCommandsMap } from "../../commands.d";
 
 interface LayerItemProps {
@@ -565,12 +566,13 @@ export const LayerItem = React.memo(
                   row with the floating panel (both keyed on the enabled
                   chain — disabled instances render nowhere). */}
               {(() => {
-                const enabled = sortEffectInstancesForRender(getEffectChain(layer)).filter((s) => s.enabled);
+                const chain = getEffectChain(layer);
+                const enabled = sortEffectInstancesForRender(chain).filter((s) => s.enabled);
                 if (enabled.length === 1) {
-                  return <EffectMemberRow layerId={layer.id} instance={enabled[0]} ordinal={1} />;
+                  return <EffectMemberRow layerId={layer.id} instance={enabled[0]} ordinal={effectInstanceOrdinal(chain, enabled[0].id)} />;
                 }
                 if (enabled.length >= 2) {
-                  return <EffectGroupItem layerId={layer.id} instances={enabled} />;
+                  return <EffectGroupItem layerId={layer.id} instances={enabled} chain={chain} />;
                 }
                 return null;
               })()}
