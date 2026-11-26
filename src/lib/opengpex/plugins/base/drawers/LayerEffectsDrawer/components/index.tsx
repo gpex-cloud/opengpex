@@ -60,10 +60,13 @@ import { DrawerHeader } from "@opengpex/editor/workspace/components/DrawerHeader
 import ActionDropdown from "@opengpex/editor/widgets/ActionDropdown";
 import VerticalTabs, { type VerticalTabItem } from "@opengpex/editor/widgets/VerticalTabs";
 import { ChevronDown } from "lucide-react";
+import SplitButton from "@opengpex/editor/widgets/SplitButton";
 import type { EffectCategory, EffectInstance } from "@opengpex/editor/core/types/models";
 import {
   appendEffectInstance,
+  defaultParamsFor,
   disableAllEffectInstances,
+  updateEffectParams,
   ensureEffectCategoryInstance,
   effectInstanceOrdinal,
   getEffectChain,
@@ -75,6 +78,7 @@ import { StrokePanel } from "./panels/StrokePanel";
 import { ShadowPanel } from "./panels/ShadowPanel";
 import { ColorOverlayPanel } from "./panels/ColorOverlayPanel";
 import { OuterGlowPanel } from "./panels/OuterGlowPanel";
+import { GradientOverlayPanel } from "./panels/GradientOverlayPanel";
 import { EmptyCategoryPanel } from "./panels/shared";
 import {
   ADDABLE_CATEGORIES,
@@ -426,45 +430,46 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
           }
           actions={
             <>
-              {/* Disable-all: one patch turns every instance off (instances
-                  stay listed — same semantics as a per-instance eye toggle,
-                  never a removal). Always visible next to the add button;
-                  dimmed while nothing is enabled (no-op by contract). */}
-              <button
-                disabled={!hasEnabledInstances}
-                title={hasEnabledInstances
-                  ? "Disable all effects on this layer"
-                  : "No enabled effects to disable"}
-                onClick={() => {
-                  if (!activeLayer || !applyEffectPatchCmd) return;
+            {/* AdjustmentDrawer reset-SplitButton precedent: the "+" is the
+                primary action (add an instance beneath the active tab); the
+                split menu carries the two maintenance actions — disable-all
+                (layer-scoped, one patch) and per-instance factory reset. */}
+            <SplitButton
+              icon={<Plus size={12} />}
+              tooltip={canAdd
+                ? `Add ${EFFECT_CATEGORY_LABELS[activeCategory] ?? activeCategory} instance (inserted beneath the active tab)`
+                : "No layer selected"}
+              disabled={!canAdd}
+              onClick={() => {
+                if (!activeLayer || !applyEffectPatchCmd || !canAdd) return;
+                const id = newEffectInstanceId();
+                const patch = appendEffectInstance(activeLayer, activeCategory as EffectCategory, { afterId: activeRailTab?.instance?.id, id });
+                applyEffectPatchCmd.execute({ patch });
+                selectTab(id);
+              }}
+              dropdownOptions={[
+                { label: "Disable all effects", value: 'disable-all' },
+                { label: "Reset to defaults", value: 'reset-defaults' },
+              ]}
+              onDropdownSelect={(value) => {
+                if (!activeLayer || !applyEffectPatchCmd) return;
+                if (value === 'disable-all') {
                   const patch = disableAllEffectInstances(activeLayer);
                   if (patch) applyEffectPatchCmd.execute({ patch });
-                }}
-                className={`p-1 rounded outline-none ${hasEnabledInstances
-                  ? "cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-main)]"
-                  : "text-[var(--text-muted)] opacity-40 cursor-not-allowed"}`}
-              >
-                <EyeOff size={12} />
-              </button>
-              <button
-                disabled={!canAdd}
-                title={canAdd
-                  ? `Add ${EFFECT_CATEGORY_LABELS[activeCategory] ?? activeCategory} instance (inserted beneath the active tab)`
-                  : "Adding arrives with the shadow pipeline (P5)"}
-                onClick={() => {
-                  if (!activeLayer || !applyEffectPatchCmd || !canAdd) return;
-                  const id = newEffectInstanceId();
-                  const patch = appendEffectInstance(activeLayer, activeCategory as EffectCategory, { afterId: activeRailTab?.instance?.id, id });
-                  applyEffectPatchCmd.execute({ patch });
-                  selectTab(id);
-                }}
-                className={`p-1 rounded outline-none ${canAdd
-                  ? "cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-main)]"
-                  : "text-[var(--text-muted)] opacity-40 cursor-not-allowed"}`}
-              >
-                <Plus size={12} />
-              </button>
-            </>
+                  return;
+                }
+                if (value === 'reset-defaults') {
+                  if (!activeRailTab?.instance) return;
+                  const patch = updateEffectParams(
+                    activeLayer,
+                    activeRailTab.instance.id,
+                    defaultParamsFor(activeCategory as EffectCategory),
+                  );
+                  if (patch) applyEffectPatchCmd.execute({ patch });
+                }
+              }}
+            />
+</>
           }
           actionsClassName="gap-1"
         />
@@ -516,6 +521,12 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
                   />
                 ) : activeRailTab.instance.category === "outerGlow" ? (
                   <OuterGlowPanel
+                    key={activeRailTab.instance.id}
+                    layer={activeLayer}
+                    instance={activeRailTab.instance}
+                  />
+                ) : activeRailTab.instance.category === "gradientOverlay" ? (
+                  <GradientOverlayPanel
                     key={activeRailTab.instance.id}
                     layer={activeLayer}
                     instance={activeRailTab.instance}

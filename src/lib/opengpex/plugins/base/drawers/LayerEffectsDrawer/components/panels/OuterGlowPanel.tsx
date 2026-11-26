@@ -43,11 +43,11 @@ import React, { useState } from 'react';
 import ColorSwatchRow from '@opengpex/editor/widgets/ColorSwatchRow';
 import FancySvgSlider from '@opengpex/editor/widgets/FancySvgSlider';
 import type { EffectInstance, Layer, OuterGlowParams } from '@opengpex/editor/core/types/models';
-import { defaultOuterGlowParams, updateEffectParams } from '@opengpex/editor/core/layer/effects';
+import { updateEffectParams } from '@opengpex/editor/core/layer/effects';
 import { usePluginCommands } from '@opengpex/editor/core/context';
 import { useFilterGesture } from '@opengpex/editor/plugins/base/drawers/AdjustmentDrawer/hooks';
 import type { LayerEffectsDrawerCommandsMap } from '../../commands.d';
-import { PanelSection, PanelResetButton } from './shared';
+import { PanelSection } from './shared';
 
 export function OuterGlowPanel({
   layer,
@@ -148,12 +148,6 @@ export function OuterGlowPanel({
     gesture.end();
   };
 
-  // Restore the outer-glow factory defaults onto THIS instance — a ONE-SHOT
-  // undoable patch through the shared applyEffectPatch channel (no fast
-  // buffer: a discrete click, not a drag gesture).
-  const resetToDefaults = () => {
-    applyOneShot(defaultOuterGlowParams());
-  };
 
   // A drag interrupted by unmount must still land its volatile draft — the
   // same cleanup contract as the stroke/shadow/color-overlay panels.
@@ -186,7 +180,6 @@ export function OuterGlowPanel({
           onValueChange={handleColorChange}
           onValueCommit={handleColorCommit}
         />
-        <PanelResetButton onReset={resetToDefaults} />
       </div>
       <PanelSection label="Blur">
         {/* The unit sits inline after the slider's numeric field (house

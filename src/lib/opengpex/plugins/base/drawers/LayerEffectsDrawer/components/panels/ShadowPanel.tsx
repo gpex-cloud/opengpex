@@ -38,11 +38,11 @@ import ColorSwatchRow from '@opengpex/editor/widgets/ColorSwatchRow';
 import FancySvgSlider from '@opengpex/editor/widgets/FancySvgSlider';
 import AngleDial, { angleDistanceFromOffset } from '@opengpex/editor/widgets/AngleDial';
 import type { EffectInstance, Layer, ShadowParams } from '@opengpex/editor/core/types/models';
-import { defaultShadowParams, updateEffectParams } from '@opengpex/editor/core/layer/effects';
+import { updateEffectParams } from '@opengpex/editor/core/layer/effects';
 import { usePluginCommands } from '@opengpex/editor/core/context';
 import { useFilterGesture } from '@opengpex/editor/plugins/base/drawers/AdjustmentDrawer/hooks';
 import type { LayerEffectsDrawerCommandsMap } from '../../commands.d';
-import { PanelSection, PanelResetButton } from './shared';
+import { PanelSection } from './shared';
 
 export function ShadowPanel({
   layer,
@@ -172,12 +172,6 @@ export function ShadowPanel({
     gesture.end();
   };
 
-  // Restore the shadow factory defaults onto THIS instance — a ONE-SHOT
-  // undoable patch through the shared applyEffectPatch channel (no fast
-  // buffer: a discrete click, not a drag gesture).
-  const resetToDefaults = () => {
-    applyOneShot(defaultShadowParams());
-  };
 
   // A drag interrupted by unmount must still land its volatile draft — the
   // same cleanup contract as the stroke panel.
@@ -211,7 +205,6 @@ export function ShadowPanel({
           onValueChange={handleColorChange}
           onValueCommit={handleColorCommit}
         />
-        <PanelResetButton onReset={resetToDefaults} />
       </div>
       <PanelSection label="Offset">
         {/* pl-16 = the ColorSwatchRow label width (w-14) + its gap — the dial

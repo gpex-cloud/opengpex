@@ -49,6 +49,7 @@ import type {
   ColorOverlayParams,
   EffectCategory,
   EffectInstance,
+  GradientOverlayParams,
   Layer,
   OuterGlowParams,
   ShadowParams,
@@ -68,6 +69,7 @@ export const EFFECT_CATEGORY_LABELS: Readonly<Record<string, string>> = {
   shadow: 'Shadow',
   colorOverlay: 'Color Overlay',
   outerGlow: 'Outer Glow',
+  gradientOverlay: 'Gradient Overlay',
 };
 
 // ─── Defaults ─────────────────────────────────────────────────────────────────
@@ -115,11 +117,66 @@ export function defaultOuterGlowParams(): OuterGlowParams {
   return { color: fromHex('#ffffbe'), blurRadius: 5, spreadPx: 0, strength: 0.5 };
 }
 
+/**
+ * First-release gradient-overlay defaults: the reference product's Gradient
+ * Overlay dialog factory state — a black→white linear ramp rising
+ * bottom→top (angle 90), full scale, full opacity, Normal blend (the
+ * factory blend mode, distinct from Color Overlay's Multiply). The same
+ * "one-shot success" contract as the other category defaults.
+ */
+export function defaultGradientOverlayParams(): GradientOverlayParams {
+  return {
+    start: fromHex('#000000'),
+    end: fromHex('#ffffff'),
+    style: 'linear',
+    angleDeg: 90,
+    scale: 100,
+    opacity: 1,
+    blendMode: 'source-over',
+  };
+}
+
+/**
+ * Built-in two-stop gradient presets feeding the panel's swatch chips — a
+ * FROZEN table (the ImageInfoDrawer export-preset precedent: static data
+ * only, no user-defined presets in v1). A preset click fills start/end +
+ * style in one shot; the other parameters stay as the user left them.
+ * User-facing English names; the hex pairs are curated display-viewport
+ * colours (the translator resolves them to working-LINEAR like any
+ * ColorValue).
+ */
+export interface GradientPreset {
+  /** Stable id (test/guard anchor, doubles as the React key). */
+  readonly id: string;
+  /** User-facing name (the chip tooltip). */
+  readonly label: string;
+  /** Ramp start (t = 0), TRC-encoded. */
+  readonly start: GradientOverlayParams['start'];
+  /** Ramp end (t = 1), TRC-encoded. */
+  readonly end: GradientOverlayParams['end'];
+  /** Ramp geometry shipped with the preset. */
+  readonly style: GradientOverlayParams['style'];
+}
+
+export const GRADIENT_PRESETS: readonly GradientPreset[] = [
+  // Sourced from the uiGradients hand-picked library (uigradients.com /
+  // github.com/ghosh/uiGradients gradients.json) — canonical names kept.
+  // Chosen for HIGH two-stop contrast so the ramp reads clearly on real
+  // imagery (the first draft palette was too close-toned to show a gradient).
+  { id: 'ibiza-sunset', label: 'Ibiza Sunset', start: fromHex('#ee0979'), end: fromHex('#ff6a00'), style: 'linear' },
+  { id: 'sublime-vivid', label: 'Sublime Vivid', start: fromHex('#fc466b'), end: fromHex('#3f5efb'), style: 'linear' },
+  { id: 'kye-meh', label: 'Kye Meh', start: fromHex('#8360c3'), end: fromHex('#2ebf91'), style: 'linear' },
+  { id: 'aqua-marine', label: 'Aqua Marine', start: fromHex('#2af598'), end: fromHex('#009efd'), style: 'linear' },
+  { id: 'witching-hour', label: 'Witching Hour', start: fromHex('#c31432'), end: fromHex('#240b36'), style: 'linear' },
+  { id: 'moonlit-asteroid', label: 'Moonlit Asteroid', start: fromHex('#0f2027'), end: fromHex('#2c5364'), style: 'linear' },
+] as const;
+
 /** Category-specific default parameters (used by append + enable-create paths). */
-export function defaultParamsFor(category: EffectCategory): StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams {
+export function defaultParamsFor(category: EffectCategory): StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams | GradientOverlayParams {
   if (category === 'stroke') return defaultStrokeParams();
   if (category === 'colorOverlay') return defaultColorOverlayParams();
   if (category === 'outerGlow') return defaultOuterGlowParams();
+  if (category === 'gradientOverlay') return defaultGradientOverlayParams();
   return defaultShadowParams();
 }
 
@@ -135,7 +192,7 @@ export function newEffectInstanceId(): string {
 /** Create one detached chain instance for `category` with default parameters. */
 export function createEffectInstance(
   category: EffectCategory,
-  opts: { params?: StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams; id?: string; enabled?: boolean } = {},
+  opts: { params?: StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams | GradientOverlayParams; id?: string; enabled?: boolean } = {},
 ): EffectInstance {
   return {
     id: opts.id ?? newEffectInstanceId(),
@@ -208,7 +265,14 @@ export const EFFECT_RENDER_RANK: Readonly<Record<EffectCategory, number>> = {
   shadow: 0,
   outerGlow: 1,
   stroke: 2,
+  // The surface overlay band: both overlays live ON the content surface.
+  // The rank orders the band INTRA-BAND as color overlay beneath gradient
+  // overlay (the reference product's Layer Style dialog order): the prepass
+  // executes the color overlays first, then the gradients, both BEFORE the
+  // stroke — each surface pass re-colours the accumulated content pixels,
+  // so the later pass reads the earlier one's result.
   colorOverlay: 3,
+  gradientOverlay: 4,
 };
 
 export function sortEffectInstancesForRender(chain: EffectInstance[]): EffectInstance[] {
@@ -235,7 +299,7 @@ export function appendEffectInstance(
   category: EffectCategory,
   opts: {
     afterId?: string;
-    params?: StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams;
+    params?: StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams | GradientOverlayParams;
     /**
      * Caller-supplied id (the drawer generates one so it can activate the new
      * tab immediately — the patch return value alone cannot carry the id).
@@ -316,7 +380,7 @@ export function removeEffectInstance(layer: Layer, id: string): Partial<Layer> |
 export function updateEffectParams(
   layer: Layer,
   id: string,
-  params: StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams,
+  params: StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams | GradientOverlayParams,
 ): Partial<Layer> | null {
   const chain = getEffectChain(layer);
   const at = chain.findIndex((e) => e.id === id);

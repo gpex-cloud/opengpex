@@ -36,7 +36,7 @@
  *     collapses back to `undefined` and the composite signature reverts to the
  *     historical no-effects token.
  *
- * Scope: `stroke`, `shadow`, `color-overlay` and `outer-glow` stages are emitted; categories
+ * Scope: `stroke`, `shadow`, `color-overlay`, `outer-glow` and `gradient-overlay` stages are emitted; categories
  * without a render pipeline yet are skipped here — their enabled/disabled
  * state does not change pixels, the honest render behaviour for an
  * unimplemented category (the chain keeps the instance; the drawer keeps the tab).
@@ -46,7 +46,7 @@
  * @module core/engine/pipeline/scene/translators/effects
  */
 
-import type { Layer, StrokeParams, ShadowParams, ColorOverlayParams, OuterGlowParams, LayerBlendMode } from '@opengpex/editor/core/types';
+import type { Layer, StrokeParams, ShadowParams, ColorOverlayParams, OuterGlowParams, GradientOverlayParams, LayerBlendMode } from '@opengpex/editor/core/types';
 import type { ColorValue } from '@opengpex/editor/core/engine/color/ColorValue';
 import { toWorkingLinearRgba } from '@opengpex/editor/core/engine/color';
 import type { WorkingColorSpace } from '@opengpex/editor/core/types';
@@ -143,6 +143,23 @@ export function translateLayerEffects(
         blurRadius: clampShadowScalar(params.blurRadius, 0, 0, 50),
         spreadPx: params.spreadPx === undefined ? undefined : clampShadowScalar(params.spreadPx, 0, 0, 50),
         strength: params.strength === undefined ? 1 : clampShadowScalar(params.strength, 1, 0, 1),
+      });
+    } else if (instance.category === 'gradientOverlay') {
+      // Optional-tolerant: the non-color fields default to the reference
+      // product's factory state (linear / 90deg / 100 scale / full opacity /
+      // Normal blend). Scale keeps a sane positive range — a corrupted
+      // document cannot explode or zero out the ramp extent.
+      const params = instance.params as GradientOverlayParams;
+      const style = params.style === 'radial' ? 'radial' : 'linear';
+      stages.push({
+        kind: 'gradient-overlay',
+        colorStart: toWorkingLinearRgba(params.start as ColorValue, workingSpace),
+        colorEnd: toWorkingLinearRgba(params.end as ColorValue, workingSpace),
+        style,
+        angleDeg: clampShadowScalar(params.angleDeg === undefined ? 90 : params.angleDeg, 90, 0, 360),
+        scale: clampShadowScalar(params.scale === undefined ? 100 : params.scale, 100, 1, 1000),
+        opacity: params.opacity === undefined ? 1 : clampShadowScalar(params.opacity, 1, 0, 1),
+        blendMode: params.blendMode === undefined ? 'source-over' : sanitizeOverlayBlendMode(params.blendMode),
       });
     }
   }

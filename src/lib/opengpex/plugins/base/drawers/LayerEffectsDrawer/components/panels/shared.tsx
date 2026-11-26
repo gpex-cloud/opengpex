@@ -29,7 +29,6 @@
  */
 
 import React from 'react';
-import { RotateCcw } from 'lucide-react';
 
 /** Section row: the tiny uppercase label above one parameter control. */
 export function PanelSection({
@@ -49,30 +48,6 @@ export function PanelSection({
   );
 }
 
-/**
- * Panel reset control: a small trailing icon in the panel's first row that
- * restores THAT category's factory-default parameters onto the current
- * instance — the AdjustmentDrawer header reset's per-panel sibling (the
- * RotateCcw icon vocabulary, plain click, no split menu: a category has
- * exactly one default set). ⚠️ span[role=button], NOT <button>: the row it
- * rides in may sit inside larger clickable chrome, and the panel's own rows
- * already use the span convention (the VerticalTabs nested-button lesson).
- * The click handler lands a ONE-SHOT undoable patch through the shared
- * applyEffectPatch channel — no fast-buffer involvement.
- */
-export function PanelResetButton({ onReset }: { onReset: () => void }) {
-  return (
-    <span
-      role="button"
-      aria-label="Reset to defaults"
-      title="Reset to defaults"
-      className="ml-auto p-1 rounded outline-none cursor-pointer text-[var(--text-muted)] hover:text-[var(--text-main)] shrink-0"
-      onClick={onReset}
-    >
-      <RotateCcw size={10} />
-    </span>
-  );
-}
 
 /**
  * Placeholder body: an AVAILABLE category whose panel has no pipeline yet
@@ -93,3 +68,4 @@ export function EmptyCategoryPanel({ label, available }: { label: string; availa
     </div>
   );
 }
+

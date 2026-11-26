@@ -755,6 +755,35 @@ export type EffectStageDesc =
     readonly spreadPx?: number;
     /** Glow strength 0..1 (multiplies the halo alpha). */
     readonly strength: number;
+  }
+  /**
+   * GRADIENT OVERLAY (surface effect, same band as the color overlay): a
+   * two-stop ramp sampled per content texel and blended into the content's
+   * own visible pixels by `blendMode` (the full 16-mode LayerBlendMode
+   * set), weighted by `opacity` and the per-texel content coverage. The
+   * content ALPHA is never changed — the gradient re-colours the surface
+   * without altering the silhouette. The ramp's UV basis is the VISIBLE
+   * content rect (contentRectInTexture contract), never the full texture
+   * dims. The prepass executes this stage AFTER the color overlays and
+   * BEFORE any stroke (intra-band order: color overlay beneath gradient
+   * overlay, the reference product's Layer Style dialog order).
+   */
+  | {
+    readonly kind: 'gradient-overlay';
+    /** Ramp START colour: working-gamut LINEAR straight-alpha RGBA (t = 0). */
+    readonly colorStart: readonly [number, number, number, number];
+    /** Ramp END colour: working-gamut LINEAR straight-alpha RGBA (t = 1). */
+    readonly colorEnd: readonly [number, number, number, number];
+    /** Ramp geometry. */
+    readonly style: 'linear' | 'radial';
+    /** Ramp axis angle in DEGREES, display orientation (0..360). */
+    readonly angleDeg: number;
+    /** Ramp extent percent of the visible rect. */
+    readonly scale: number;
+    /** Overlay strength 0..1. */
+    readonly opacity: number;
+    /** How the ramp colour combines with the content colour (16 modes). */
+    readonly blendMode: LayerBlendMode;
   };
 
 // ────────────────────────────────────────────────────────────

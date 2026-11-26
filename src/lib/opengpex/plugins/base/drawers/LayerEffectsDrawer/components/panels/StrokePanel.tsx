@@ -39,11 +39,11 @@ import ColorSwatchRow from '@opengpex/editor/widgets/ColorSwatchRow';
 import FancySvgSlider from '@opengpex/editor/widgets/FancySvgSlider';
 import FunctionTabs from '@opengpex/editor/widgets/FunctionTabs';
 import type { EffectInstance, Layer, StrokeParams, StrokePosition } from '@opengpex/editor/core/types/models';
-import { defaultStrokeParams, updateEffectParams } from '@opengpex/editor/core/layer/effects';
+import { updateEffectParams } from '@opengpex/editor/core/layer/effects';
 import { usePluginCommands } from '@opengpex/editor/core/context';
 import { useFilterGesture } from '@opengpex/editor/plugins/base/drawers/AdjustmentDrawer/hooks';
 import type { LayerEffectsDrawerCommandsMap } from '../../commands.d';
-import { PanelSection, PanelResetButton } from './shared';
+import { PanelSection } from './shared';
 
 export function StrokePanel({
   layer,
@@ -156,17 +156,6 @@ export function StrokePanel({
 
   const activePosition: StrokePosition = params.position ?? 'outside';
 
-  // Restore the stroke factory defaults onto THIS instance — a ONE-SHOT
-  // undoable patch through the shared applyEffectPatch channel (no fast
-  // buffer: a discrete click, not a drag gesture).
-  const resetToDefaults = () => {
-    // Typed-value commit is a ONE-SHOT write in a mini gesture (one undo
-    // step) — the fast track has no dragEnd to commit it.
-    gesture.begin();
-    const patch = updateEffectParams(layer, instance.id, defaultStrokeParams());
-    if (patch) applyEffectPatchCmd?.execute({ patch });
-    gesture.end();
-  };
 
   return (
     <div className="flex flex-col gap-3 px-3 pt-2 pb-3">
@@ -183,7 +172,6 @@ export function StrokePanel({
           onValueChange={handleColorChange}
           onValueCommit={handleColorCommit}
         />
-        <PanelResetButton onReset={resetToDefaults} />
       </div>
       <PanelSection label="Size">
         {/* The unit sits inline after the slider's numeric field (house

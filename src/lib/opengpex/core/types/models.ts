@@ -231,8 +231,11 @@ export const MAX_ADJUSTMENT_MASKS_PER_LAYER = 16;
 
 // ─── Layer render effects (A8) ───────────────────────────────────────────────
 
-/** Supported render-effect categories. Shipped: stroke, shadow, colorOverlay, outerGlow; the chain model admits future categories (inner shadow / inner glow / gradient / pattern / bevel) without migration. */
-export type EffectCategory = 'stroke' | 'shadow' | 'colorOverlay' | 'outerGlow';
+/** Supported render-effect categories. Shipped: stroke, shadow, colorOverlay, outerGlow, gradientOverlay; the chain model admits future categories (inner shadow / inner glow / pattern / bevel) without migration. */
+export type EffectCategory = 'stroke' | 'shadow' | 'colorOverlay' | 'outerGlow' | 'gradientOverlay';
+
+/** Gradient-overlay geometry style. First release ships the two PS styles; optional-tolerant (absent = `'linear'`). */
+export type GradientOverlayStyle = 'linear' | 'radial';
 
 /**
  * Outward stroke parameters. The first release renders OUTWARD strokes only
@@ -328,6 +331,39 @@ export interface OuterGlowParams {
 }
 
 /**
+ * Gradient-overlay parameters: a two-stop gradient ramp blended INTO the
+ * layer's own visible pixels (a surface effect in the same band as the
+ * color overlay — the content alpha is never changed).
+ *
+ * All non-color fields are optional-tolerant (documents written before the
+ * fields existed hydrate with zero migration):
+ *   - `style`: absent = `'linear'`.
+ *   - `angleDeg`: absent = 90 (the reference product's factory angle — the
+ *     ramp rises bottom→top in display orientation).
+ *   - `scale`: absent = 100 (percent; 100 fits the visible content rect).
+ *   - `opacity`: absent = 1.
+ *   - `blendMode`: absent = `'source-over'` — the reference product's
+ *     Gradient Overlay factory blend mode is Normal (documented factory
+ *     state, distinct from Color Overlay's Multiply).
+ */
+export interface GradientOverlayParams {
+  /** TRC-encoded ramp START colour (t = 0 of the ramp). */
+  start: ColorValue;
+  /** TRC-encoded ramp END colour (t = 1 of the ramp). */
+  end: ColorValue;
+  /** Ramp geometry (default `'linear'`). */
+  style?: GradientOverlayStyle;
+  /** Ramp axis angle in degrees, display orientation, 0–360 (default 90). */
+  angleDeg?: number;
+  /** Ramp extent as a percent of the visible content rect (default 100). */
+  scale?: number;
+  /** Overlay strength 0..1 (UI range 0–100). Default 1. */
+  opacity?: number;
+  /** How the ramp colour combines with the content colour (16 modes; default `'source-over'`). */
+  blendMode?: LayerBlendMode;
+}
+
+/**
  * One non-destructive render-effect instance on a layer — the chain-item
  * sibling of {@link AdjustmentMask} (same structural vocabulary: id /
  * category / params / enabled / optional coverage shape / preset provenance).
@@ -354,8 +390,8 @@ export interface EffectInstance {
   id: string;
   category: EffectCategory;
   enabled: boolean;
-  /** Discriminated by `category`: stroke → {@link StrokeParams}, shadow → {@link ShadowParams}, colorOverlay → {@link ColorOverlayParams}, outerGlow → {@link OuterGlowParams}. */
-  params: StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams;
+  /** Discriminated by `category`: stroke → {@link StrokeParams}, shadow → {@link ShadowParams}, colorOverlay → {@link ColorOverlayParams}, outerGlow → {@link OuterGlowParams}, gradientOverlay → {@link GradientOverlayParams}. */
+  params: StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams | GradientOverlayParams;
   /** Reserved future scoping seam (first release: never written, never read). */
   shape?: LocalPolygon;
   /** Reserved future scoping seam — feather radius (px) for the shape edge. */

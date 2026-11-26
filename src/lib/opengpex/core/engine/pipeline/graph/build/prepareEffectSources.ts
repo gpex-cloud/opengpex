@@ -76,6 +76,7 @@ import { AdjustPrePass } from '../composite/AdjustPrePass';
 import { EffectStrokePass, sweepEdtCache } from '../composite/EffectStrokePass';
 import { EffectShadowPass } from '../composite/EffectShadowPass';
 import { EffectOverlayPass } from '../composite/EffectOverlayPass';
+import { EffectGradientPass } from '../composite/EffectGradientPass';
 import { resolveSourceGamutId } from '../support/sourceGamut';
 import { expandWindowForStroke, expandWindowForPads, effectWindowPadsPx, effectReachPx, strokeContentBase } from './support/effectRoi';
 import {
@@ -114,6 +115,10 @@ function glowStages(layer: CompiledScene['scene']['layers'][number]) {
   return (layer.effects ?? []).filter((s) => s.kind === 'outer-glow');
 }
 
+function gradientStages(layer: CompiledScene['scene']['layers'][number]) {
+  return (layer.effects ?? []).filter((s) => s.kind === 'gradient-overlay');
+}
+
 export function prepareEffectSources(
   encoder: GPUCommandEncoder,
   compiled: CompiledScene,
@@ -133,10 +138,11 @@ export function prepareEffectSources(
     const shadows = shadowStages(layer);
     const overlays = overlayStages(layer);
     const glows = glowStages(layer);
+    const gradients = gradientStages(layer);
     // ANY enabled effect category claims the prepass — the gate must not be
-    // pinned to a specific category subset, or an outer-glow-only layer would
-    // skip the prepass entirely and render without its halo.
-    if (stages.length === 0 && shadows.length === 0 && overlays.length === 0 && glows.length === 0) continue;
+    // pinned to a specific category subset, or a gradient-only layer would
+    // skip the prepass entirely and render without its ramp.
+    if (stages.length === 0 && shadows.length === 0 && overlays.length === 0 && glows.length === 0 && gradients.length === 0) continue;
     const prepared = sources.get(layer.id);
     if (!prepared) continue; // asset not resident yet — the layer skips this frame anyway
 
@@ -169,7 +175,7 @@ export function prepareEffectSources(
       // The solid arm pre-expands its own window, so its reach must count
       // EVERY outward-reaching category (stroke, shadow, outer glow) — not
       // just the stroke stages.
-      const reach = effectReachPx([...stages, ...shadows, ...glows]);
+      const reach = effectReachPx([...stages, ...shadows, ...glows, ...gradients]);
       const windowRect = expandWindowForStroke(logical, reach);
       base = { x: logical.x - windowRect.x, y: logical.y - windowRect.y, w: logical.w, h: logical.h };
       const raw = ctx.texturePool.acquire({
@@ -312,7 +318,7 @@ export function prepareEffectSources(
     // the silhouette, so a cropped shared-source fragment must give both the
     // same truthful-transparency crop (opaque neighbor pixels would be dyed
     // INTO the visible content or smeared into the halo).
-    const needsVisibilityCrop = (shadows.length > 0 || overlays.length > 0 || glows.length > 0) && baseIsSubRect;
+    const needsVisibilityCrop = (shadows.length > 0 || overlays.length > 0 || glows.length > 0 || gradients.length > 0) && baseIsSubRect;
     if (bmaskTex || vmaskBake || needsVisibilityCrop) {
       const bx0 = solidColor ? 0 : Math.floor(base.x);
       const by0 = solidColor ? 0 : Math.floor(base.y);
@@ -444,7 +450,14 @@ export function prepareEffectSources(
     // "slightly enlarged content" incident). The first stage samples the
     // content at the window offset; later stages consume the window-aligned
     // previous output.
-    let overlayWindowAligned = false;
+    // SURFACE BAND (intra-band order = the reference product's Layer Style
+    // dialog order): color overlays FIRST, gradient overlays SECOND — each
+    // surface pass re-colours the accumulated content pixels, so the later
+    // pass reads the earlier one's result (color overlay beneath gradient
+    // overlay). Both share one window-alignment flag: the first surface
+    // stage faces the raw content at the window offset, every later stage
+    // consumes a window-aligned output at zero offset.
+    let surfaceWindowAligned = false;
     for (let i = 0; i < overlays.length; i++) {
       const stage = overlays[i];
       if (stage.kind !== 'color-overlay') continue;
@@ -453,7 +466,7 @@ export function prepareEffectSources(
         current,
         currentIsLinear,
         gamutId: currentGamutId,
-        windowTexel: overlayWindowAligned
+        windowTexel: surfaceWindowAligned
           ? { x: 0, y: 0, w: windowTexel.w, h: windowTexel.h }
           : windowTexel,
         overlayColor: stage.color,
@@ -462,7 +475,41 @@ export function prepareEffectSources(
       });
       // The compose output is working-LINEAR in the working gamut,
       // window-aligned.
-      overlayWindowAligned = true;
+      surfaceWindowAligned = true;
+      currentIsLinear = true;
+      currentGamutId = 0;
+    }
+    // The gradient chain sits INSIDE the surface band: after the color
+    // overlays, before the stroke. The ramp's UV basis is the VISIBLE
+    // content rect (contentRectInTexture contract) — re-based into window
+    // coordinates when the input is already a window-aligned surface
+    // output, so the ramp anchors on the visible pixels either way.
+    for (let i = 0; i < gradients.length; i++) {
+      const stage = gradients[i];
+      if (stage.kind !== 'gradient-overlay') continue;
+      const visibleInCurrent: TexelRect = surfaceWindowAligned
+        ? { x: base.x - windowTexel.x, y: base.y - windowTexel.y, w: base.w, h: base.h }
+        : base;
+      current = EffectGradientPass.run(encoder, ctx, {
+        layerId: layer.id,
+        current,
+        currentIsLinear,
+        gamutId: currentGamutId,
+        windowTexel: surfaceWindowAligned
+          ? { x: 0, y: 0, w: windowTexel.w, h: windowTexel.h }
+          : windowTexel,
+        contentVisible: visibleInCurrent,
+        startColor: stage.colorStart,
+        endColor: stage.colorEnd,
+        blendMode: stage.blendMode,
+        style: stage.style,
+        angleRad: (stage.angleDeg * Math.PI) / 180,
+        scale: stage.scale,
+        opacity: stage.opacity,
+      });
+      // The compose output is working-LINEAR in the working gamut,
+      // window-aligned.
+      surfaceWindowAligned = true;
       currentIsLinear = true;
       currentGamutId = 0;
     }
@@ -473,12 +520,13 @@ export function prepareEffectSources(
       activeEdtKeys.add(cacheId);
       // Only the FIRST instance faces the original content (window offset
       // inside it); later instances consume the previous window-aligned
-      // output, whose origin IS the window origin. When an overlay ran, the
-      // "original content" IS already window-aligned (the overlay output),
-      // so the first stroke stage reads it at zero offset too — and its
-      // visible sub-rect re-bases into window coordinates.
-      const overlayRan = overlays.length > 0;
-      const windowInContent: TexelRect = i === 0 && !overlayRan
+      // output, whose origin IS the window origin. When a SURFACE stage ran
+      // (color overlay or gradient), the "original content" IS already
+      // window-aligned (the surface output), so the first stroke stage
+      // reads it at zero offset too — and its visible sub-rect re-bases
+      // into window coordinates.
+      const surfaceRan = overlays.length > 0 || gradients.length > 0;
+      const windowInContent: TexelRect = i === 0 && !surfaceRan
         ? windowTexel
         : { x: 0, y: 0, w: windowTexel.w, h: windowTexel.h };
       current = EffectStrokePass.run(encoder, ctx, {
@@ -492,7 +540,7 @@ export function prepareEffectSources(
         widthTexels: stage.widthPx * density,
         position: stage.position,
         contentVisibleTexel: i === 0
-          ? (overlayRan
+          ? (surfaceRan
             ? { x: base.x - windowTexel.x, y: base.y - windowTexel.y, w: base.w, h: base.h }
             : base)
           : undefined,
@@ -513,7 +561,7 @@ export function prepareEffectSources(
     // Window-alignment tracking for the FOREGROUND side of the beneath-
     // compose passes (glow and shadow): a stroke or overlay output is already
     // window-aligned, raw content is not. Updated by each chain below.
-    let currentAligned = stages.length > 0 || overlays.length > 0;
+    let currentAligned = stages.length > 0 || overlays.length > 0 || gradients.length > 0;
 
     // ── 2c. Outer-glow chain (halo beneath the stroked content) ─────────
     // EXECUTION ORDER: AFTER the stroke chain, BEFORE the shadow chain. The

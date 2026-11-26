@@ -71,6 +71,10 @@ import {
   buildEffectOverlayComposeWgsl,
   EFFECT_OVERLAY_UNIFORM_BUFFER_SIZE,
 } from '../shaders/effectOverlayCompose';
+import {
+  buildEffectGradientComposeWgsl,
+  EFFECT_GRADIENT_UNIFORM_BUFFER_SIZE,
+} from '../shaders/effectGradientCompose';
 import { VMASK_WGSL, VMASK_UNIFORM_SIZE } from '../shaders/vmask';
 import { BMASK_COMBINE_WGSL, BMASK_COMBINE_UNIFORM_SIZE } from '../shaders/bmaskCombine';
 import { BLEND_UNIFORM_BUFFER_SIZE } from '../shaders/blend';
@@ -1269,6 +1273,50 @@ export class PipelineCache {
       wgsl: buildEffectOverlayComposeWgsl(storageFormat),
       entryPoint: 'cs_effect_overlay_compose',
       bindGroupLayout: this.getEffectOverlayBindGroupLayout(storageFormat),
+    });
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Effect gradient-overlay compose compute pipeline (cs_effect_gradient_compose)
+  // ──────────────────────────────────────────────────────────
+
+  getEffectGradientBindGroupLayout(
+    storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
+  ): GPUBindGroupLayout {
+    const cached = this.effectBindGroupLayouts.get(`gradient:${storageFormat}`);
+    if (cached) return cached;
+    const currentSampleType = storageFormat === 'rgba32float' ? 'unfilterable-float' : 'float';
+    const layout = this.device.createBindGroupLayout({
+      label: `Effect Gradient Bind Group Layout [${storageFormat}]`,
+      entries: [
+        {
+          binding: 0,
+          visibility: GPUShaderStage.COMPUTE,
+          buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: EFFECT_GRADIENT_UNIFORM_BUFFER_SIZE },
+        },
+        { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: currentSampleType } },
+        {
+          binding: 2,
+          visibility: GPUShaderStage.COMPUTE,
+          storageTexture: { access: 'write-only', format: storageFormat },
+        },
+      ],
+    });
+    this.effectBindGroupLayouts.set(`gradient:${storageFormat}`, layout);
+    return layout;
+  }
+
+  /** Gradient compose pipeline (pointwise, workgroup 8x8), one per working format. */
+  getEffectGradientPipeline(
+    storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
+  ): GPUComputePipeline {
+    return this.getOrCreateComputePipeline({
+      cacheKey: `effect-gradient:${storageFormat}`,
+      label: `Effect Gradient [${storageFormat}]`,
+      moduleKey: `effect-gradient:${storageFormat}`,
+      wgsl: buildEffectGradientComposeWgsl(storageFormat),
+      entryPoint: 'cs_effect_gradient_compose',
+      bindGroupLayout: this.getEffectGradientBindGroupLayout(storageFormat),
     });
   }
 

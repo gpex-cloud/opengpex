@@ -101,14 +101,23 @@ export interface EffectTabDef {
 
 export const EFFECT_TABS: readonly EffectTabDef[] = [
   // Only SHIPPED categories are listed (user ruling 20261126: the rail shows
-  // implemented effects only; each future effect joins this list — third slot
-  // onward, in ship order — when its render pipeline lands, by adding one
-  // entry with `available: true`). The rail machinery keeps the `available`
-  // flag so that future list growth needs no plumbing changes.
+  // implemented effects only; each future effect joins this list — by adding
+  // one entry with `available: true` — at its FAMILY slot below, so the rail
+  // order is stable across future growth). The `available` flag machinery
+  // stays so that list growth needs no plumbing changes.
+  //
+  // Tab order groups effects BY NATURE (20261126 ruling, revised: Stroke
+  // leads — it is the flagship outline effect and the family users reach
+  // for first): outline (Stroke), outer halo (Shadow, Outer Glow, then
+  // Inner Shadow / Inner Glow), surface overlays (Color / Gradient / Pattern
+  // Overlay). NOTE: this is the DISPLAY order only — the on-canvas render
+  // stacking is a separate order carried by EFFECT_RENDER_RANK in
+  // core/layer/effects.ts and never follows tabs.
   { id: 'stroke', label: 'Stroke', available: true },
   { id: 'shadow', label: 'Shadow', available: true },
-  { id: 'colorOverlay', label: 'Color Overlay', available: true },
   { id: 'outerGlow', label: 'Outer Glow', available: true },
+  { id: 'colorOverlay', label: 'Color Overlay', available: true },
+  { id: 'gradientOverlay', label: 'Gradient Overlay', available: true },
 ] as const;
 
 /** The shipped (chain-model-backed) categories, in tab display order. */
@@ -116,14 +125,14 @@ export const AVAILABLE_TAB_IDS: readonly EffectTabId[] = EFFECT_TABS
   .filter((t) => t.available)
   .map((t) => t.id as EffectTabId);
 
-export type EffectTabId = 'shadow' | 'stroke' | 'colorOverlay' | 'outerGlow';
+export type EffectTabId = 'shadow' | 'stroke' | 'colorOverlay' | 'outerGlow' | 'gradientOverlay';
 
 /**
  * Categories the "+" accepts, per implementation phase. P3 ships stroke's
- * parameter pipeline; shadow joins at P5; color overlay and outer glow join
- * with their pipelines.
+ * parameter pipeline; shadow joins at P5; the surface effects (color
+ * overlay, outer glow, gradient overlay) join with their pipelines.
  */
-export const ADDABLE_CATEGORIES: readonly EffectTabId[] = ['stroke', 'colorOverlay', 'outerGlow'];
+export const ADDABLE_CATEGORIES: readonly EffectTabId[] = ['stroke', 'colorOverlay', 'outerGlow', 'gradientOverlay'];
 
 /**
  * A category tab with NO instance yet carries this virtual id — a TRANSIENT

@@ -40,11 +40,11 @@ import FancySvgSlider from '@opengpex/editor/widgets/FancySvgSlider';
 import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
 import { BLEND_MODE_DROPDOWN_OPTIONS, BLEND_MODE_LABEL_MAP } from '@opengpex/editor/widgets/blendModes';
 import type { EffectInstance, Layer, ColorOverlayParams, LayerBlendMode } from '@opengpex/editor/core/types/models';
-import { defaultColorOverlayParams, updateEffectParams } from '@opengpex/editor/core/layer/effects';
+import { updateEffectParams } from '@opengpex/editor/core/layer/effects';
 import { usePluginCommands } from '@opengpex/editor/core/context';
 import { useFilterGesture } from '@opengpex/editor/plugins/base/drawers/AdjustmentDrawer/hooks';
 import type { LayerEffectsDrawerCommandsMap } from '../../commands.d';
-import { PanelSection, PanelResetButton } from './shared';
+import { PanelSection } from './shared';
 
 export function ColorOverlayPanel({
   layer,
@@ -157,12 +157,6 @@ export function ColorOverlayPanel({
     gesture.end();
   };
 
-  // Restore the color-overlay factory defaults onto THIS instance — a
-  // ONE-SHOT undoable patch through the shared applyEffectPatch channel (no
-  // fast buffer: a discrete click, not a drag gesture).
-  const resetToDefaults = () => {
-    applyOneShot(defaultColorOverlayParams());
-  };
 
   // A drag interrupted by unmount must still land its volatile draft — the
   // same cleanup contract as the stroke/shadow panels.
@@ -193,7 +187,6 @@ export function ColorOverlayPanel({
           onValueChange={handleColorChange}
           onValueCommit={handleColorCommit}
         />
-        <PanelResetButton onReset={resetToDefaults} />
       </div>
       {/* Single-row layout, same house pattern as the Color row above: the
           label sits inline LEFT of the control (not stacked in a section). */}

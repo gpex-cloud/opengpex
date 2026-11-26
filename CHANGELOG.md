@@ -2,6 +2,13 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.74
+
+- Layers: new Gradient Overlay effect — tint a layer's visible content with a two-color gradient (From / To), with Linear and Radial styles, an angle control for any direction, scale, strength and the full 16-mode blend picker.
+- Layers: six ready-made gradient presets with high-contrast color pairs (Ibiza Sunset, Sublime Vivid, Kye Meh, Aqua Marine, Witching Hour, Moonlit Asteroid) — click one to fill both stops instantly.
+- Layers: effect tabs are now grouped by effect family — outline first (Stroke), then glows and shadows, then overlays.
+- Layers: gradient angle control greys out in Radial style, since a radial falloff has no direction.
+
 ## 2.0.73
 
 - Layers: new Outer Glow effect — add a glowing halo around any layer's visible content, with color, blur, spread and strength sliders. Large spreads still follow the true content shape (letter gaps stay visible in the halo) instead of collapsing into a rectangle.
