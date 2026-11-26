@@ -54,6 +54,17 @@ export const EFFECT_SHADOW_WORKGROUP = 8;
 export const EFFECT_SHADOW_FLAG_CURRENT_LINEAR = 1 << 0;
 
 /**
+ * `flags` bit: STANDALONE output — emit ONLY the shadow pixels as
+ * straight-alpha (rgb, shadow_a) without sampling `current_tex` at all. The
+ * backdrop-blend split (Drop Shadow / Outer Glow with a non-Normal blend
+ * mode) runs the shadow pass once per external effect into its OWN transient;
+ * the composite blends each effect transient against the canvas backdrop with
+ * the effect's blend mode, so the pass must not fold the foreground in.
+ * `current_tex` stays BOUND (the layout is fixed) but is never read.
+ */
+export const EFFECT_SHADOW_FLAG_STANDALONE = 1 << 1;
+
+/**
  * `EffectShadowUniforms` size in bytes: dims vec2 (8) + flags (4) +
  * gamut_id (4) + current_dims vec2 (8) + current_origin vec2 (8) +
  * blurred_dims vec2 (8) + shadow_offset vec2 (8, i32 texels) +
@@ -86,13 +97,16 @@ export function packEffectShadowComposeUniform(
     readonly shadowColor: readonly [number, number, number, number];
     /** Shadow opacity 0..1 (multiplies the tint alpha). */
     readonly opacity: number;
+    /** Emit only the shadow pixels (no current sampling, no over mix). */
+    readonly standalone?: boolean;
   },
 ): Float32Array {
   const out = new Float32Array(EFFECT_SHADOW_UNIFORM_FLOATS);
   const uints = new Uint32Array(out.buffer);
   uints[0] = Math.max(1, width) >>> 0;
   uints[1] = Math.max(1, height) >>> 0;
-  uints[2] = opts.currentIsLinear ? EFFECT_SHADOW_FLAG_CURRENT_LINEAR : 0;
+  uints[2] = (opts.currentIsLinear ? EFFECT_SHADOW_FLAG_CURRENT_LINEAR : 0)
+    | (opts.standalone ? EFFECT_SHADOW_FLAG_STANDALONE : 0);
   uints[3] = opts.gamutId >>> 0;
   uints[4] = Math.max(1, opts.currentWidth) >>> 0;
   uints[5] = Math.max(1, opts.currentHeight) >>> 0;
@@ -166,6 +180,15 @@ fn cs_effect_shadow_compose(@builtin(global_invocation_id) gid : vec3<u32>) {
   // discarded (a drop shadow is not a blurred copy of the content colour).
   let shadow_a = clamp(s.a, 0.0, 1.0) * u.shadow_color.a * u.shadow_opacity;
   let shadow_rgb = u.shadow_color.rgb;
+
+  // STANDALONE output: skip the foreground entirely and emit the pure effect
+  // pixels as straight-alpha. The zero-alpha guard keeps fully transparent
+  // texels from leaking the tint colour through unpremultiplied RGB.
+  if ((u.flags & ${EFFECT_SHADOW_FLAG_STANDALONE}u) != 0u) {
+    let alone_rgb = select(vec3<f32>(0.0), shadow_rgb, shadow_a > 0.0001);
+    textureStore(dst_tex, xy, vec4<f32>(alone_rgb, shadow_a));
+    return;
+  }
 
   // The accumulated foreground samples UNOFFSET at this texel. Same explicit
   // bounds guard + bit-exact origin as strokeCompose.

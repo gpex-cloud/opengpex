@@ -710,6 +710,13 @@ export type EffectStageDesc =
     readonly spreadPx?: number;
     /** Shadow opacity 0..1 (the UI's "strength"). */
     readonly opacity: number;
+    /**
+     * How the shadow combines with the canvas BACKDROP beneath the layer
+     * (16-mode LayerBlendMode set). `'source-over'` keeps the historical
+     * flat beneath-compose; any other mode promotes the WHOLE layer's
+     * external effects to standalone composite steps (see SceneCompiler).
+     */
+    readonly blendMode: LayerBlendMode;
   }
   /**
    * COLOR OVERLAY (surface effect): the solid `color` blended into the
@@ -734,8 +741,9 @@ export type EffectStageDesc =
    * OUTER GLOW: a bright halo around the content silhouette — a zero-offset
    * drop shadow of the same silhouette, so the prepass reuses the shadow
    * machinery (EDT spread + Gaussian blur + beneath-compose) with the glow
-   * colour at `strength`. The reference product's Screen brightening is
-   * approximated layer-internally (bright colour, no backdrop blend). The
+   * colour at `strength`. With the default `source-over` blend the factory
+   * Screen brightening stays approximated layer-internally; an explicit
+   * backdrop blend promotes the glow to its own composite step. The
    * glow silhouette derives from the ORIGINAL mask-baked content (never from
    * the stroke output), and the prepass executes it AFTER the stroke chain
    * and BEFORE the shadow chain: the final stacking is shadow (bottom) <
@@ -755,6 +763,13 @@ export type EffectStageDesc =
     readonly spreadPx?: number;
     /** Glow strength 0..1 (multiplies the halo alpha). */
     readonly strength: number;
+    /**
+     * How the glow combines with the canvas BACKDROP beneath the layer
+     * (16-mode LayerBlendMode set). `'source-over'` keeps the historical
+     * layer-internal bright-halo approximation; any other mode promotes the
+     * WHOLE layer's external effects to standalone composite steps.
+     */
+    readonly blendMode: LayerBlendMode;
   }
   /**
    * GRADIENT OVERLAY (surface effect, same band as the color overlay): a

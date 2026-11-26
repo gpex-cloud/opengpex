@@ -98,6 +98,11 @@ export function defaultShadowParams(): ShadowParams {
     offsetY: diagonal,
     blurRadius: 8,
     opacity: 0.6,
+    // Factory blend = Multiply — the reference product's Drop Shadow dialog
+    // factory state. Documents written before the field existed still read
+    // as source-over in the scene translator (zero visual change for old
+    // documents); only newly created instances start at Multiply.
+    blendMode: 'multiply',
   };
 }
 
@@ -118,7 +123,17 @@ export function defaultColorOverlayParams(): ColorOverlayParams {
  * contract as the stroke/shadow/colorOverlay defaults.
  */
 export function defaultOuterGlowParams(): OuterGlowParams {
-  return { color: fromHex('#ffffbe'), blurRadius: 5, spreadPx: 0, strength: 0.5 };
+  return {
+    color: fromHex('#ffffbe'),
+    blurRadius: 5,
+    spreadPx: 0,
+    strength: 0.5,
+    // Factory blend = Screen — the reference product's Outer Glow dialog
+    // factory state (brightening against the backdrop). Documents written before the
+    // field existed still read as source-over in the scene translator; only
+    // newly created instances start at Screen.
+    blendMode: 'screen',
+  };
 }
 
 /**

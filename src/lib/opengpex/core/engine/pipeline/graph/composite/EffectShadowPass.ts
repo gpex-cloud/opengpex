@@ -105,6 +105,15 @@ export class EffectShadowPass {
       readonly edtAlphaKey?: string;
       readonly shadowColor: readonly [number, number, number, number];
       readonly opacity: number;
+      /**
+       * STANDALONE output: emit ONLY the shadow pixels into the output
+       * transient (straight-alpha, no current sampling, no over mix). The
+       * backdrop-blend split runs one pass per external effect into its own
+       * transient; the composite then blends each against the canvas
+       * backdrop with the effect's blend mode. `current` still rides the
+       * bind group (fixed layout) but is never read.
+       */
+      readonly standalone?: boolean;
     },
   ): LayerTexture {
     const width = Math.max(1, p.windowTexel.w);
@@ -200,6 +209,7 @@ export class EffectShadowPass {
       offsetY: p.offsetY,
       shadowColor: p.shadowColor,
       opacity: p.opacity,
+      standalone: p.standalone === true,
     });
     const slot = ctx.bufferRing.writeSlot(uniform);
     const bindGroup = ctx.device.createBindGroup({

@@ -69,6 +69,7 @@
  */
 
 import type { CompiledScene } from '../SceneCompiler';
+import { splitExternalEffectLayer } from '../SceneCompiler';
 import { snapToPowerOfTwo } from '@opengpex/editor/core/engine/gpu/resources/TexturePool';
 import { LayerTexture } from '@opengpex/editor/core/engine/gpu/resources/LayerTexture';
 import { GPUTextureUsage } from '@opengpex/editor/core/engine/gpu/constants';
@@ -157,6 +158,22 @@ export function prepareEffectSources(
     const prepared = sources.get(layer.id);
     if (!prepared) continue; // asset not resident yet — the layer skips this frame anyway
 
+    // CLASS-B SPLIT: any external effect (shadow / outer glow) carrying a
+    // non-Normal backdrop blend promotes EVERY external effect of this layer
+    // to its own standalone composite step (see splitExternalEffectLayer).
+    // The standalone transients register under `${layer.id}::eff:<index>`;
+    // the body keeps its own registration under `layer.id`.
+    const splitNodes = splitExternalEffectLayer(layer);
+    // Global stage index of every shadow / outer-glow instance within
+    // `layer.effects` (the translator's render order) — the effect-draw-key
+    // namespace. Array order matches the filtered family lists below.
+    const shadowStageIndices: number[] = [];
+    const glowStageIndices: number[] = [];
+    (layer.effects ?? []).forEach((stage, index) => {
+      if (stage.kind === 'shadow') shadowStageIndices.push(index);
+      else if (stage.kind === 'outer-glow') glowStageIndices.push(index);
+    });
+
     const solidColor = layer.source.kind === 'solid' ? layer.source.color : undefined;
     const asset = prepared.texture;
 
@@ -169,6 +186,12 @@ export function prepareEffectSources(
     let density: number;
     let contentIsLinear: boolean;
     let gamutId: number;
+    // True when the BODY content left the raw prepared texture (adjust bake,
+    // mask bake, or visibility crop). Drives the split-mode body registration:
+    // a body that never ran any window-aligning chain and was never baked
+    // keeps its ORIGINAL prepared declaration (its geometry is already
+    // correct); a baked body re-registers with its own geometry.
+    let bodyBaked = false;
     /** Offset of the content texture's origin in the OUTPUT-window space (asset/window coords). */
     let contentToWindow: { x: number; y: number };
 
@@ -271,6 +294,7 @@ export function prepareEffectSources(
       // graded content and the output can declare suppressAdjust — otherwise
       // the compositor's inline grade would hit the stroke pixels too.
       if (!prepared.suppressAdjust && layer.adjustStages && layer.adjustStages.length > 0) {
+        bodyBaked = true;
         const raw = ctx.texturePool.acquire({
           width: asset.width,
           height: asset.height,
@@ -335,6 +359,7 @@ export function prepareEffectSources(
     // a painted band).
     const needsVisibilityCrop = (shadows.length > 0 || overlays.length > 0 || glows.length > 0 || gradients.length > 0 || innerGlows.length > 0 || innerShadows.length > 0) && baseIsSubRect;
     if (bmaskTex || vmaskBake || needsVisibilityCrop) {
+      bodyBaked = true;
       const bx0 = solidColor ? 0 : Math.floor(base.x);
       const by0 = solidColor ? 0 : Math.floor(base.y);
       const dstW = solidColor ? content.width : Math.max(1, Math.ceil(base.x + base.w) - bx0);
@@ -567,6 +592,37 @@ export function prepareEffectSources(
       currentGamutId = 0;
     }
 
+    // ── 2a. Standalone external-effect registration (Class-B split) ──────
+    // When the layer is in split mode, every shadow / outer-glow instance
+    // runs STANDALONE (its own transient, no current sampling) and registers
+    // under its effect-draw key; the compositor blends each transient
+    // against the canvas backdrop with the stage's blend mode. The window
+    // and reporting basis are the SAME as the body's flat declaration (one
+    // shared window — the Phase-1 contract keeps the body wide-windowed).
+    // ⚠️ Defined AFTER the window exists but BEFORE the glow/shadow chains.
+    const isLogicalReport = solidColor || layer.source.kind === 'vector';
+    const div = isLogicalReport ? density : 1;
+    const windowBasis: 'content-local' | 'asset' = isLogicalReport ? 'content-local' : 'asset';
+    const registerStandaloneEffectSource = (stageIndex: number, tex: LayerTexture) => {
+      sources.set(`${layer.id}::eff:${stageIndex}`, {
+        texture: tex,
+        suppressAdjust: true,
+        vectorTransient: false,
+        sourceIsLinear: true,
+        sourceIsWorkingGamut: true,
+        sourceIntentApplied: prepared.sourceIntentApplied,
+        contentWindow: {
+          x: (contentToWindow.x + windowTexel.x) / div,
+          y: (contentToWindow.y + windowTexel.y) / div,
+          w: windowTexel.w / div,
+          h: windowTexel.h / div,
+          basis: windowBasis,
+        },
+        expandQuadToWindow: true,
+        maskFree: true,
+      });
+    };
+
     // The shadow and glow spread EDTs live in their own cache slots per
     // instance — register them in the sweep guard or the sweep destroys the
     // entries every frame (the cache would never survive past one frame).
@@ -598,6 +654,33 @@ export function prepareEffectSources(
     for (let i = 0; i < glows.length; i++) {
       const stage = glows[i];
       if (stage.kind !== 'outer-glow') continue;
+      if (splitNodes) {
+        // STANDALONE (backdrop blend): emit the pure glow pixels into their
+        // own transient and register it under the effect-draw key. `current`
+        // is untouched — the glow no longer folds into the body.
+        const effTex = EffectShadowPass.run(encoder, ctx, {
+          layerId: layer.id,
+          current,
+          silhouette,
+          windowTexel,
+          currentIsLinear,
+          gamutId: currentGamutId,
+          currentOriginTexel: { x: 0, y: 0, w: current.width, h: current.height },
+          offsetX: 0,
+          offsetY: 0,
+          blurRadius: stage.blurRadius * density,
+          spreadTexels: (stage.spreadPx ?? 0) * density,
+          instanceIndex: i,
+          spreadCacheKey: `outer-glow#${i}`,
+          outputSlotKey: `eff:${glowStageIndices[i]}`,
+          edtAlphaKey: baseAlphaKey,
+          shadowColor: stage.color,
+          opacity: stage.strength,
+          standalone: true,
+        });
+        registerStandaloneEffectSource(glowStageIndices[i], effTex);
+        continue;
+      }
       const currentOrigin: TexelRect = currentAligned
         ? { x: 0, y: 0, w: current.width, h: current.height }
         : { x: -windowTexel.x, y: -windowTexel.y, w: current.width, h: current.height };
@@ -641,6 +724,33 @@ export function prepareEffectSources(
     for (let i = 0; i < shadows.length; i++) {
       const stage = shadows[i];
       if (stage.kind !== 'shadow') continue;
+      if (splitNodes) {
+        // STANDALONE (backdrop blend): pure shadow pixels into their own
+        // transient, registered under the effect-draw key. `current` is
+        // untouched — the shadow no longer folds into the body.
+        const effTex = EffectShadowPass.run(encoder, ctx, {
+          layerId: layer.id,
+          current,
+          silhouette,
+          windowTexel,
+          currentIsLinear,
+          gamutId: currentGamutId,
+          currentOriginTexel: { x: 0, y: 0, w: current.width, h: current.height },
+          offsetX: stage.offsetX * density,
+          offsetY: stage.offsetY * density,
+          blurRadius: stage.blurRadius * density,
+          spreadTexels: (stage.spreadPx ?? 0) * density,
+          instanceIndex: i,
+          spreadCacheKey: `shadow-spread#${i}`,
+          outputSlotKey: `eff:${shadowStageIndices[i]}`,
+          edtAlphaKey: baseAlphaKey,
+          shadowColor: stage.color,
+          opacity: stage.opacity,
+          standalone: true,
+        });
+        registerStandaloneEffectSource(shadowStageIndices[i], effTex);
+        continue;
+      }
       const currentOrigin: TexelRect = currentAligned
         ? { x: 0, y: 0, w: current.width, h: current.height }
         : { x: -windowTexel.x, y: -windowTexel.y, w: current.width, h: current.height };
@@ -763,20 +873,61 @@ export function prepareEffectSources(
     // 1); raster windows report in ASSET texels (the compositor recovers
     // logical px through layer.dprScale — the same contract the filter
     // windows already run under).
-    const isLogicalReport = solidColor || layer.source.kind === 'vector';
-    const div = isLogicalReport ? density : 1;
     const contentWindow = {
       x: (contentToWindow.x + windowTexel.x) / div,
       y: (contentToWindow.y + windowTexel.y) / div,
       w: windowTexel.w / div,
       h: windowTexel.h / div,
-      // Explicit basis: raster windows are in ASSET texels (the compositor
-      // recovers logical px through layer.dprScale); vector/solid windows are
-      // already in the layer's LOCAL LOGICAL px — the compositor must not
-      // divide by anything (vector dpr is 1 by construction, and a stale
-      // layer.dprScale on the node must not squeeze the quad).
-      basis: (isLogicalReport ? 'content-local' : 'asset') as 'content-local' | 'asset',
+      basis: windowBasis,
     };
+
+    if (splitNodes) {
+      // SPLIT MODE body declaration (three cases, the window contract):
+      if (currentAligned) {
+        // A window-aligning chain ran on the body (stroke / surface
+        // overlays / inner edge): the body shares the SAME window as the
+        // standalone effect transients — the Phase-1 unified-window
+        // contract (no body narrow-windowing yet).
+        sources.set(layer.id, {
+          texture: current,
+          suppressAdjust: true,
+          vectorTransient: false,
+          sourceIsLinear: true,
+          sourceIsWorkingGamut: true,
+          sourceIntentApplied: prepared.sourceIntentApplied,
+          contentWindow,
+          expandQuadToWindow: true,
+          maskFree: true,
+        });
+      } else if (bodyBaked) {
+        // No aligning chain ran, but the content left the raw prepared
+        // texture (adjust bake / mask bake / visibility crop): register the
+        // BAKED content under its OWN geometry — NEVER a windowTexel-sized
+        // declaration over an unaligned texture (the size mismatch would
+        // stretch the quad). No expandQuadToWindow: the quad follows the
+        // crop geometry as usual, the contentWindow re-maps the UVs.
+        sources.set(layer.id, {
+          texture: current,
+          suppressAdjust: true,
+          vectorTransient: false,
+          sourceIsLinear: currentIsLinear,
+          sourceIsWorkingGamut: currentGamutId === 0,
+          sourceIntentApplied: prepared.sourceIntentApplied,
+          contentWindow: {
+            x: contentToWindow.x / div,
+            y: contentToWindow.y / div,
+            w: current.width / div,
+            h: current.height / div,
+            basis: windowBasis,
+          },
+          expandQuadToWindow: false,
+          maskFree: true,
+        });
+      }
+      // else: nothing baked, nothing aligned — the raw prepared source under
+      // `layer.id` is already exactly right; leave it untouched.
+      return;
+    }
 
     sources.set(layer.id, {
       texture: current,

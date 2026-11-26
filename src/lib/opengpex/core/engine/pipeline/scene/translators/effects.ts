@@ -75,18 +75,21 @@ function clampShadowOffset(v: number): number {
 }
 
 /**
- * Guard the overlay blend mode: only the 16 `LayerBlendMode` members render;
- * anything else (corrupted document, hand-edited JSON) falls back to the
- * Multiply default — the same Photoshop factory default the chain uses.
+ * Guard any blend-mode parameter: only the 16 `LayerBlendMode` members
+ * render; anything else (corrupted document, hand-edited JSON, absent field)
+ * falls back to the caller's category default. The outer shadow / outer glow
+ * pass `'source-over'` (documents written before the field existed keep the
+ * historical flat beneath-compose), the surface overlays keep their factory
+ * defaults.
  */
-function sanitizeOverlayBlendMode(mode: unknown): LayerBlendMode {
+function sanitizeBlendMode(mode: unknown, fallback: LayerBlendMode): LayerBlendMode {
   const KNOWN: readonly LayerBlendMode[] = [
     'source-over', 'multiply', 'screen', 'overlay',
     'darken', 'lighten', 'color-dodge', 'color-burn',
     'hard-light', 'soft-light', 'difference', 'exclusion',
     'hue', 'saturation', 'color', 'luminosity',
   ];
-  return KNOWN.includes(mode as LayerBlendMode) ? (mode as LayerBlendMode) : 'multiply';
+  return KNOWN.includes(mode as LayerBlendMode) ? (mode as LayerBlendMode) : fallback;
 }
 
 /**
@@ -121,6 +124,9 @@ export function translateLayerEffects(
         blurRadius: clampShadowScalar(params.blurRadius, 0, 0, 100),
         spreadPx: params.spreadPx === undefined ? undefined : clampShadowScalar(params.spreadPx, 0, 0, 1000),
         opacity: clampShadowScalar(params.opacity, 1, 0, 1),
+        // Optional-tolerant: documents written before the field existed keep
+        // the historical flat beneath-compose (Normal).
+        blendMode: sanitizeBlendMode(params.blendMode, 'source-over'),
       });
     } else if (instance.category === 'colorOverlay') {
       // Optional-tolerant: documents written before the fields existed read
@@ -129,7 +135,7 @@ export function translateLayerEffects(
       stages.push({
         kind: 'color-overlay',
         color: toWorkingLinearRgba(params.color as ColorValue, workingSpace),
-        blendMode: sanitizeOverlayBlendMode(params.blendMode),
+        blendMode: sanitizeBlendMode(params.blendMode, 'multiply'),
         opacity: params.opacity === undefined ? 1 : clampShadowScalar(params.opacity, 1, 0, 1),
       });
     } else if (instance.category === 'outerGlow') {
@@ -143,6 +149,9 @@ export function translateLayerEffects(
         blurRadius: clampShadowScalar(params.blurRadius, 0, 0, 50),
         spreadPx: params.spreadPx === undefined ? undefined : clampShadowScalar(params.spreadPx, 0, 0, 50),
         strength: params.strength === undefined ? 1 : clampShadowScalar(params.strength, 1, 0, 1),
+        // Optional-tolerant: absent field reads Normal (the historical
+        // layer-internal bright-halo approximation).
+        blendMode: sanitizeBlendMode(params.blendMode, 'source-over'),
       });
     } else if (instance.category === 'gradientOverlay') {
       // Optional-tolerant: the non-color fields default to the reference
@@ -159,7 +168,7 @@ export function translateLayerEffects(
         angleDeg: clampShadowScalar(params.angleDeg === undefined ? 90 : params.angleDeg, 90, 0, 360),
         scale: clampShadowScalar(params.scale === undefined ? 100 : params.scale, 100, 1, 1000),
         opacity: params.opacity === undefined ? 1 : clampShadowScalar(params.opacity, 1, 0, 1),
-        blendMode: params.blendMode === undefined ? 'source-over' : sanitizeOverlayBlendMode(params.blendMode),
+        blendMode: params.blendMode === undefined ? 'source-over' : sanitizeBlendMode(params.blendMode, 'multiply'),
       });
     } else if (instance.category === 'innerGlow') {
       // Optional-tolerant: absent spreadPx reads 0, absent strength reads 1,
@@ -171,7 +180,7 @@ export function translateLayerEffects(
         blurRadius: clampShadowScalar(params.blurRadius, 0, 0, 50),
         spreadPx: params.spreadPx === undefined ? undefined : clampShadowScalar(params.spreadPx, 0, 0, 50),
         strength: params.strength === undefined ? 1 : clampShadowScalar(params.strength, 1, 0, 1),
-        blendMode: params.blendMode === undefined ? 'screen' : sanitizeOverlayBlendMode(params.blendMode),
+        blendMode: params.blendMode === undefined ? 'screen' : sanitizeBlendMode(params.blendMode, 'multiply'),
       });
     } else if (instance.category === 'innerShadow') {
       // The OFFSET keeps its sign (a delta, like the outer shadow's) and
@@ -185,7 +194,7 @@ export function translateLayerEffects(
         blurRadius: clampShadowScalar(params.blurRadius, 0, 0, 50),
         spreadPx: params.spreadPx === undefined ? undefined : clampShadowScalar(params.spreadPx, 0, 0, 50),
         strength: params.strength === undefined ? 1 : clampShadowScalar(params.strength, 1, 0, 1),
-        blendMode: params.blendMode === undefined ? 'multiply' : sanitizeOverlayBlendMode(params.blendMode),
+        blendMode: params.blendMode === undefined ? 'multiply' : sanitizeBlendMode(params.blendMode, 'multiply'),
       });
     }
   }

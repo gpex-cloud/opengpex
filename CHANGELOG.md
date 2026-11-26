@@ -2,6 +2,10 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.1.1
+
+- Layers: Drop Shadow and Outer Glow now offer a Blend mode picker that mixes the shadow or glow directly with the artwork behind the layer — Multiply deepens a shadow into the background color, Screen brightens a glow out of dark scenes, and all 16 modes are available. New effects default to Multiply (shadow) / Screen (glow); existing effects keep their current look.
+
 ## 2.1.0
 
 - Layers: two new effects complete the glow family — Inner Glow tints the inner edge of any layer's visible content with a soft luminous band, and Inner Shadow presses a shaded ring into the inner edge (with an offset dial, blur, spread and strength).

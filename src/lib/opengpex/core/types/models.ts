@@ -283,6 +283,14 @@ export interface ShadowParams {
   spreadPx?: number;
   /** Shadow opacity 0..1 (UI label: strength). */
   opacity: number;
+  /**
+   * How the shadow combines with the canvas BACKDROP beneath the layer
+   * (Photoshop Layer-Style blend mode). Reuses {@link LayerBlendMode} — no
+   * new enum members. Optional-tolerant: documents written before the field
+   * existed read as `'source-over'` (the historical flat behaviour — old
+   * documents keep rendering identically).
+   */
+  blendMode?: LayerBlendMode;
 }
 
 /**
@@ -309,12 +317,14 @@ export interface ColorOverlayParams {
  * Outer-glow parameters: a bright halo around the content silhouette —
  * equivalent to a zero-offset drop shadow of the SAME silhouette, so the
  * pipeline reuses the shadow machinery (EDT spread + Gaussian blur +
- * beneath-compose). The reference product's default Screen brightening is
- * approximated layer-internally (a bright glow colour at partial strength
- * composed beneath the content); no blend-mode parameter is exposed.
+ * beneath-compose). The reference product's factory brightening corresponds
+ * to the Screen backdrop blend, which the optional `blendMode` now carries
+ * explicitly (the exact backdrop blend); documents without the field keep
+ * the historical layer-internal approximation.
  *
  * Optional fields tolerate documents written before they existed: absent
- * `spreadPx` reads as 0, absent `strength` reads as 1.
+ * `spreadPx` reads as 0, absent `strength` reads as 1, absent `blendMode`
+ * reads as `'source-over'`.
  */
 export interface OuterGlowParams {
   /** TRC-encoded glow colour (same currency as fillColor / penStyle). */
@@ -328,6 +338,12 @@ export interface OuterGlowParams {
   spreadPx?: number;
   /** Glow strength 0..1 (UI range 0–100). Absent = 1. */
   strength?: number;
+  /**
+   * How the glow combines with the canvas BACKDROP beneath the layer.
+   * Reuses {@link LayerBlendMode} — no new enum members. Absent =
+   * `'source-over'` (the historical bright-halo-over approximation).
+   */
+  blendMode?: LayerBlendMode;
 }
 
 /**
