@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.0.73
+
+- Layers: new Outer Glow effect — add a glowing halo around any layer's visible content, with color, blur, spread and strength sliders. Large spreads still follow the true content shape (letter gaps stay visible in the halo) instead of collapsing into a rectangle.
+- Layers: every effect panel gains a reset button that restores the effect's factory-default settings in one click.
+- Layers: effect tabs now always show their delete button — for a category not added to the layer yet it appears dimmed, so the tab row stays consistent.
+
 ## 2.0.72
 
 - Layers: new Color Overlay effect — tint any layer's visible content with a single color while keeping every detail edge, with the full set of 16 blend modes (grouped like the reference product's menu) and a strength slider.

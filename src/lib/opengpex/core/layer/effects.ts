@@ -50,6 +50,7 @@ import type {
   EffectCategory,
   EffectInstance,
   Layer,
+  OuterGlowParams,
   ShadowParams,
   StrokeParams,
 } from '@opengpex/editor/core/types';
@@ -66,6 +67,7 @@ export const EFFECT_CATEGORY_LABELS: Readonly<Record<string, string>> = {
   stroke: 'Stroke',
   shadow: 'Shadow',
   colorOverlay: 'Color Overlay',
+  outerGlow: 'Outer Glow',
 };
 
 // ─── Defaults ─────────────────────────────────────────────────────────────────
@@ -102,10 +104,22 @@ export function defaultColorOverlayParams(): ColorOverlayParams {
   return { color: fromHex('#ff0000'), blendMode: 'multiply', opacity: 1 };
 }
 
+/**
+ * First-release outer-glow defaults: the reference product's Outer Glow
+ * dialog factory state — a pale-yellow glow (the Screen-style brightening is
+ * approximated with the bright colour itself), 5px blur (the factory "size"),
+ * no spread, 50% strength (the factory opacity). The same "one-shot success"
+ * contract as the stroke/shadow/colorOverlay defaults.
+ */
+export function defaultOuterGlowParams(): OuterGlowParams {
+  return { color: fromHex('#ffffbe'), blurRadius: 5, spreadPx: 0, strength: 0.5 };
+}
+
 /** Category-specific default parameters (used by append + enable-create paths). */
-export function defaultParamsFor(category: EffectCategory): StrokeParams | ShadowParams | ColorOverlayParams {
+export function defaultParamsFor(category: EffectCategory): StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams {
   if (category === 'stroke') return defaultStrokeParams();
   if (category === 'colorOverlay') return defaultColorOverlayParams();
+  if (category === 'outerGlow') return defaultOuterGlowParams();
   return defaultShadowParams();
 }
 
@@ -121,7 +135,7 @@ export function newEffectInstanceId(): string {
 /** Create one detached chain instance for `category` with default parameters. */
 export function createEffectInstance(
   category: EffectCategory,
-  opts: { params?: StrokeParams | ShadowParams | ColorOverlayParams; id?: string; enabled?: boolean } = {},
+  opts: { params?: StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams; id?: string; enabled?: boolean } = {},
 ): EffectInstance {
   return {
     id: opts.id ?? newEffectInstanceId(),
@@ -185,15 +199,16 @@ export function isCategoryFloorInstance(layer: Layer, id: string): boolean {
  * fallback MUST composite through this ordering so tab order and pixels agree.
  */
 export const EFFECT_RENDER_RANK: Readonly<Record<EffectCategory, number>> = {
+  // Visual stacking, bottom to top: shadow < outer glow < stroke < content
+  // (with the overlay living ON the content surface). The prepass EXECUTES
+  // the surface overlay BEFORE the stroke and the glow AFTER the stroke —
+  // execution order and visual stacking are deliberately different axes;
+  // this rank only fixes the chain evaluation order for the translator and
+  // the layers-list rows.
   shadow: 0,
-  stroke: 1,
-  // The overlay lives ON the content surface (beneath the stroke visually):
-  // rank 2 keeps the chain evaluation order stable for the translator and the
-  // layers-list rows; the prepass executes the overlay BEFORE the stroke
-  // regardless (surface effects act on the mask-baked content, stroke then
-  // rings the overlay-colored pixels — visual stacking and execution order
-  // are deliberately different axes).
-  colorOverlay: 2,
+  outerGlow: 1,
+  stroke: 2,
+  colorOverlay: 3,
 };
 
 export function sortEffectInstancesForRender(chain: EffectInstance[]): EffectInstance[] {
@@ -220,7 +235,7 @@ export function appendEffectInstance(
   category: EffectCategory,
   opts: {
     afterId?: string;
-    params?: StrokeParams | ShadowParams | ColorOverlayParams;
+    params?: StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams;
     /**
      * Caller-supplied id (the drawer generates one so it can activate the new
      * tab immediately — the patch return value alone cannot carry the id).
@@ -301,7 +316,7 @@ export function removeEffectInstance(layer: Layer, id: string): Partial<Layer> |
 export function updateEffectParams(
   layer: Layer,
   id: string,
-  params: StrokeParams | ShadowParams | ColorOverlayParams,
+  params: StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams,
 ): Partial<Layer> | null {
   const chain = getEffectChain(layer);
   const at = chain.findIndex((e) => e.id === id);

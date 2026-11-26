@@ -38,11 +38,11 @@ import ColorSwatchRow from '@opengpex/editor/widgets/ColorSwatchRow';
 import FancySvgSlider from '@opengpex/editor/widgets/FancySvgSlider';
 import AngleDial, { angleDistanceFromOffset } from '@opengpex/editor/widgets/AngleDial';
 import type { EffectInstance, Layer, ShadowParams } from '@opengpex/editor/core/types/models';
-import { updateEffectParams } from '@opengpex/editor/core/layer/effects';
+import { defaultShadowParams, updateEffectParams } from '@opengpex/editor/core/layer/effects';
 import { usePluginCommands } from '@opengpex/editor/core/context';
 import { useFilterGesture } from '@opengpex/editor/plugins/base/drawers/AdjustmentDrawer/hooks';
 import type { LayerEffectsDrawerCommandsMap } from '../../commands.d';
-import { PanelSection } from './shared';
+import { PanelSection, PanelResetButton } from './shared';
 
 export function ShadowPanel({
   layer,
@@ -172,6 +172,13 @@ export function ShadowPanel({
     gesture.end();
   };
 
+  // Restore the shadow factory defaults onto THIS instance — a ONE-SHOT
+  // undoable patch through the shared applyEffectPatch channel (no fast
+  // buffer: a discrete click, not a drag gesture).
+  const resetToDefaults = () => {
+    applyOneShot(defaultShadowParams());
+  };
+
   // A drag interrupted by unmount must still land its volatile draft — the
   // same cleanup contract as the stroke panel.
   React.useEffect(() => {
@@ -192,15 +199,20 @@ export function ShadowPanel({
   return (
     <div className="flex flex-col gap-3 px-3 pt-2 pb-3">
       {/* Single-row layout: the label sits inline LEFT of the swatch control
-          (ColorSwatchRow's built-in label — the house row pattern). */}
-      <ColorSwatchRow
-        label="Color"
-        className="px-0"
-        labelClassName="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-tight w-14 shrink-0"
-        value={fastColor ?? params.color}
-        onValueChange={handleColorChange}
-        onValueCommit={handleColorCommit}
-      />
+          (ColorSwatchRow's built-in label — the house row pattern). The
+          trailing reset restores this category's factory defaults with ONE
+          undoable patch (no fast buffer — a discrete action, not a drag). */}
+      <div className="flex items-center gap-1">
+        <ColorSwatchRow
+          label="Color"
+          className="px-0"
+          labelClassName="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-tight w-14 shrink-0"
+          value={fastColor ?? params.color}
+          onValueChange={handleColorChange}
+          onValueCommit={handleColorCommit}
+        />
+        <PanelResetButton onReset={resetToDefaults} />
+      </div>
       <PanelSection label="Offset">
         {/* pl-16 = the ColorSwatchRow label width (w-14) + its gap — the dial
             left-aligns with the color palette button, not the Color label. */}

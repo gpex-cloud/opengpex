@@ -110,6 +110,10 @@ function overlayStages(layer: CompiledScene['scene']['layers'][number]) {
   return (layer.effects ?? []).filter((s) => s.kind === 'color-overlay');
 }
 
+function glowStages(layer: CompiledScene['scene']['layers'][number]) {
+  return (layer.effects ?? []).filter((s) => s.kind === 'outer-glow');
+}
+
 export function prepareEffectSources(
   encoder: GPUCommandEncoder,
   compiled: CompiledScene,
@@ -128,10 +132,11 @@ export function prepareEffectSources(
     const stages = strokeStages(layer);
     const shadows = shadowStages(layer);
     const overlays = overlayStages(layer);
+    const glows = glowStages(layer);
     // ANY enabled effect category claims the prepass — the gate must not be
-    // pinned to the stroke/shadow pair, or an overlay-only layer would skip
-    // the prepass entirely and render un-overlaid.
-    if (stages.length === 0 && shadows.length === 0 && overlays.length === 0) continue;
+    // pinned to a specific category subset, or an outer-glow-only layer would
+    // skip the prepass entirely and render without its halo.
+    if (stages.length === 0 && shadows.length === 0 && overlays.length === 0 && glows.length === 0) continue;
     const prepared = sources.get(layer.id);
     if (!prepared) continue; // asset not resident yet — the layer skips this frame anyway
 
@@ -161,7 +166,10 @@ export function prepareEffectSources(
         : { x: 0, y: 0, w: layer.width ?? 1, h: layer.height ?? 1 };
       density = 1;
       contentToWindow = { x: 0, y: 0 };
-      const reach = effectReachPx(stages);
+      // The solid arm pre-expands its own window, so its reach must count
+      // EVERY outward-reaching category (stroke, shadow, outer glow) — not
+      // just the stroke stages.
+      const reach = effectReachPx([...stages, ...shadows, ...glows]);
       const windowRect = expandWindowForStroke(logical, reach);
       base = { x: logical.x - windowRect.x, y: logical.y - windowRect.y, w: logical.w, h: logical.h };
       const raw = ctx.texturePool.acquire({
@@ -300,10 +308,11 @@ export function prepareEffectSources(
     // base-sized silhouette whose out-of-bounds is truthful transparency.
     const baseIsSubRect = !solidColor
       && (base.x > 0 || base.y > 0 || base.x + base.w < content.width || base.y + base.h < content.height);
-    // Not shadow-only: an overlay reads the content colour too, so a cropped
-    // shared-source fragment must give it the same truthful-transparency
-    // crop (opaque neighbor pixels would be dyed INTO the visible content).
-    const needsVisibilityCrop = (shadows.length > 0 || overlays.length > 0) && baseIsSubRect;
+    // Not shadow-only: an overlay reads the content colour and a glow blurs
+    // the silhouette, so a cropped shared-source fragment must give both the
+    // same truthful-transparency crop (opaque neighbor pixels would be dyed
+    // INTO the visible content or smeared into the halo).
+    const needsVisibilityCrop = (shadows.length > 0 || overlays.length > 0 || glows.length > 0) && baseIsSubRect;
     if (bmaskTex || vmaskBake || needsVisibilityCrop) {
       const bx0 = solidColor ? 0 : Math.floor(base.x);
       const by0 = solidColor ? 0 : Math.floor(base.y);
@@ -384,7 +393,17 @@ export function prepareEffectSources(
     //     through layer.dprScale, the same contract filter windows run
     //     under); logical px for vector (window/density) and solid (the
     //     materialized texture is already the expanded window).
-    const pads = effectWindowPadsPx([...stages, ...shadows]);
+    // ⚠️ The window IS the EDT's grid: a missing category's reach means the
+    // spread band (sd ∈ [spread−½, spread+½]) is not representable inside it
+    // — coverage then saturates to 1 across the whole window and the blurred
+    // output is a straight-edged RECTANGLE slab (the max-spread glow
+    // incident: the pads call used to hand-pick per-family arrays and glow
+    // was forgotten). It now consumes the layer's FULL translated stage
+    // list — effectWindowPadsPx dispatches per kind and zero-pads any kind
+    // without an ROI branch (surface overlays), so a future effect's reach
+    // is counted by construction the moment it grows a branch, with no
+    // call-site list to forget.
+    const pads = effectWindowPadsPx(layer.effects);
     const windowTexel: TexelRect = solidColor
       ? { x: 0, y: 0, w: content.width, h: content.height }
       : expandWindowForPads(
@@ -485,10 +504,65 @@ export function prepareEffectSources(
       currentGamutId = 0;
     }
 
-    // The shadow spread's EDT lives in its own cache slot per instance —
-    // register it in the sweep guard or the sweep destroys the entry every
-    // frame (the cache would never survive past one frame).
+    // The shadow and glow spread EDTs live in their own cache slots per
+    // instance — register them in the sweep guard or the sweep destroys the
+    // entries every frame (the cache would never survive past one frame).
     shadows.forEach((_, i) => activeEdtKeys.add(`${layer.id}:shadow-spread#${i}`));
+    glows.forEach((_, i) => activeEdtKeys.add(`${layer.id}:outer-glow#${i}`));
+
+    // Window-alignment tracking for the FOREGROUND side of the beneath-
+    // compose passes (glow and shadow): a stroke or overlay output is already
+    // window-aligned, raw content is not. Updated by each chain below.
+    let currentAligned = stages.length > 0 || overlays.length > 0;
+
+    // ── 2c. Outer-glow chain (halo beneath the stroked content) ─────────
+    // EXECUTION ORDER: AFTER the stroke chain, BEFORE the shadow chain. The
+    // shadow pass composes its result BENEATH the accumulated foreground, so
+    // running the glows first stacks them: drop shadow (bottom) < outer glow
+    // < stroked content — the cross-category visual order. The glow
+    // silhouette is the ORIGINAL content (captured before the stroke chain),
+    // never the stroke output: a stroke ring must not fatten the glow.
+    // Screen APPROXIMATION (documented): the reference product's Outer Glow
+    // brightens through a Screen backdrop blend; approximating that exactly
+    // needs the backdrop-blend prepass split (out of scope), so the glow
+    // lands as a bright colour at partial strength composed beneath the
+    // content — visually equivalent in the halo band, and the UI exposes no
+    // blend-mode parameter by ruling. The glow runs through the shadow pass
+    // with offset (0, 0): same EDT spread + separable Gaussian +
+    // beneath-compose machinery, its OWN spread EDT cache slot and output
+    // transient slot (a shared slot would alias the shadow's per-frame
+    // state), and its own ROI pads (blur reach + spread).
+    for (let i = 0; i < glows.length; i++) {
+      const stage = glows[i];
+      if (stage.kind !== 'outer-glow') continue;
+      const currentOrigin: TexelRect = currentAligned
+        ? { x: 0, y: 0, w: current.width, h: current.height }
+        : { x: -windowTexel.x, y: -windowTexel.y, w: current.width, h: current.height };
+      current = EffectShadowPass.run(encoder, ctx, {
+        layerId: layer.id,
+        current,
+        silhouette,
+        windowTexel,
+        currentIsLinear,
+        gamutId: currentGamutId,
+        currentOriginTexel: currentOrigin,
+        offsetX: 0,
+        offsetY: 0,
+        blurRadius: stage.blurRadius * density,
+        spreadTexels: (stage.spreadPx ?? 0) * density,
+        instanceIndex: i,
+        spreadCacheKey: `outer-glow#${i}`,
+        outputSlotKey: 'outer-glow',
+        edtAlphaKey: baseAlphaKey,
+        shadowColor: stage.color,
+        opacity: stage.strength,
+      });
+      // The compose output is working-LINEAR in the working gamut,
+      // window-aligned — later stages and the output declaration agree.
+      currentIsLinear = true;
+      currentGamutId = 0;
+      currentAligned = true;
+    }
 
     // ── 2b. Shadow chain ────────────────────────────────────────────────
     // Runs AFTER the strokes: each shadow composites BENEATH the accumulated
@@ -501,7 +575,6 @@ export function prepareEffectSources(
     // not). Only the FOREGROUND side of the compose switches coordinates: the
     // raw content's top-left sits at -windowTexel inside the window, while a
     // stroke-composed foreground is already window-aligned.
-    let currentAligned = stages.length > 0 || overlays.length > 0;
     for (let i = 0; i < shadows.length; i++) {
       const stage = shadows[i];
       if (stage.kind !== 'shadow') continue;

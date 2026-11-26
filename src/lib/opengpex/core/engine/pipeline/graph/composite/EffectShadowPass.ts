@@ -85,6 +85,22 @@ export class EffectShadowPass {
       readonly spreadTexels: number;
       /** Distinguishes the spread EDT cache slot between shadow instances. */
       readonly instanceIndex: number;
+      /**
+       * Cache-slot suffix for the spread EDT. Shadows default to
+       * `shadow-spread#<instanceIndex>`; the OUTER GLOW reuses this pass and
+       * MUST bring its own suffix (`outer-glow#<i>`) — a shared slot would
+       * let a glow and a shadow on the same layer evict each other's cached
+       * field mid-frame (different silhouettes? no — same silhouette, but
+       * the cache keys must still stay disjoint so the sweep guard's
+       * registration in the prepass matches exactly what the pass uses).
+       */
+      readonly spreadCacheKey?: string;
+      /**
+       * Output transient slot key. Shadows default to `'shadow'`; the glow
+       * passes `'outer-glow'` so the two passes on the same layer never alias
+       * the same per-frame transient slot.
+       */
+      readonly outputSlotKey?: string;
       /** Alpha-only cache key for cross-frame EDT reuse (same contract as the stroke pass). */
       readonly edtAlphaKey?: string;
       readonly shadowColor: readonly [number, number, number, number];
@@ -106,7 +122,7 @@ export class EffectShadowPass {
     if (Math.abs(spread) > 0.001) {
       const edt = EffectStrokePass.computeEdt(encoder, ctx, {
         layerId: p.layerId,
-        cacheId: `${p.layerId}:shadow-spread#${p.instanceIndex}`,
+        cacheId: `${p.layerId}:${p.spreadCacheKey ?? `shadow-spread#${p.instanceIndex}`}`,
         content: p.silhouette,
         windowTexel: p.windowTexel,
         // The seed map depends only on the silhouette alpha — colour, opacity
@@ -170,7 +186,7 @@ export class EffectShadowPass {
     );
 
     // ── 3. Tint + offset + compose beneath the accumulated foreground.
-    const out = acquireEffectOutputTransient(ctx, p.layerId, 'shadow', width, height);
+    const out = acquireEffectOutputTransient(ctx, p.layerId, p.outputSlotKey ?? 'shadow', width, height);
     const uniform = packEffectShadowComposeUniform(width, height, {
       currentIsLinear: p.currentIsLinear,
       gamutId: p.gamutId,

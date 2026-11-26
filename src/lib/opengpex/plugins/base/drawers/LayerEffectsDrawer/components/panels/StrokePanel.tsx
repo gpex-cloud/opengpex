@@ -39,11 +39,11 @@ import ColorSwatchRow from '@opengpex/editor/widgets/ColorSwatchRow';
 import FancySvgSlider from '@opengpex/editor/widgets/FancySvgSlider';
 import FunctionTabs from '@opengpex/editor/widgets/FunctionTabs';
 import type { EffectInstance, Layer, StrokeParams, StrokePosition } from '@opengpex/editor/core/types/models';
-import { updateEffectParams } from '@opengpex/editor/core/layer/effects';
+import { defaultStrokeParams, updateEffectParams } from '@opengpex/editor/core/layer/effects';
 import { usePluginCommands } from '@opengpex/editor/core/context';
 import { useFilterGesture } from '@opengpex/editor/plugins/base/drawers/AdjustmentDrawer/hooks';
 import type { LayerEffectsDrawerCommandsMap } from '../../commands.d';
-import { PanelSection } from './shared';
+import { PanelSection, PanelResetButton } from './shared';
 
 export function StrokePanel({
   layer,
@@ -156,19 +156,35 @@ export function StrokePanel({
 
   const activePosition: StrokePosition = params.position ?? 'outside';
 
+  // Restore the stroke factory defaults onto THIS instance — a ONE-SHOT
+  // undoable patch through the shared applyEffectPatch channel (no fast
+  // buffer: a discrete click, not a drag gesture).
+  const resetToDefaults = () => {
+    // Typed-value commit is a ONE-SHOT write in a mini gesture (one undo
+    // step) — the fast track has no dragEnd to commit it.
+    gesture.begin();
+    const patch = updateEffectParams(layer, instance.id, defaultStrokeParams());
+    if (patch) applyEffectPatchCmd?.execute({ patch });
+    gesture.end();
+  };
+
   return (
     <div className="flex flex-col gap-3 px-3 pt-2 pb-3">
       {/* Single-row layout: the row label sits inline LEFT of the swatch
           control (ColorSwatchRow's built-in label, house pattern) — the
-          header-above variant wraps the swatch to its own line. */}
-      <ColorSwatchRow
-        label="Color"
-        className="px-0"
-        labelClassName="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-tight w-14 shrink-0"
-        value={fastColor ?? params.color}
-        onValueChange={handleColorChange}
-        onValueCommit={handleColorCommit}
-      />
+          header-above variant wraps the swatch to its own line. The trailing
+          reset restores the factory defaults with one undoable patch. */}
+      <div className="flex items-center gap-1">
+        <ColorSwatchRow
+          label="Color"
+          className="px-0"
+          labelClassName="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-tight w-14 shrink-0"
+          value={fastColor ?? params.color}
+          onValueChange={handleColorChange}
+          onValueCommit={handleColorCommit}
+        />
+        <PanelResetButton onReset={resetToDefaults} />
+      </div>
       <PanelSection label="Size">
         {/* The unit sits inline after the slider's numeric field (house
             pattern) — a standalone row under the slider reads as a wrap. */}

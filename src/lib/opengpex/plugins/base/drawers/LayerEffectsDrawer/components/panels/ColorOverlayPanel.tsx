@@ -40,11 +40,11 @@ import FancySvgSlider from '@opengpex/editor/widgets/FancySvgSlider';
 import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
 import { BLEND_MODE_DROPDOWN_OPTIONS, BLEND_MODE_LABEL_MAP } from '@opengpex/editor/widgets/blendModes';
 import type { EffectInstance, Layer, ColorOverlayParams, LayerBlendMode } from '@opengpex/editor/core/types/models';
-import { updateEffectParams } from '@opengpex/editor/core/layer/effects';
+import { defaultColorOverlayParams, updateEffectParams } from '@opengpex/editor/core/layer/effects';
 import { usePluginCommands } from '@opengpex/editor/core/context';
 import { useFilterGesture } from '@opengpex/editor/plugins/base/drawers/AdjustmentDrawer/hooks';
 import type { LayerEffectsDrawerCommandsMap } from '../../commands.d';
-import { PanelSection } from './shared';
+import { PanelSection, PanelResetButton } from './shared';
 
 export function ColorOverlayPanel({
   layer,
@@ -157,6 +157,13 @@ export function ColorOverlayPanel({
     gesture.end();
   };
 
+  // Restore the color-overlay factory defaults onto THIS instance — a
+  // ONE-SHOT undoable patch through the shared applyEffectPatch channel (no
+  // fast buffer: a discrete click, not a drag gesture).
+  const resetToDefaults = () => {
+    applyOneShot(defaultColorOverlayParams());
+  };
+
   // A drag interrupted by unmount must still land its volatile draft — the
   // same cleanup contract as the stroke/shadow panels.
   React.useEffect(() => {
@@ -174,15 +181,20 @@ export function ColorOverlayPanel({
   return (
     <div className="flex flex-col gap-3 px-3 pt-2 pb-3">
       {/* Single-row layout: the label sits inline LEFT of the swatch control
-          (ColorSwatchRow's built-in label — the house row pattern). */}
-      <ColorSwatchRow
-        label="Color"
-        className="px-0"
-        labelClassName="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-tight w-14 shrink-0"
-        value={fastColor ?? params.color}
-        onValueChange={handleColorChange}
-        onValueCommit={handleColorCommit}
-      />
+          (ColorSwatchRow's built-in label — the house row pattern). The
+          trailing reset restores this category's factory defaults with ONE
+          undoable patch (no fast buffer — a discrete action, not a drag). */}
+      <div className="flex items-center gap-1">
+        <ColorSwatchRow
+          label="Color"
+          className="px-0"
+          labelClassName="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-tight w-14 shrink-0"
+          value={fastColor ?? params.color}
+          onValueChange={handleColorChange}
+          onValueCommit={handleColorCommit}
+        />
+        <PanelResetButton onReset={resetToDefaults} />
+      </div>
       {/* Single-row layout, same house pattern as the Color row above: the
           label sits inline LEFT of the control (not stacked in a section). */}
       <div className="flex items-center gap-2">

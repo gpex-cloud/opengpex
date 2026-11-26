@@ -108,6 +108,7 @@ export const EFFECT_TABS: readonly EffectTabDef[] = [
   { id: 'stroke', label: 'Stroke', available: true },
   { id: 'shadow', label: 'Shadow', available: true },
   { id: 'colorOverlay', label: 'Color Overlay', available: true },
+  { id: 'outerGlow', label: 'Outer Glow', available: true },
 ] as const;
 
 /** The shipped (chain-model-backed) categories, in tab display order. */
@@ -115,14 +116,14 @@ export const AVAILABLE_TAB_IDS: readonly EffectTabId[] = EFFECT_TABS
   .filter((t) => t.available)
   .map((t) => t.id as EffectTabId);
 
-export type EffectTabId = 'shadow' | 'stroke' | 'colorOverlay';
+export type EffectTabId = 'shadow' | 'stroke' | 'colorOverlay' | 'outerGlow';
 
 /**
  * Categories the "+" accepts, per implementation phase. P3 ships stroke's
- * parameter pipeline; shadow joins at P5; color overlay joins with its
- * pipeline.
+ * parameter pipeline; shadow joins at P5; color overlay and outer glow join
+ * with their pipelines.
  */
-export const ADDABLE_CATEGORIES: readonly EffectTabId[] = ['stroke', 'colorOverlay'];
+export const ADDABLE_CATEGORIES: readonly EffectTabId[] = ['stroke', 'colorOverlay', 'outerGlow'];
 
 /**
  * A category tab with NO instance yet carries this virtual id — a TRANSIENT

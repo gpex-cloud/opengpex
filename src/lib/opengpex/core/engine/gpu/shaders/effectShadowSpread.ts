@@ -50,6 +50,14 @@ export const EFFECT_SHADOW_SPREAD_WORKGROUP = 8;
 
 /**
  * `EffectShadowSpreadUniforms` size in bytes: dims vec2 (8) +
+ * DILATION IS PER-SHAPE, NOT PER-RECT: the EDT seeds from the content's own
+ * ALPHA (cs_edt_seed thresholds `a >= 0.5`; the visible rect is only a read
+ * guard), so dilation grows every disconnected shape independently. Dense
+ * content (a line of CJK glyphs) dilated far enough merges into a single
+ * ROUNDED slab whose bounding-box corners stay circular — that is the honest
+ * dilated union, not a rectangle fill; effectSpreadPerShape-golden.test.ts
+ * pins both regimes.
+ *
  * content_dims vec2 (8) + content_origin vec2 (8) + spread f32 (4) +
  * IMPLICIT 4-byte align pad (28..31; vec4 aligns to 16) +
  * content_visible vec4 (32..47) = 48.

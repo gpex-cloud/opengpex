@@ -120,6 +120,17 @@ export function effectWindowPadsPx(stages: readonly EffectStageDesc[] | undefine
         top = Math.max(top, blur + spread + Math.max(-oy, 0));
         right = Math.max(right, blur + spread + Math.max(ox, 0));
         bottom = Math.max(bottom, blur + spread + Math.max(oy, 0));
+      } else if (s.kind === 'outer-glow') {
+        // A glow is a zero-offset shadow: the halo spreads `3σ` past the
+        // (optionally dilated) silhouette on EVERY side equally — no offset
+        // asymmetry.
+        const blur = shadowBlurReachPx(s.blurRadius);
+        const spreadRaw = s.spreadPx;
+        const spread = typeof spreadRaw === 'number' && Number.isFinite(spreadRaw) ? spreadRaw : 0;
+        left = Math.max(left, blur + spread);
+        top = Math.max(top, blur + spread);
+        right = Math.max(right, blur + spread);
+        bottom = Math.max(bottom, blur + spread);
       }
     }
   }

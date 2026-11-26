@@ -231,8 +231,8 @@ export const MAX_ADJUSTMENT_MASKS_PER_LAYER = 16;
 
 // ─── Layer render effects (A8) ───────────────────────────────────────────────
 
-/** Supported render-effect categories. Shipped: stroke, shadow, colorOverlay; the chain model admits future categories (glow / inner shadow / gradient / pattern / bevel) without migration. */
-export type EffectCategory = 'stroke' | 'shadow' | 'colorOverlay';
+/** Supported render-effect categories. Shipped: stroke, shadow, colorOverlay, outerGlow; the chain model admits future categories (inner shadow / inner glow / gradient / pattern / bevel) without migration. */
+export type EffectCategory = 'stroke' | 'shadow' | 'colorOverlay' | 'outerGlow';
 
 /**
  * Outward stroke parameters. The first release renders OUTWARD strokes only
@@ -303,6 +303,31 @@ export interface ColorOverlayParams {
 }
 
 /**
+ * Outer-glow parameters: a bright halo around the content silhouette —
+ * equivalent to a zero-offset drop shadow of the SAME silhouette, so the
+ * pipeline reuses the shadow machinery (EDT spread + Gaussian blur +
+ * beneath-compose). The reference product's default Screen brightening is
+ * approximated layer-internally (a bright glow colour at partial strength
+ * composed beneath the content); no blend-mode parameter is exposed.
+ *
+ * Optional fields tolerate documents written before they existed: absent
+ * `spreadPx` reads as 0, absent `strength` reads as 1.
+ */
+export interface OuterGlowParams {
+  /** TRC-encoded glow colour (same currency as fillColor / penStyle). */
+  color: ColorValue;
+  /** Gaussian sigma in canvas px (UI label: blur / softness, UI range 0–50). */
+  blurRadius: number;
+  /**
+   * Silhouette dilation before the blur, in canvas px (UI range 0–50) —
+   * grows the halo without softening it. Absent = 0.
+   */
+  spreadPx?: number;
+  /** Glow strength 0..1 (UI range 0–100). Absent = 1. */
+  strength?: number;
+}
+
+/**
  * One non-destructive render-effect instance on a layer — the chain-item
  * sibling of {@link AdjustmentMask} (same structural vocabulary: id /
  * category / params / enabled / optional coverage shape / preset provenance).
@@ -329,8 +354,8 @@ export interface EffectInstance {
   id: string;
   category: EffectCategory;
   enabled: boolean;
-  /** Discriminated by `category`: stroke → {@link StrokeParams}, shadow → {@link ShadowParams}, colorOverlay → {@link ColorOverlayParams}. */
-  params: StrokeParams | ShadowParams | ColorOverlayParams;
+  /** Discriminated by `category`: stroke → {@link StrokeParams}, shadow → {@link ShadowParams}, colorOverlay → {@link ColorOverlayParams}, outerGlow → {@link OuterGlowParams}. */
+  params: StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams;
   /** Reserved future scoping seam (first release: never written, never read). */
   shape?: LocalPolygon;
   /** Reserved future scoping seam — feather radius (px) for the shape edge. */

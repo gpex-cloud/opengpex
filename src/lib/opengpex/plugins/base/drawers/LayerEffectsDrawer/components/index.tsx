@@ -74,6 +74,7 @@ import type { LayerEffectsDrawerCommandsMap, LayerEffectsDrawerSignalsMap } from
 import { StrokePanel } from "./panels/StrokePanel";
 import { ShadowPanel } from "./panels/ShadowPanel";
 import { ColorOverlayPanel } from "./panels/ColorOverlayPanel";
+import { OuterGlowPanel } from "./panels/OuterGlowPanel";
 import { EmptyCategoryPanel } from "./panels/shared";
 import {
   ADDABLE_CATEGORIES,
@@ -277,9 +278,13 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
 
   const tabs: VerticalTabItem[] = useMemo(() => {
     return rail.map((railTab) => {
+      // Delete-button floor guard: a virtual (not-yet-materialized) tab has
+      // nothing to delete, so its trash renders in the same dimmed floor
+      // state — the button ROW stays aligned across every tab (user ruling
+      // 20261126: keep the virtual tabs, render the delete button everywhere).
       const floor = railTab.instance
         ? (activeLayer ? isCategoryFloorInstance(activeLayer, railTab.instance.id) : false)
-        : false;
+        : true;
       const enabled = railTab.instance ? railTab.instance.enabled : false;
       const eyeVisible = railTab.available;
       return {
@@ -314,20 +319,24 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
             >
               {enabled ? <Eye size={9} /> : <EyeOff size={9} />}
             </span>
-            {railTab.instance && (
+            {(
               <span
                 role="button"
-                aria-label={floor ? "The last instance of a kind cannot be deleted" : "Delete instance"}
+                aria-label={railTab.instance
+                  ? (floor ? "The last instance of a kind cannot be deleted" : "Delete instance")
+                  : "Nothing added yet on this layer"}
                 aria-disabled={floor}
-                title={floor ? "The last instance of a kind cannot be deleted" : "Delete instance"}
+                title={railTab.instance
+                  ? (floor ? "The last instance of a kind cannot be deleted" : "Delete instance")
+                  : "Nothing added yet on this layer"}
                 className={`p-0.5 rounded outline-none ${floor
                   ? "opacity-30 cursor-not-allowed"
                   : "hover:text-red-500 text-[var(--text-muted)] cursor-pointer"}`}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (floor) return;
-                  removeEffectInstanceCmd?.execute({ instanceId: railTab.instance!.id });
+                  if (floor || !railTab.instance) return;
+                  removeEffectInstanceCmd?.execute({ instanceId: railTab.instance.id });
                 }}
               >
                 <Trash2 size={9} />
@@ -501,6 +510,12 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
                   />
                 ) : activeRailTab.instance.category === "colorOverlay" ? (
                   <ColorOverlayPanel
+                    key={activeRailTab.instance.id}
+                    layer={activeLayer}
+                    instance={activeRailTab.instance}
+                  />
+                ) : activeRailTab.instance.category === "outerGlow" ? (
+                  <OuterGlowPanel
                     key={activeRailTab.instance.id}
                     layer={activeLayer}
                     instance={activeRailTab.instance}

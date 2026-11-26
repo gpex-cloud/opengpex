@@ -729,6 +729,32 @@ export type EffectStageDesc =
     readonly blendMode: LayerBlendMode;
     /** Overlay strength 0..1. */
     readonly opacity: number;
+  }
+  /**
+   * OUTER GLOW: a bright halo around the content silhouette — a zero-offset
+   * drop shadow of the same silhouette, so the prepass reuses the shadow
+   * machinery (EDT spread + Gaussian blur + beneath-compose) with the glow
+   * colour at `strength`. The reference product's Screen brightening is
+   * approximated layer-internally (bright colour, no backdrop blend). The
+   * glow silhouette derives from the ORIGINAL mask-baked content (never from
+   * the stroke output), and the prepass executes it AFTER the stroke chain
+   * and BEFORE the shadow chain: the final stacking is shadow (bottom) <
+   * glow < stroked content.
+   */
+  | {
+    readonly kind: 'outer-glow';
+    /** Glow colour: working-gamut LINEAR straight-alpha RGBA (0..1). */
+    readonly color: readonly [number, number, number, number];
+    /** Gaussian sigma in logical px (the UI's "blur"). */
+    readonly blurRadius: number;
+    /**
+     * Silhouette dilation before the blur, in logical px (the UI's
+     * "spread"). Grows the halo without softening it; non-negative.
+     * Absent = 0.
+     */
+    readonly spreadPx?: number;
+    /** Glow strength 0..1 (multiplies the halo alpha). */
+    readonly strength: number;
   };
 
 // ────────────────────────────────────────────────────────────
