@@ -607,7 +607,7 @@ export function useEditorStore() {
             toMask: advRef(P.ADV_LAYER_CLIP_TO_MASK, (payload?: { layerId?: string }) => executeCommand<{ layerId?: string } | undefined, Promise<void>>(P.ADV_LAYER_CLIP_TO_MASK, payload)),
           },
           cmdj: {
-            copy: advRef(P.ADV_LAYER_CMDJ_COPY, () => executeCommand(P.ADV_LAYER_CMDJ_COPY, undefined)),
+            copy: advRef(P.ADV_LAYER_CMDJ_COPY, (payload?: { keepClipBoxAfter?: boolean }) => executeCommand(P.ADV_LAYER_CMDJ_COPY, payload)),
             cut: advRef(P.ADV_LAYER_CMDJ_CUT, (payload?: { keepClipBoxAfter?: boolean }) => executeCommand(P.ADV_LAYER_CMDJ_CUT, payload)),
           },
           mask: {

@@ -32,7 +32,7 @@ async function clipToNewLayer(
   mode: 'copyToLayer' | 'cutToLayer',
   /** Caller-resolved selection policy (the plugin wrapper reads the user
    *  preference — core commands never read plugin config). Default: clear
-   *  on cutToLayer, the Photoshop behavior. */
+   *  the selection on landing, for both copy and cut modes. */
   keepClipBoxAfter = false,
 ): Promise<void> {
   const { activeFrame, activeLayer, actions, state } = ctx;
@@ -68,12 +68,11 @@ async function clipToNewLayer(
   const insertAt = ctx.layers.factory.getInsertIndexAbove(activeFrame, latestLayer.id);
   ctx.layers.factory.addLayer(activeFrame.id, result.newLayer, insertAt);
 
-  // Selection lifecycle on landing — same rule as the clipboard family: a
-  // Cut to Layer dissolves the selection unless the preference keeps the
-  // ants, and a KEPT selection converges onto the inserted fragment's cut
-  // outline (Copy to Layer always converges — the source is untouched and
-  // the ants should describe the new fragment).
-  if (mode === 'cutToLayer' && !keepClipBoxAfter) {
+  // Selection lifecycle on landing — same rule as the clipboard family: both
+  // Layer via Copy and Layer via Cut dissolve the selection unless the
+  // preference keeps the ants, and a KEPT selection converges onto the
+  // inserted fragment's outline.
+  if (!keepClipBoxAfter) {
     actions.updateFrame(activeFrame.id, { confinement: null });
   } else if (result.newLayer && getClipBox(activeFrame) && result.confinement) {
     // Converge only when a selection existed (same guard as the clipboard
@@ -92,9 +91,9 @@ export const LayerCmdJCommands = {
     id: P.ADV_LAYER_CMDJ_COPY,
     name: 'Copy to Layer',
     undoable: true,
-    execute: async (ctx: EditorContextValue): Promise<void> => {
+    execute: async (ctx: EditorContextValue, payload?: { keepClipBoxAfter?: boolean }): Promise<void> => {
       try {
-        await clipToNewLayer(ctx, 'copyToLayer');
+        await clipToNewLayer(ctx, 'copyToLayer', payload?.keepClipBoxAfter);
       } catch (err) {
         console.error('[ClipCommands] Layer via Copy failed:', err);
       }

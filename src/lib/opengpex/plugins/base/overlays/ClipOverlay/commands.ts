@@ -1200,7 +1200,9 @@ export const CLIP_ENTRY_COMMANDS = {
     category: 'Selection',
     shortcuts: [{ key: 'j', meta: true }, { key: 'j', ctrl: true }],
     execute: (ctx: EditorContextValue) => {
-      ctx.actions.adv.layer.cmdj.copy.execute();
+      const keepClipBoxAfter =
+        ((ctx.state.pluginConfig as Record<string, Partial<ClipOverlayConfig>> | undefined)?.[ClipOverlayAPI.configKey]?.keepClipBoxAfter === true);
+      ctx.actions.adv.layer.cmdj.copy.execute({ keepClipBoxAfter });
     }
   } as EditorCommand<void, void>,
 

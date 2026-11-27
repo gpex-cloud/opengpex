@@ -30,7 +30,7 @@ import {
 import type { GradeCategory, GradeState } from '@opengpex/editor/core/types';
 import type { AdjustmentDrawerCommandsMap, AdjustmentDrawerSignalsMap } from '../commands.d';
 import type { ActiveGradingTool, GradingTool, AdjustmentDrawerConfig } from '../protocols';
-import { DEFAULT_GRADING_TOOL } from '../protocols';
+import { resolveActiveGradingTool } from '../protocols';
 import { resolveEditableTail } from '../utils-hotTail';
 
 const EMPTY_GRADE: GradeState = {};
@@ -92,8 +92,7 @@ export function useAdjustmentDrawer() {
   const { activeLayer } = useEditorState();
 
   const signalTool = activeGradingToolSignal?.value as ActiveGradingTool | null | undefined;
-  const activeTool: ActiveGradingTool =
-    signalTool ?? (selfConfig?.openWithBasic ? 'basic' : DEFAULT_GRADING_TOOL);
+  const activeTool = resolveActiveGradingTool(signalTool, selfConfig);
 
   return {
     activeTool,

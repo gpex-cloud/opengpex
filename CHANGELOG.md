@@ -2,6 +2,11 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.1.6
+
+- Selection: Layer via Copy now honors the same "keep the selection" preference as Layer via Cut.
+- Adjustments: the panel that opens after reload is also the panel that Reset applies to (Reset Current Panel no longer loses track of the opening choice).
+
 ## 2.1.5
 
 - Effects: the effects drawer no longer adds hidden Undo steps — Cmd+Z always reverts your real edits, and tweaking a switched-off effect keeps its values while the effect stays off.

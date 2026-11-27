@@ -240,7 +240,7 @@ export interface EditorActions {
         toMask: AdvCommandRef<{ layerId?: string } | undefined, Promise<void>>;
       };
       cmdj: {
-        copy: AdvCommandRef<undefined>;
+        copy: AdvCommandRef<{ keepClipBoxAfter?: boolean } | undefined>;
         cut: AdvCommandRef<{ keepClipBoxAfter?: boolean } | undefined>;
       };
       // NOTE: the peel command family (cmd.peel.*) is plugin-owned

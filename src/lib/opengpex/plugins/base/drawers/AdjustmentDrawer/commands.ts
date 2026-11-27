@@ -209,11 +209,13 @@ export const ADJUSTMENT_COMMANDS = {
     name: 'Reset Current Panel',
     undoable: true,
     execute: (ctx: EditorContextValue) => {
-      const { activeFrame, activeLayer, actions, scoped } = ctx;
+      const { activeFrame, activeLayer, actions, scoped, state } = ctx;
       if (!activeFrame || !activeLayer) return;
-      const tool =
-        (scoped!.getSignal(P.SIGNAL_ACTIVE_GRADING_TOOL, P.DEFAULT_GRADING_TOOL) as GradingTool) ??
-        P.DEFAULT_GRADING_TOOL;
+      const pluginUid = `${P.PLUGIN_AUTHOR}.${P.PLUGIN_ID}`;
+      // Optional chain: test-harness contexts may carry no pluginConfig.
+      const config = ((state as EditorContextValue['state'] | undefined)?.pluginConfig as Record<string, P.AdjustmentDrawerConfig> | undefined)?.[pluginUid];
+      const signalTool = scoped!.getSignal(P.SIGNAL_ACTIVE_GRADING_TOOL, null) as P.ActiveGradingTool | null;
+      const tool = P.resolveActiveGradingTool(signalTool, config);
       const category = toolCategory(tool);
       // The presets tool spans several grade categories, so its reset is not
       // a single-category drop: it removes exactly the preset-owned masks

@@ -397,6 +397,21 @@ export interface AdjustmentDrawerConfig {
   customFilterPresets?: FilterPreset[];
 }
 
+/**
+ * Single source of truth for resolving the currently visible grading panel.
+ *
+ * When the session signal is `null`/`undefined` (user has not explicitly
+ * picked a panel since reload), the `openWithBasic` preference governs the
+ * opening panel; otherwise the explicit signal pick wins. Shared by both the
+ * UI hook (`useAdjustmentDrawer`) and commands (`resetActivePanel`).
+ */
+export function resolveActiveGradingTool(
+  signalTool: ActiveGradingTool | null | undefined,
+  config: AdjustmentDrawerConfig | undefined,
+): ActiveGradingTool {
+  return signalTool ?? (config?.openWithBasic ? 'basic' : DEFAULT_GRADING_TOOL);
+}
+
 
 // ─── Default Grading States ────────────────────────────────────────────────────
 //
