@@ -46,7 +46,7 @@ import type { LayerNode } from '../../scene/Scene';
 import type { PipelineCache } from '@opengpex/editor/core/engine/gpu/resources/PipelineCache';
 import type { BufferRing } from '@opengpex/editor/core/engine/gpu/resources/BufferRing';
 import { ADJUST_UNIFORM_BUFFER_SIZE } from '@opengpex/editor/core/engine/gpu/shaders/adjust';
-import { packAdjustChain } from '../../scene/adjustUniform';
+import { packAdjustChain } from './adjustUniform';
 
 /** Everything the resolver needs from the surrounding pass context. */
 export interface ResolveAdjustDeps {

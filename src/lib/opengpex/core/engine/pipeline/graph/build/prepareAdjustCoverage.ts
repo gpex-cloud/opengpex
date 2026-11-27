@@ -48,6 +48,7 @@ import {
 import type { AdjustStageDesc, VectorSubMask } from '../../scene/Scene';
 import type { AdjustCoverageBinding } from '../support/adjustBindGroup';
 import { GPUTextureUsage } from '@opengpex/editor/core/engine/gpu/constants';
+import { engineContentCache } from '@opengpex/editor/core/engine/gpu/resources/EngineContentCache';
 
 /**
  * One layer's gathered adjust coverage: the array texture (one array layer
@@ -68,7 +69,10 @@ interface AdjustCoverageEntry {
  * its key — every stage's geometry token, feather, AA flag and the bake
  * dimensions — changes.
  */
-const adjustCoverageArrays = new Map<string, AdjustCoverageEntry>();
+const adjustCoverageArrays = engineContentCache.namespace<AdjustCoverageEntry>(
+  'adjust-coverage-arrays',
+  { dispose: (entry) => entry.texture.destroy() },
+);
 
 /**
  * Union bake window of all confined stages (layer-local px, clamped to the
@@ -154,9 +158,8 @@ export function prepareAdjustCoverage(
     });
 
     const key = keyParts.join('|');
-    let entry = adjustCoverageArrays.get(layer.id);
+    let entry = adjustCoverageArrays.get(ctx.device, layer.id);
     if (!entry || entry.key !== key) {
-      entry?.texture.destroy();
       const texture = ctx.device.createTexture({
         size: [maskW, maskH, bakes.length],
         format: 'rgba8unorm',
@@ -176,22 +179,11 @@ export function prepareAdjustCoverage(
         view: texture.createView({ dimension: '2d-array', label: `Adjust Coverage Array View (${layer.id})` }),
         window: [window.x / logicalW, window.y / logicalH, window.w / logicalW, window.h / logicalH],
       };
-      adjustCoverageArrays.set(layer.id, entry);
+      adjustCoverageArrays.set(ctx.device, layer.id, entry);
     }
     out.set(layer.id, { view: entry.view, window: entry.window });
     seenLayers.add(layer.id);
   }
   sweepFrozenSelectionNamespace(seen, CONFINEMENT_SOURCE_ADJUST);
-  for (const [id, entry] of adjustCoverageArrays) {
-    if (!seenLayers.has(id)) {
-      entry.texture.destroy();
-      adjustCoverageArrays.delete(id);
-    }
-  }
-}
-
-/** Teardown seam — destroy the gathered arrays (per-stage bakes live in the shared cache). */
-export function clearAMaskCoverageArrays(): void {
-  for (const entry of adjustCoverageArrays.values()) entry.texture.destroy();
-  adjustCoverageArrays.clear();
+  adjustCoverageArrays.sweep(seenLayers);
 }

@@ -203,6 +203,9 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
   //      lazy-floor ensure below materializes into a real disabled instance
   //      the moment the drawer opens on it.
   const [override, setOverride] = useState<{ id: string; nonce: number } | null>(null);
+  // (layer, category) pairs this mount already materialized a floor instance
+  // for — see the undo guard inside the lazy-floor effect below.
+  const materializedRef = React.useRef<Set<string>>(new Set());
   const selectTab = (id: string) => setOverride({ id, nonce: jumpNonce });
   const overrideActive = !!override
     && override.nonce === jumpNonce
@@ -239,6 +242,16 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
   React.useEffect(() => {
     if (!activeLayer || !applyEffectPatchCmd) return;
     if (!activeRailTab?.available || activeRailTab.instance) return;
+    // UNDO GUARD: the floor patch is undoable, so ⌘Z can strip the instance
+    // back off. Re-running this effect would immediately re-materialize it
+    // (a fresh undoable patch + a tab-select flash), so every subsequent
+    // ⌘Z gets silently eaten by a remove/re-add loop and undo appears dead
+    // while the drawer is open. Materializing once per (layer, category) is
+    // enough: after an undo the category stays on its virtual tab (the eye
+    // still creates an instance on demand), and a real re-entry — switching
+    // to another layer and back — remounts state through a different key.
+    const materializedKey = `${activeLayer.id}:${activeRailTab.category}`;
+    if (materializedRef.current.has(materializedKey)) return;
     // The drawer generates the id (appendEffectInstance precedent) so the
     // tab selection can FOLLOW the materialized instance: the virtual-tab
     // override would otherwise dangle once the rail replaces `virtual:<cat>`
@@ -251,6 +264,7 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
       { id },
     );
     if (patch) {
+      materializedRef.current.add(materializedKey);
       applyEffectPatchCmd.execute({ patch });
       selectTab(id);
     }

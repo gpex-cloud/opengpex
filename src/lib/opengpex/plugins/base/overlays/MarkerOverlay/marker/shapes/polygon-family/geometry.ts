@@ -30,8 +30,8 @@
 import type { MarkerBounding, MarkerData, SdfGeometry, StarMarkerData } from '../../types';
 import { toCssColor4 } from '@opengpex/editor/core/engine/color';
 import { svgFillAttrs, svgStroke } from '../shared';
-import { sdfSolverOutline } from '@opengpex/editor/core/engine/pipeline/scene/sdfPolygonSolver';
-import type { SdfSolverOutline } from '@opengpex/editor/core/engine/pipeline/scene/sdfPolygonSolver';
+import { sdfSolverOutline } from '@opengpex/editor/core/engine/pipeline/graph/build/vectorRenderers/sdfPolygonSolver';
+import type { SdfSolverOutline } from '@opengpex/editor/core/engine/pipeline/graph/build/vectorRenderers/sdfPolygonSolver';
 
 /**
  * Sharpness that makes the star polygon TRUE: valleys land exactly on the

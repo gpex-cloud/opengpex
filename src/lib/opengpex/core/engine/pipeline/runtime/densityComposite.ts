@@ -43,7 +43,7 @@
  * here — sharpness-tracking-zoom is a pure-vector-tool goal (Figma), not a
  * raster editor's.
  *
- * @module core/engine/pipeline/graph/support/densityComposite
+ * @module core/engine/pipeline/runtime/densityComposite
  */
 
 /**

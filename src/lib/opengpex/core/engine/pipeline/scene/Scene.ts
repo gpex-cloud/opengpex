@@ -45,7 +45,7 @@
 
 import type { Rect, WorkingColorSpace, LayerBlendMode, GamutId } from '@opengpex/editor/core/types';
 import type { TextLayout } from '@opengpex/editor/core/engine/text/textLayout';
-import type { SdfSolverOutline } from './sdfPolygonSolver';
+import type { SdfSolverOutline } from '@opengpex/editor/core/engine/pipeline/graph/build/vectorRenderers/sdfPolygonSolver';
 
 // ────────────────────────────────────────────────────────────
 // Geometry

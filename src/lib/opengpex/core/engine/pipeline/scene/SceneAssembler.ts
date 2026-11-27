@@ -54,7 +54,7 @@ import { translateLayerAdjustments } from './adjustments';
 import { translateLayerEffects } from './translators/effects';
 import { translateLayer } from './translators';
 import { WORKING_GAMUT } from '@opengpex/editor/core/engine/color/gamut';
-import { resolveCompositeDensity } from '@opengpex/editor/core/engine/pipeline/graph/support/densityComposite';
+import { resolveCompositeDensity } from '@opengpex/editor/core/engine/pipeline/runtime/densityComposite';
 
 /**
  * UNIFIED raw-upload seam — the single convergence point for every

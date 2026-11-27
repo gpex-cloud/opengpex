@@ -43,7 +43,7 @@ import { ellipseToSdf } from './marker/shapes/ellipse/render';
 import { segmentToSdf } from './marker/shapes/line-segment/geometry';
 import { radialToSdf } from './marker/shapes/polygon-family/geometry';
 import { calloutToSdf } from './marker/shapes/callout/render';
-import { sdfSolverOutline } from '@opengpex/editor/core/engine/pipeline/scene/sdfPolygonSolver';
+import { sdfSolverOutline } from '@opengpex/editor/core/engine/pipeline/graph/build/vectorRenderers/sdfPolygonSolver';
 
 /** Fill is considered present above this opacity (mirrors "0 = no fill"). */
 const FILL_EPSILON = 0.001;

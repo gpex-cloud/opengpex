@@ -48,7 +48,7 @@
  * one-way (never imports the engine) and the state machine unit-testable with
  * a fake clock.
  *
- * @module core/engine/pipeline/graph/support/gainPresenter
+ * @module core/engine/pipeline/runtime/gainPresenter
  */
 
 import { GPUTextureUsage } from '@opengpex/editor/core/engine/gpu/constants';

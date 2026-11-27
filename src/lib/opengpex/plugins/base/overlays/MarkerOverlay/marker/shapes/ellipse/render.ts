@@ -23,7 +23,7 @@ import type { EllipseMarkerData } from '../../types';
 import type { MarkerBounding, SdfGeometry } from '../../types';
 import { svgFillAttrs, svgStroke } from '../shared';
 import { solverRingSvg, fillOverlay } from '../polygon-family/geometry';
-import { sdfSolverOutline } from '@opengpex/editor/core/engine/pipeline/scene/sdfPolygonSolver';
+import { sdfSolverOutline } from '@opengpex/editor/core/engine/pipeline/graph/build/vectorRenderers/sdfPolygonSolver';
 
 /**
  * The preview IS the engine's solver artifact (the exact inscribed 32-gon):

@@ -65,7 +65,7 @@
  *     `COMPOSITE_BUDGET_DEFAULT_BYTES`: sharpness must never move when the
  *     channel gate does.
  *
- * @module core/engine/pipeline/graph/support/compositeBudget
+ * @module core/engine/pipeline/runtime/compositeBudget
  */
 
 import type { InteractiveDensity } from './densityComposite';

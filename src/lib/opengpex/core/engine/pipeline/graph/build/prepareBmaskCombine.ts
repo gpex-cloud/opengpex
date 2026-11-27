@@ -59,6 +59,7 @@
 import type { CompiledScene } from '../SceneCompiler';
 import { GPUBufferUsage, GPUTextureUsage } from '@opengpex/editor/core/engine/gpu/constants';
 import { BufferRing } from '@opengpex/editor/core/engine/gpu/resources/BufferRing';
+import { engineContentCache } from '@opengpex/editor/core/engine/gpu/resources/EngineContentCache';
 import { LayerTexture } from '@opengpex/editor/core/engine/gpu/resources/LayerTexture';
 import {
   BMASK_COMBINE_UNIFORM_SIZE,
@@ -116,6 +117,10 @@ class BmaskCombineCache {
   private device: GPUDevice | null = null;
   private readonly entries = new Map<string, BmaskCombineCacheEntry>();
   private uniformRing: BufferRing | null = null;
+
+  constructor() {
+    engineContentCache.register('bmask-combine', () => this.clear());
+  }
 
   /** Lazily (re)create the private uniform ring, dropping everything on a device change. */
   private ensureRing(device: GPUDevice): void {
@@ -347,12 +352,4 @@ export function prepareBmaskCombineSources(
     seen.add(layer.id);
   }
   cache.sweep(seen);
-}
-
-/**
- * Release all owned combined bmask textures + the private uniform ring. Call on
- * engine teardown (WebGpuEngine.destroy()) beside `clearVmaskCache()`.
- */
-export function clearBmaskCombineCache(): void {
-  cache.clear();
 }

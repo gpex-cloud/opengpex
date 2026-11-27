@@ -56,6 +56,7 @@
 import type { CompiledScene } from '../SceneCompiler';
 import { GPUBufferUsage, GPUTextureUsage } from '@opengpex/editor/core/engine/gpu/constants';
 import { BufferRing } from '@opengpex/editor/core/engine/gpu/resources/BufferRing';
+import { engineContentCache } from '@opengpex/editor/core/engine/gpu/resources/EngineContentCache';
 import { LayerTexture } from '@opengpex/editor/core/engine/gpu/resources/LayerTexture';
 import {
   VMASK_WORKGROUP_SIZE,
@@ -113,6 +114,10 @@ export class VmaskCache {
   private edgesRing: BufferRing | null = null;
   private tableRing: BufferRing | null = null;
   private uniformRing: BufferRing | null = null;
+
+  constructor(name = `vmask-${Math.random().toString(36).slice(2)}`) {
+    engineContentCache.register(name, () => this.clear());
+  }
 
   /** Lazily (re)create the private rings, dropping everything on a device change. */
   private ensureRings(device: GPUDevice): void {
@@ -548,13 +553,4 @@ export function prepareVmaskSources(
     seen.add(layer.id);
   }
   cache.sweep(seen);
-}
-
-/**
- * Release all owned vmask coverage textures + private rings. Call on engine teardown
- * (WebGpuEngine.destroy()) so the GPU textures do not leak — the replacement for the
- * deleted `clearVectorMaskCache()` (which freed the old CPU ImageBitmap cache).
- */
-export function clearVmaskCache(): void {
-  cache.clear();
 }

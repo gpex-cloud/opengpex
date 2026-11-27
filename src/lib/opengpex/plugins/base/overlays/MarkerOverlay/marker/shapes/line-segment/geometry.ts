@@ -29,7 +29,7 @@
 
 import type { MarkerData, SegmentMarkerData, SdfGeometry } from '../../types';
 import { svgStroke } from '../shared';
-import { sdfSolverOutline } from '@opengpex/editor/core/engine/pipeline/scene/sdfPolygonSolver';
+import { sdfSolverOutline } from '@opengpex/editor/core/engine/pipeline/graph/build/vectorRenderers/sdfPolygonSolver';
 
 /** 2D point (canvas-local or layer-local px, used interchangeably by value). */
 interface Pt {

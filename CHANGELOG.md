@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.1.4
+
+- Effects: pressing Undo (Cmd+Z) with the layer effects drawer open no longer gets stuck undoing the drawer's own setup; it now undoes your actual last edit again.
+- Onboarding: the welcome dialog is refreshed into a "What's New" overview of recent features and shows once again for existing users.
+- Engine: internal GPU pipeline refactoring for maintainability and resource hygiene.
+
 ## 2.1.3
 
 - Adjustments: tweaking adjustments no longer silently removes a disabled adjustment entry from the layer; explicit resets and deletions still clear every entry as before.

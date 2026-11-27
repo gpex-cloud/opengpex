@@ -56,7 +56,7 @@
  *     rebuild key (a pan), or content signature (an edit) no longer matches
  *     this frame's decision.
  *
- * @module core/engine/pipeline/graph/support/roiFrame
+ * @module core/engine/pipeline/runtime/roiFrame
  */
 
 import type { Scene } from '@opengpex/editor/core/engine/pipeline/scene/Scene';

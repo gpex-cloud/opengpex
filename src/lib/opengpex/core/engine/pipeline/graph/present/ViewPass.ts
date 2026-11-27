@@ -37,7 +37,7 @@ import type { LayerTexture } from '@opengpex/editor/core/engine/gpu/resources/La
 import type { PipelineCache } from '@opengpex/editor/core/engine/gpu/resources/PipelineCache';
 import type { BufferRing } from '@opengpex/editor/core/engine/gpu/resources/BufferRing';
 import { CHANNEL_MASK_RGB, type SceneChannelMask } from '../../scene/Scene';
-import type { PresentGainMap } from '../support/gainPresenter';
+import type { PresentGainMap } from '../../runtime/gainPresenter';
 
 /**
  * A 2D affine as the 6 meaningful components of a 3×3 (last row [0,0,1]),

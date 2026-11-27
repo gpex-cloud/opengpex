@@ -20,7 +20,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { X, Zap, ArrowUpRight } from "lucide-react";
+import { X, Zap, ArrowUpRight, Layers, Cpu, Sparkles } from "lucide-react";
 
 // ─── WelcomeModal ─────────────────────────────────────────────────────────────
 
@@ -54,16 +54,20 @@ export function WelcomeModal({
       <div
         className="relative bg-[var(--bg-panel)] border border-[var(--border-subtle)] rounded-2xl shadow-2xl shadow-black/40 w-[480px] max-w-[92vw] overflow-hidden"
         style={{
-          transform: visible ? "scale(1) translateY(0)" : "scale(0.94) translateY(12px)",
+          transform: visible
+            ? "scale(1) translateY(0)"
+            : "scale(0.94) translateY(12px)",
           opacity: visible ? 1 : 0,
-          transition: "transform 0.25s cubic-bezier(0.16,1,0.3,1), opacity 0.25s ease",
+          transition:
+            "transform 0.25s cubic-bezier(0.16,1,0.3,1), opacity 0.25s ease",
         }}
       >
         {/* Gradient accent strip */}
         <div
           className="absolute top-0 inset-x-0 h-[2px]"
           style={{
-            background: "linear-gradient(90deg, #6366f1 0%, #818cf8 50%, #a5b4fc 100%)",
+            background:
+              "linear-gradient(90deg, #6366f1 0%, #818cf8 50%, #a5b4fc 100%)",
           }}
         />
 
@@ -71,29 +75,35 @@ export function WelcomeModal({
         <div
           className="absolute inset-0 opacity-[0.04] pointer-events-none"
           style={{
-            background: "radial-gradient(ellipse 80% 60% at 50% 0%, #818cf8 0%, transparent 70%)",
+            background:
+              "radial-gradient(ellipse 80% 60% at 50% 0%, #818cf8 0%, transparent 70%)",
           }}
         />
 
         <div className="relative px-7 py-6">
           {/* Header */}
           <div className="flex items-start justify-between mb-4">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5">
               <div className="w-7 h-7 rounded-lg bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center">
                 <Zap size={14} className="text-indigo-400" />
               </div>
               <div>
-                <h2 className="text-[15px] font-bold text-[var(--text-main)] leading-tight">
-                  Welcome to OpenGPEX v2
-                </h2>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-[15px] font-bold text-[var(--text-main)] leading-tight">
+                    What&apos;s New in OpenGPEX
+                  </h2>
+                  <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/25">
+                    v2.1
+                  </span>
+                </div>
                 <p className="text-[11.5px] text-indigo-400 font-medium">
-                  Now powered by WebGPU
+                  WebGPU-powered image editor
                 </p>
               </div>
             </div>
             <button
               onClick={handleDismiss}
-              className="w-6 h-6 flex items-center justify-center rounded-full hover:bg-[var(--bg-hover)] transition-colors mt-0.5"
+              className="w-6 h-6 flex items-center justify-center rounded-full hover:bg-[var(--bg-hover)] transition-colors mt-0.5 outline-none"
               title="Close"
             >
               <X size={12} className="text-[var(--text-muted)]" />
@@ -101,37 +111,62 @@ export function WelcomeModal({
           </div>
 
           {/* Body */}
-          <div className="space-y-3 text-[13px] text-[var(--text-main)]/85 leading-[1.65]">
-            <p>
-              v2 upgrades the rendering engine to{" "}
-              <span className="text-indigo-300 font-semibold">WebGPU</span>, delivering
-              smoother performance and support for much larger images.
-            </p>
-            <p>
-              If you&apos;re upgrading from v1, your work migrates automatically — and
-              even if something goes wrong, your files remain safely stored in your browser.
-            </p>
-            <p className="text-[var(--text-muted)]">
-              Hit a snag? Open an issue on{" "}
+          <div className="space-y-3 text-[12.5px] text-[var(--text-main)]/85 leading-[1.55]">
+            <div className="flex items-start gap-2.5">
+              <Layers size={14} className="text-indigo-400 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-semibold text-[var(--text-main)]">
+                  Layer Effects Suite
+                </span>
+                {" — "}
+                Stroke, Shadow, Inner Shadow, Outer Glow, Inner Glow, Color
+                Overlay, and Gradient Overlay are all live with 16 blend modes.
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2.5">
+              <Cpu size={14} className="text-indigo-400 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-semibold text-[var(--text-main)]">
+                  High-Depth &amp; Large-Canvas WebGPU Engine
+                </span>
+                {" — "}
+                16/32-bit working precision with responsive viewport compositing
+                on large documents.
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2.5">
+              <Sparkles size={14} className="text-indigo-400 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-semibold text-[var(--text-main)]">
+                  In Progress
+                </span>
+                {" — "}
+                Real-time incremental vector brush performance and more pro
+                editing tools are actively underway.
+              </div>
+            </div>
+
+            <p className="pt-1 text-[11.5px] text-[var(--text-muted)]">
+              Feedback or bugs? Open an issue on{" "}
               <a
                 href="https://github.com/gpex-cloud/opengpex/issues"
                 target="_blank"
                 rel="noreferrer"
-                className="text-indigo-400 hover:text-indigo-300 transition-colors inline-flex items-center gap-0.5"
+                className="text-indigo-400 hover:text-indigo-300 transition-colors inline-flex items-center gap-0.5 outline-none"
               >
                 GitHub <ArrowUpRight size={10} />
               </a>
-              {" "}and I&apos;ll help you sort it out. If your device struggles with v2,
-              the legacy editor is still at{" "}
+              {" · "}Legacy editor:{" "}
               <a
                 href="https://v1.gpex.cloud"
                 target="_blank"
                 rel="noreferrer"
-                className="text-indigo-400 hover:text-indigo-300 transition-colors"
+                className="text-indigo-400 hover:text-indigo-300 transition-colors outline-none"
               >
                 v1.gpex.cloud
               </a>
-              {" "}(manual file migration required).
             </p>
           </div>
 
@@ -155,7 +190,13 @@ export function WelcomeModal({
                 >
                   {dontShowAgain && (
                     <svg width="8" height="6" viewBox="0 0 8 6" fill="none">
-                      <path d="M1 3L3 5L7 1" stroke="white" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                      <path
+                        d="M1 3L3 5L7 1"
+                        stroke="white"
+                        strokeWidth="1.4"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
                     </svg>
                   )}
                 </div>
@@ -167,7 +208,7 @@ export function WelcomeModal({
 
             <button
               onClick={handleDismiss}
-              className="px-4 py-1.5 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white text-[12px] font-semibold transition-colors"
+              className="px-4 py-1.5 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white text-[12px] font-semibold transition-colors outline-none"
             >
               Got it
             </button>

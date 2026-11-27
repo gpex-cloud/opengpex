@@ -43,10 +43,10 @@
  * IDENTITY: an all-identity `AdjustmentDesc[]` yields `flags = 0` and an
  * identity matrix, so `apply_stage` returns its input bit-exactly.
  *
- * @module core/gpu/scene/adjustUniform
+ * @module core/engine/pipeline/graph/support/adjustUniform
  */
 
-import type { AdjustmentDesc, AdjustStageDesc } from './Scene';
+import type { AdjustmentDesc, AdjustStageDesc } from '@opengpex/editor/core/engine/pipeline/scene/Scene';
 import {
   ADJUST_STAGE_FLOATS,
   ADJUST_UNIFORM_FLOATS,

@@ -46,6 +46,7 @@ import {
   STROKE_COMPOSE_WORKGROUP,
 } from '@opengpex/editor/core/engine/gpu/shaders/strokeCompose';
 import type { StrokePosition } from '@opengpex/editor/core/types/models';
+import { engineContentCache } from '@opengpex/editor/core/engine/gpu/resources/EngineContentCache';
 import { acquireEffectOutputTransient, type FilterPassContext } from './FilterPass';
 
 interface TexelRect {
@@ -64,60 +65,9 @@ interface EdtCacheEntry {
   gpuTexture: GPUTexture;
 }
 
-class EdtCache {
-  private device: GPUDevice | null = null;
-  private readonly entries = new Map<string, EdtCacheEntry>();
-
-  private ensureDevice(device: GPUDevice): void {
-    if (this.device !== device) {
-      this.clear();
-      this.device = device;
-    }
-  }
-
-  get(device: GPUDevice, cacheId: string, key: string): LayerTexture | undefined {
-    this.ensureDevice(device);
-    const entry = this.entries.get(cacheId);
-    return entry && entry.key === key ? entry.texture : undefined;
-  }
-
-  set(device: GPUDevice, cacheId: string, key: string, gpuTexture: GPUTexture, width: number, height: number): LayerTexture {
-    this.ensureDevice(device);
-    const prev = this.entries.get(cacheId);
-    if (prev) prev.gpuTexture.destroy();
-    const wrapped = new LayerTexture({
-      texture: gpuTexture,
-      width,
-      height,
-      allocatedWidth: width,
-      allocatedHeight: height,
-      format: 'rgba16uint',
-    });
-    this.entries.set(cacheId, { key, texture: wrapped, gpuTexture });
-    return wrapped;
-  }
-
-  sweep(activeIds: ReadonlySet<string>): void {
-    for (const [id, entry] of this.entries) {
-      if (!activeIds.has(id)) {
-        entry.gpuTexture.destroy();
-        this.entries.delete(id);
-      }
-    }
-  }
-
-  clear(): void {
-    for (const entry of this.entries.values()) entry.gpuTexture.destroy();
-    this.entries.clear();
-  }
-}
-
-const edtCache = new EdtCache();
-
-/** Release all owned dual-field EDT textures (wire into `WebGpuEngine.destroy()`). */
-export function clearEdtCache(): void {
-  edtCache.clear();
-}
+const edtCache = engineContentCache.namespace<EdtCacheEntry>('edt-seed', {
+  dispose: (entry) => entry.gpuTexture.destroy(),
+});
 
 /** Sweep cached EDT textures for layers no longer carrying effects. */
 export function sweepEdtCache(activeKeys: ReadonlySet<string>): void {
@@ -153,7 +103,8 @@ export class EffectStrokePass {
       ? `${p.edtAlphaKey}|win:${p.windowTexel.x},${p.windowTexel.y},${width},${height}|vis:${visKey}`
       : undefined;
 
-    let edtResult = fullEdtKey ? edtCache.get(ctx.device, cacheId, fullEdtKey) : undefined;
+    const cachedEdt = fullEdtKey ? edtCache.get(ctx.device, cacheId) : undefined;
+    let edtResult = cachedEdt && cachedEdt.key === fullEdtKey ? cachedEdt.texture : undefined;
     if (!edtResult) {
       const steps = jfaStepSequence(width, height);
       const pingGpu = ctx.device.createTexture({
@@ -248,7 +199,16 @@ export class EffectStrokePass {
       // winning buffer in EdtCache when a key is provided (else scratch both).
       ctx.scratch.push(dstGpu);
       if (fullEdtKey) {
-        edtResult = edtCache.set(ctx.device, cacheId, fullEdtKey, srcGpu, width, height);
+        const wrapped = new LayerTexture({
+          texture: srcGpu,
+          width,
+          height,
+          allocatedWidth: width,
+          allocatedHeight: height,
+          format: 'rgba16uint',
+        });
+        edtCache.set(ctx.device, cacheId, { key: fullEdtKey, texture: wrapped, gpuTexture: srcGpu });
+        edtResult = wrapped;
       } else {
         ctx.scratch.push(srcGpu);
         edtResult = srcTex;

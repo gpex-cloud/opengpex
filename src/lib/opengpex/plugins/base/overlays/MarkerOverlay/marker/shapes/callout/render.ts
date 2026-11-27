@@ -23,7 +23,7 @@ import type { CalloutMarkerData } from '../../types';
 import type { MarkerBounding, SdfGeometry } from '../../types';
 import { clampRadius, svgFillAttrs, svgStroke } from '../shared';
 import { solverRingSvg, fillOverlay } from '../polygon-family/geometry';
-import { sdfSolverOutline } from '@opengpex/editor/core/engine/pipeline/scene/sdfPolygonSolver';
+import { sdfSolverOutline } from '@opengpex/editor/core/engine/pipeline/graph/build/vectorRenderers/sdfPolygonSolver';
 import { calloutTailHalfBase } from './geometry';
 
 /** `callout`: [body.x, body.y, body.w, body.h, tip.x, tip.y, cornerRadius, tailHalfBase]. */

@@ -62,10 +62,10 @@
  * integral at every render density. Contract: a `null` return means "no
  * solver outline; use the legacy smoothstep path".
  *
- * @module core/engine/pipeline/scene/sdfPolygonSolver
+ * @module core/engine/pipeline/graph/build/vectorRenderers/sdfPolygonSolver
  */
 
-import type { SdfPrimitive } from './Scene';
+import type { SdfPrimitive } from '@opengpex/editor/core/engine/pipeline/scene/Scene';
 
 /**
  * Vertex budget per ring. Matches the WGSL uniform's vertex slots exactly

@@ -143,11 +143,6 @@ export function sweepFrozenSelectionNamespace(seen: Set<string>, prefix: string)
   confinementCache.sweep(seen, prefix);
 }
 
-/** Teardown seam for the frozen-selection coverage cache — wire alongside clearVmaskCache(). */
-export function clearConfinementCoverageCache(): void {
-  confinementCache.clear();
-}
-
 /**
  * Compact content token for one stroke's frozen selection rings — a stable
  * digest over the ring geometry (count, per-ring length, first/last point and

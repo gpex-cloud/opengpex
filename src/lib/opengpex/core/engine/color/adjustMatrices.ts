@@ -22,7 +22,7 @@
  *
  * SINGLE SOURCE OF the saturation / hueRotate 3x3 matrices, their Rec.709
  * luma weights and the row-major multiply. The GPU packer
- * (`pipeline/scene/adjustUniform.ts`) fuses these into the `color_matrix`
+ * (`pipeline/graph/support/adjustUniform.ts`) fuses these into the `color_matrix`
  * uniform that `adjust.wgsl` samples; CPU-side graders that must mirror the
  * GPU's colour-matrix arm (e.g. the filter-preset thumbnail renderer) import
  * the SAME functions, so the two stay mathematically identical by

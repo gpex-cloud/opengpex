@@ -21,10 +21,9 @@
  * PipelineCache.ts — Pipeline and shared GPU resource cache.
  *
  * Manages:
- *   • Compilation and memoization of `GPURenderPipeline` by (shader, blend, format);
- *   • The shared unit quad vertex buffer (6 vertices, 2 triangles);
- *   • The shared bilinear clamp sampler;
- *   • The shared 1×1 solid-white dummy mask texture for unmasked layers.
+ *   • Compilation and memoization of `GPURenderPipeline` and `GPUComputePipeline`;
+ *   • Unified caching of WGSL shader modules, bind group layouts, and pipeline layouts;
+ *   • Shared unit quad vertex buffer, samplers, and dummy/identity textures.
  *
  * @module core/gpu/resources/PipelineCache
  */
@@ -32,11 +31,16 @@
 import type { LayerBlendMode } from '@opengpex/editor/core/types';
 import { LayerTexture } from './LayerTexture';
 import { LAYER_WGSL, LAYER_UNIFORM_BUFFER_SIZE } from '../shaders/layer';
-import { BLEND_WGSL, isHardwareBlendable } from '../shaders/blend';
+import { BLEND_WGSL, BLEND_UNIFORM_BUFFER_SIZE, isHardwareBlendable } from '../shaders/blend';
 import { VIEW_WGSL, VIEW_WGSL_HDR, VIEW_UNIFORM_BUFFER_SIZE } from '../shaders/view';
 import { SDF_WGSL, SDF_UNIFORM_BUFFER_SIZE } from '../shaders/sdf';
 import { FACE_WGSL, FACE_UNIFORM_BUFFER_SIZE } from '../shaders/face';
-import { STROKE_EXTRUDE_WGSL, STROKE_PAINT_WGSL, STROKE_UNIFORM_BUFFER_SIZE, STROKE_VERTEX_STRIDE } from '../shaders/stroke';
+import {
+  STROKE_EXTRUDE_WGSL,
+  STROKE_PAINT_WGSL,
+  STROKE_UNIFORM_BUFFER_SIZE,
+  STROKE_VERTEX_STRIDE,
+} from '../shaders/stroke';
 import { TEXT_PAINT_WGSL, TEXT_UNIFORM_BUFFER_SIZE, TEXT_INSTANCE_STRIDE } from '../shaders/text';
 import { ADJUST_UNIFORM_BUFFER_SIZE } from '../shaders/adjust';
 import { ADJUST_PRE_WGSL, ADJUST_PRE_UNIFORM_BUFFER_SIZE } from '../shaders/adjustPre';
@@ -83,7 +87,6 @@ import {
 } from '../shaders/effectInnerCompose';
 import { VMASK_WGSL, VMASK_UNIFORM_SIZE } from '../shaders/vmask';
 import { BMASK_COMBINE_WGSL, BMASK_COMBINE_UNIFORM_SIZE } from '../shaders/bmaskCombine';
-import { BLEND_UNIFORM_BUFFER_SIZE } from '../shaders/blend';
 import { GPUBufferUsage, GPUTextureUsage, GPUShaderStage, GPUColorWrite } from '../constants';
 
 /** Unit quad vertices: 6 vertices, 2 triangles from (0,0) to (1,1). */
@@ -96,6 +99,68 @@ const UNIT_QUAD_DATA = new Float32Array([
   1, 1, 1, 1,
   0, 1, 0, 1,
 ]);
+
+/** Shared vertex layout for full-quad render passes (pos @0, uv @8, stride 16). */
+const UNIT_QUAD_VERTEX_BUFFERS: GPUVertexBufferLayout[] = [
+  {
+    arrayStride: 16,
+    stepMode: 'vertex',
+    attributes: [
+      { format: 'float32x2', offset: 0, shaderLocation: 0 },
+      { format: 'float32x2', offset: 8, shaderLocation: 1 },
+    ],
+  },
+];
+
+/** Vertex layout for vector face fill/edge passes: [x, y, dist, kind] stride 16. */
+const FACE_VERTEX_BUFFERS: GPUVertexBufferLayout[] = [
+  {
+    arrayStride: 16,
+    stepMode: 'vertex',
+    attributes: [
+      { format: 'float32x2', offset: 0, shaderLocation: 0 },
+      { format: 'float32', offset: 8, shaderLocation: 1 },
+      { format: 'float32', offset: 12, shaderLocation: 2 },
+    ],
+  },
+];
+
+/** Vertex layout for compute-extruded stroke ribbons (stride 40). */
+const STROKE_VERTEX_BUFFERS: GPUVertexBufferLayout[] = [
+  {
+    arrayStride: STROKE_VERTEX_STRIDE,
+    stepMode: 'vertex',
+    attributes: [
+      { format: 'float32x2', offset: 0, shaderLocation: 0 },
+      { format: 'float32x2', offset: 8, shaderLocation: 1 },
+      { format: 'float32x2', offset: 16, shaderLocation: 2 },
+      { format: 'float32x2', offset: 24, shaderLocation: 3 },
+      { format: 'float32x2', offset: 32, shaderLocation: 4 },
+    ],
+  },
+];
+
+/** Vertex layout for instanced glyph quads over a coverage atlas. */
+const TEXT_VERTEX_BUFFERS: GPUVertexBufferLayout[] = [
+  {
+    arrayStride: 16,
+    stepMode: 'vertex',
+    attributes: [
+      { format: 'float32x2', offset: 0, shaderLocation: 0 },
+      { format: 'float32x2', offset: 8, shaderLocation: 1 },
+    ],
+  },
+  {
+    arrayStride: TEXT_INSTANCE_STRIDE,
+    stepMode: 'instance',
+    attributes: [
+      { format: 'float32x2', offset: 0, shaderLocation: 2 },
+      { format: 'float32x2', offset: 8, shaderLocation: 3 },
+      { format: 'float32x2', offset: 16, shaderLocation: 4 },
+      { format: 'float32x2', offset: 24, shaderLocation: 5 },
+    ],
+  },
+];
 
 /** Standard pre-multiplied alpha 'over' blend state. */
 export const PREMULTIPLIED_OVER_BLEND: GPUBlendState = {
@@ -112,9 +177,8 @@ export const PREMULTIPLIED_OVER_BLEND: GPUBlendState = {
 };
 
 /**
- * Straight-alpha 'over' blend state: for targets holding NON-premultiplied
- * color (the vector face renderer's output contract). src.rgb is weighted by
- * src.a explicitly; the destination stays in straight form throughout.
+ * Straight-alpha 'over' blend state: for targets holding non-premultiplied
+ * color (the vector face renderer's output contract).
  */
 export const STRAIGHT_OVER_BLEND: GPUBlendState = {
   color: {
@@ -158,12 +222,8 @@ export const ADD_BLEND: GPUBlendState = {
 };
 
 /**
- * Coverage-UNION blend state (`max`): dst = max(src, dst) per channel. For a
- * SINGLE-COLOUR stroke ribbon whose per-segment quads overlap on the inner side of
- * every turn, `max` merges their soft-edge coverage into the union — a later segment's
- * low-coverage AA edge can NEVER punch a hole through a solid pixel a neighbour already
- * wrote (which REPLACE / 'over' both do), and equal-colour overlaps do not double-darken.
- * srcFactor/dstFactor are ignored under `operation: 'max'` but must stay valid.
+ * Coverage-union blend state (`max`): dst = max(src, dst) per channel.
+ * Merges overlapping single-color AA rims without holes or double-darkening.
  */
 export const MAX_BLEND: GPUBlendState = {
   color: {
@@ -178,28 +238,17 @@ export const MAX_BLEND: GPUBlendState = {
   },
 };
 
+type ComputeInputSlot = 'sample' | 'float' | 'unfilterable-float' | 'uint' | 'sampler';
+
 export class PipelineCache {
   private readonly pipelines = new Map<string, GPURenderPipeline>();
-  private layerShaderModule: GPUShaderModule | null = null;
-  private layerBindGroupLayout: GPUBindGroupLayout | null = null;
-  private layerPipelineLayout: GPUPipelineLayout | null = null;
+  private readonly computePipelines = new Map<string, GPUComputePipeline>();
+  private readonly shaderModules = new Map<string, GPUShaderModule>();
+  private readonly bindGroupLayouts = new Map<string, GPUBindGroupLayout>();
+  private readonly pipelineLayouts = new Map<string, GPUPipelineLayout>();
 
-  private blendShaderModule: GPUShaderModule | null = null;
-  private blendBindGroupLayout: GPUBindGroupLayout | null = null;
-  private blendPipelineLayout: GPUPipelineLayout | null = null;
-
-  private viewShaderModule: GPUShaderModule | null = null;
-  private viewHdrShaderModule: GPUShaderModule | null = null;
-  private viewBindGroupLayout: GPUBindGroupLayout | null = null;
-  private viewPipelineLayout: GPUPipelineLayout | null = null;
-  private gainDummyView: GPUTextureView | null = null;
-
-  /** Group-1 adjustment bind group layout (shared by layer + blend pipelines). */
-  private adjustBindGroupLayout: GPUBindGroupLayout | null = null;
-  /** Persistent identity (flags=0) AdjustUniforms buffer + bind group. */
   private defaultAdjustBuffer: GPUBuffer | null = null;
   private defaultAdjustBindGroup: GPUBindGroup | null = null;
-  /** Shared clamp sampler + 1×1 identity 1D LUT for adjust group-1 bindings. */
   private lutSampler: GPUSampler | null = null;
   private identityLutTexture: GPUTexture | null = null;
   private identityLutView: GPUTextureView | null = null;
@@ -213,131 +262,195 @@ export class PipelineCache {
   private nearestSampler: GPUSampler | null = null;
   private defaultMaskTexture: GPUTexture | null = null;
   private defaultMaskView: GPUTextureView | null = null;
-  /** Shared 1×1 white LayerTexture — the declarative solid source's binding formality. */
   private defaultSourceTexture: LayerTexture | null = null;
-
-  /** Adjust-bake (pre-filter) render pipeline + its group-0 layout. */
-  private adjustPreShaderModule: GPUShaderModule | null = null;
-  private adjustPreBindGroupLayout: GPUBindGroupLayout | null = null;
-  private adjustPrePipelineLayout: GPUPipelineLayout | null = null;
-
-  /** Vector spine SDF strategy: zero-texture procedural pipeline (`shaders/sdf.ts`). */
-  private sdfShaderModule: GPUShaderModule | null = null;
-  private sdfBindGroupLayout: GPUBindGroupLayout | null = null;
-  private sdfPipelineLayout: GPUPipelineLayout | null = null;
-
-  /**
-   * Vector spine FACE strategy (`shaders/face.ts`): one WGSL module, TWO render
-   * pipelines differing only in blend — fill (REPLACE; normalized interior
-   * triangles never overlap) and edge (MAX; boundary quads overlap at joins,
-   * per-channel max = coverage union, same white-speckle fix as the stroke
-   * paint pipeline). Both are keyed by target format in `this.pipelines`.
-   */
-  private faceShaderModule: GPUShaderModule | null = null;
-  private faceBindGroupLayout: GPUBindGroupLayout | null = null;
-  private facePipelineLayout: GPUPipelineLayout | null = null;
-
-  /**
-   * Vector spine STROKE strategy: compute-extrude + paint pipelines (`shaders/stroke.ts`).
-   * The compute (`cs_extrude`) and render (`vs/fs_paint`) stages are DISTINCT WGSL
-   * modules — a single module cannot share `@group(0) @binding(0)` across the compute
-   * storage bindings and the paint uniform. The extrude pipeline is format-agnostic
-   * (writes a storage buffer), so it is a single cached field; the paint pipeline is
-   * keyed by target format in `this.pipelines` alongside the other render pipelines.
-   */
-  private strokeExtrudeShaderModule: GPUShaderModule | null = null;
-  private strokeExtrudeBindGroupLayout: GPUBindGroupLayout | null = null;
-  private strokeExtrudePipelineLayout: GPUPipelineLayout | null = null;
-  private strokeExtrudePipeline: GPUComputePipeline | null = null;
-  private strokePaintShaderModule: GPUShaderModule | null = null;
-  private strokeRenderBindGroupLayout: GPUBindGroupLayout | null = null;
-  private strokeRenderPipelineLayout: GPUPipelineLayout | null = null;
-  private strokeConfinementBindGroupLayout: GPUBindGroupLayout | null = null;
+  private gainDummyTexture: GPUTexture | null = null;
+  private gainDummyView: GPUTextureView | null = null;
   private strokeConfinementDummy: { texture: GPUTexture; view: GPUTextureView; sampler: GPUSampler } | null = null;
-
-  /**
-   * Vector spine TEXT strategy: instanced glyph quads over a grayscale coverage
-   * atlas (`shaders/text.ts`). Render-only (no compute prepass — the CPU layout
-   * and atlas rasterization happen outside the GPU encoder), format-keyed like
-   * the other render pipelines.
-   */
-  private textPaintShaderModule: GPUShaderModule | null = null;
-  private textBindGroupLayout: GPUBindGroupLayout | null = null;
-  private textPipelineLayout: GPUPipelineLayout | null = null;
-
-  /**
-   * Vmask polygon fill COMPUTE pipeline (even-odd winding + SDF feather,
-   * writes an `rgba8unorm` storage texture). The output format is fixed, so like
-   * the stroke-extrude pipeline it is a single cached field, not format-keyed.
-   */
-  private vmaskShaderModule: GPUShaderModule | null = null;
-  private vmaskBindGroupLayout: GPUBindGroupLayout | null = null;
-  private vmaskPipelineLayout: GPUPipelineLayout | null = null;
-  private vmaskPipeline: GPUComputePipeline | null = null;
-  private bmaskCombineShaderModule: GPUShaderModule | null = null;
-  private bmaskCombineBindGroupLayout: GPUBindGroupLayout | null = null;
-  private bmaskCombinePipelineLayout: GPUPipelineLayout | null = null;
-  private bmaskCombinePipeline: GPUComputePipeline | null = null;
-
-  /** Separable-Gaussian COMPUTE pipelines, keyed by storage format. */
-  private readonly computePipelines = new Map<string, GPUComputePipeline>();
-  private readonly gaussianShaderModules = new Map<string, GPUShaderModule>();
-  private readonly filterBindGroupLayouts = new Map<string, GPUBindGroupLayout>();
-  private readonly filterPipelineLayouts = new Map<string, GPUBindGroupLayout>();
-  private readonly featherCombineBindGroupLayouts = new Map<string, GPUBindGroupLayout>();
-  private readonly featherCombinePipelineLayouts = new Map<string, GPUBindGroupLayout>();
-  private readonly featherCombineShaderModules = new Map<string, GPUShaderModule>();
-  private readonly edtBindGroupLayouts = new Map<string, GPUBindGroupLayout>();
-  private readonly strokeComposeBindGroupLayouts = new Map<string, GPUBindGroupLayout>();
-  private readonly effectMaskBakeBindGroupLayouts = new Map<string, GPUBindGroupLayout>();
-  private readonly effectBindGroupLayouts = new Map<string, GPUBindGroupLayout>();
-  /**
-   * Shared WGSL module cache for the generic simple-compute-pipeline template
-   * (`getOrCreateComputePipeline`) — keyed by caller-chosen module keys so
-   * format-variant modules of one shader family still compile once each
-   * without every family owning its own private map.
-   */
-  private readonly simpleComputeShaderModules = new Map<string, GPUShaderModule>();
 
   constructor(readonly device: GPUDevice) {}
 
+  protected getOrCreateShaderModule(key: string, label: string, code: string): GPUShaderModule {
+    const cached = this.shaderModules.get(key);
+    if (cached) return cached;
+    const mod = this.device.createShaderModule({ code, label });
+    this.shaderModules.set(key, mod);
+    return mod;
+  }
+
+  protected getOrCreateBindGroupLayout(
+    key: string,
+    label: string,
+    entries: GPUBindGroupLayoutEntry[],
+  ): GPUBindGroupLayout {
+    const cached = this.bindGroupLayouts.get(key);
+    if (cached) return cached;
+    const layout = this.device.createBindGroupLayout({ label, entries });
+    this.bindGroupLayouts.set(key, layout);
+    return layout;
+  }
+
+  protected getOrCreatePipelineLayout(
+    key: string,
+    label: string,
+    bindGroupLayouts: GPUBindGroupLayout[],
+  ): GPUPipelineLayout {
+    const cached = this.pipelineLayouts.get(key);
+    if (cached) return cached;
+    const layout = this.device.createPipelineLayout({ label, bindGroupLayouts });
+    this.pipelineLayouts.set(key, layout);
+    return layout;
+  }
+
   /**
-   * Generic acquire-or-build template for SIMPLE one-bind-group COMPUTE
-   * pipelines (uniform + sampled/storage textures): pipeline, layout and WGSL
-   * module are each cached under explicit keys, so a new pointwise/tiled
-   * compute pass declares a spec instead of hand-copying the Map + layout +
-   * shaderModule + pipeline boilerplate. Families with structurally different
-   * needs (multi-layout layouts, render pipelines) stay on their own getters.
+   * Acquire or build a compute bind group layout following the standard
+   * dynamic-uniform (binding 0) + input slots + write-only storageTexture pattern.
+   */
+  protected getOrCreateComputeLayout(
+    key: string,
+    label: string,
+    spec: {
+      readonly uniformSize: number;
+      readonly storageFormat: 'rgba16float' | 'rgba32float';
+      readonly storageTextureFormat?: GPUTextureFormat;
+      readonly inputs: readonly ComputeInputSlot[];
+    },
+  ): GPUBindGroupLayout {
+    const cached = this.bindGroupLayouts.get(key);
+    if (cached) return cached;
+
+    const workingSampleType: 'float' | 'unfilterable-float' =
+      spec.storageFormat === 'rgba32float' ? 'unfilterable-float' : 'float';
+
+    const entries: GPUBindGroupLayoutEntry[] = [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: {
+          type: 'uniform',
+          hasDynamicOffset: true,
+          minBindingSize: spec.uniformSize,
+        },
+      },
+    ];
+
+    let binding = 1;
+    for (const slot of spec.inputs) {
+      if (slot === 'sampler') {
+        entries.push({
+          binding: binding++,
+          visibility: GPUShaderStage.COMPUTE,
+          sampler: { type: 'filtering' },
+        });
+      } else {
+        const sampleType: 'float' | 'unfilterable-float' | 'uint' =
+          slot === 'sample' ? workingSampleType : slot;
+        entries.push({
+          binding: binding++,
+          visibility: GPUShaderStage.COMPUTE,
+          texture: { sampleType },
+        });
+      }
+    }
+
+    entries.push({
+      binding,
+      visibility: GPUShaderStage.COMPUTE,
+      storageTexture: {
+        access: 'write-only',
+        format: spec.storageTextureFormat ?? spec.storageFormat,
+      },
+    });
+
+    return this.getOrCreateBindGroupLayout(key, label, entries);
+  }
+
+  /**
+   * Generic acquire-or-build template for one-bind-group COMPUTE pipelines:
+   * pipeline, layout, and WGSL module are each cached under explicit keys.
    */
   protected getOrCreateComputePipeline(spec: {
-    /** Pipeline + layout cache key (must be unique per variant). */
     readonly cacheKey: string;
-    /** Debug label for the pipeline and its layout. */
     readonly label: string;
-    /** WGSL module cache key — one module per distinct compiled source. */
     readonly moduleKey: string;
     readonly wgsl: string;
     readonly entryPoint: string;
     readonly bindGroupLayout: GPUBindGroupLayout;
+    readonly pipelineLayout?: GPUPipelineLayout;
   }): GPUComputePipeline {
     const cached = this.computePipelines.get(spec.cacheKey);
     if (cached) return cached;
-    let shaderModule = this.simpleComputeShaderModules.get(spec.moduleKey);
-    if (!shaderModule) {
-      shaderModule = this.device.createShaderModule({ code: spec.wgsl, label: `${spec.label} WGSL Module` });
-      this.simpleComputeShaderModules.set(spec.moduleKey, shaderModule);
-    }
+
+    const shaderModule = this.getOrCreateShaderModule(
+      spec.moduleKey,
+      `${spec.label} WGSL Module`,
+      spec.wgsl,
+    );
+    const layout =
+      spec.pipelineLayout ??
+      this.getOrCreatePipelineLayout(
+        `compute:${spec.cacheKey}`,
+        `${spec.label} Pipeline Layout`,
+        [spec.bindGroupLayout],
+      );
+
     const pipeline = this.device.createComputePipeline({
       label: `${spec.label} Compute Pipeline`,
-      layout: this.device.createPipelineLayout({
-        bindGroupLayouts: [spec.bindGroupLayout],
-        label: `${spec.label} Pipeline Layout`,
-      }),
+      layout,
       compute: { module: shaderModule, entryPoint: spec.entryPoint },
     });
     this.computePipelines.set(spec.cacheKey, pipeline);
     return pipeline;
   }
+
+  /**
+   * Generic acquire-or-build template for single-target RENDER pipelines.
+   * Defaults to the shared unit quad vertex layout and triangle-list topology.
+   */
+  protected getOrCreateRenderPipeline(spec: {
+    readonly cacheKey: string;
+    readonly label: string;
+    readonly layout: GPUPipelineLayout;
+    readonly module: GPUShaderModule;
+    readonly vertexEntry: string;
+    readonly fragmentEntry: string;
+    readonly targetFormat: GPUTextureFormat;
+    readonly blend: GPUBlendState;
+    readonly buffers?: GPUVertexBufferLayout[];
+  }): GPURenderPipeline {
+    const cached = this.pipelines.get(spec.cacheKey);
+    if (cached) return cached;
+
+    const pipeline = this.device.createRenderPipeline({
+      label: spec.label,
+      layout: spec.layout,
+      vertex: {
+        module: spec.module,
+        entryPoint: spec.vertexEntry,
+        buffers: spec.buffers ?? UNIT_QUAD_VERTEX_BUFFERS,
+      },
+      fragment: {
+        module: spec.module,
+        entryPoint: spec.fragmentEntry,
+        targets: [
+          {
+            format: spec.targetFormat,
+            blend: spec.blend,
+            writeMask: GPUColorWrite.ALL,
+          },
+        ],
+      },
+      primitive: {
+        topology: 'triangle-list',
+        cullMode: 'none',
+      },
+    });
+    this.pipelines.set(spec.cacheKey, pipeline);
+    return pipeline;
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Shared primitive buffers, samplers, and dummy/identity textures
+  // ──────────────────────────────────────────────────────────
 
   /**
    * Shared unit quad vertex buffer: (0,0) to (1,1).
@@ -356,9 +469,7 @@ export class PipelineCache {
     return buffer;
   }
 
-  /**
-   * Shared bilinear clamp-to-edge sampler.
-   */
+  /** Shared bilinear clamp-to-edge sampler. */
   getLinearSampler(): GPUSampler {
     if (this.linearSampler) return this.linearSampler;
 
@@ -372,15 +483,7 @@ export class PipelineCache {
     return this.linearSampler;
   }
 
-  /**
-   * Shared nearest-neighbour clamp-to-edge sampler.
-   *
-   * A pixel editor must show TRUE pixels when magnifying: at zoom ≥ 100% one
-   * source texel maps to ≥1 screen pixel, and linear filtering would blur the
-   * hard pixel edges. This matches OpenGPEX v1 (`imageSmoothingEnabled=false`),
-   * GIMP (`FILTER_AUTO` → nearest when scale≥1) and Photoshop. Callers choose
-   * nearest vs linear per-layer via `getSamplerForScale`.
-   */
+  /** Shared nearest-neighbour clamp-to-edge sampler. */
   getNearestSampler(): GPUSampler {
     if (this.nearestSampler) return this.nearestSampler;
 
@@ -394,20 +497,12 @@ export class PipelineCache {
     return this.nearestSampler;
   }
 
-  /**
-   * GIMP `FILTER_AUTO` rule: magnify (screen-texels-per-source-texel ≥ 1) →
-   * nearest (crisp pixels); minify (< 1) → linear (avoids dropped texels /
-   * moiré / shimmer). `scale` is the effective on-screen scale of the sampled
-   * texture (see `effectiveScale`).
-   */
+  /** Magnify (scale >= 1) selects nearest; minify (scale < 1) selects linear. */
   getSamplerForScale(scale: number): GPUSampler {
     return scale >= 1 ? this.getNearestSampler() : this.getLinearSampler();
   }
 
-  /**
-   * 1×1 dummy mask texture view for layers without an explicit mask.
-   * Ensures binding 3 is always valid.
-   */
+  /** 1x1 opaque-white dummy mask view for layers without an explicit mask. */
   getDefaultMaskView(): GPUTextureView {
     if (this.defaultMaskView) return this.defaultMaskView;
 
@@ -417,16 +512,9 @@ export class PipelineCache {
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
       label: 'Default 1x1 Dummy Mask',
     });
-
-    // Initialize to opaque white (a=255). The layer/blend shaders only
-    // sample the mask when `flags & has_mask`, but an uninitialized texture is
-    // undefined per WebGPU spec — writing white makes an accidental sample a
-    // safe no-op (mask_alpha=1 keeps the source fully visible) instead of
-    // relying on driver-dependent behavior.
-    const whitePixel = new Uint8Array([255, 255, 255, 255]);
     this.device.queue.writeTexture(
       { texture },
-      whitePixel,
+      new Uint8Array([255, 255, 255, 255]),
       { bytesPerRow: 4, rowsPerImage: 1 },
       [1, 1, 1],
     );
@@ -436,16 +524,7 @@ export class PipelineCache {
     return this.defaultMaskView;
   }
 
-  /**
-   * Shared 1×1 opaque-white source texture — the DECLARATIVE SOLID source's
-   * binding formality. Every layer slot (binding 2 in the layer/blend layouts,
-   * the AdjustPre bake source) demands a bound, filterable `texture_2d<f32>`;
-   * a solid layer never samples content (its colour rides the uniform tail
-   * vec4 behind flag bit 3), so this stretched constant satisfies the layout
-   * and its texel is discarded in-shader. Wrapped as a {@link LayerTexture}
-   * (exact 1×1 ⇒ maxU = maxV = 1) because the composite guards and
-   * `prepareFilteredSources` traffic in LayerTextures, not raw views.
-   */
+  /** Shared 1x1 opaque-white source texture for declarative solid layers. */
   getSolidPixelTexture(): LayerTexture {
     if (this.defaultSourceTexture) return this.defaultSourceTexture;
     const texture = this.device.createTexture({
@@ -471,132 +550,32 @@ export class PipelineCache {
     return this.defaultSourceTexture;
   }
 
-  getLayerShaderModule(): GPUShaderModule {
-    if (this.layerShaderModule) return this.layerShaderModule;
-    this.layerShaderModule = this.device.createShaderModule({
-      code: LAYER_WGSL,
-      label: 'Layer WGSL Module',
-    });
-    return this.layerShaderModule;
-  }
+  // ──────────────────────────────────────────────────────────
+  // Group-1 adjustment layout & identity bindings
+  // ──────────────────────────────────────────────────────────
 
-  getLayerBindGroupLayout(): GPUBindGroupLayout {
-    if (this.layerBindGroupLayout) return this.layerBindGroupLayout;
-
-    this.layerBindGroupLayout = this.device.createBindGroupLayout({
-      label: 'Layer Bind Group Layout',
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
-          buffer: {
-            type: 'uniform',
-            hasDynamicOffset: true,
-            minBindingSize: LAYER_UNIFORM_BUFFER_SIZE,
-          },
-        },
-        {
-          binding: 1,
-          visibility: GPUShaderStage.FRAGMENT,
-          sampler: { type: 'filtering' },
-        },
-        {
-          binding: 2,
-          visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float' },
-        },
-        {
-          binding: 3,
-          visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float' },
-        },
-        {
-          // Vmask texture (polygon-baked coverage). Analytic / no-vmask
-          // layers bind the 1×1 default white view so the slot is always valid.
-          binding: 4,
-          visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float' },
-        },
-        {
-          // Clip base coverage (Photoshop-style clipping mask). Unclipped
-          // layers bind the 1×1 default white view; the shader reads it only
-          // behind flags bit 1 (CLIP).
-          binding: 5,
-          visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float' },
-        },
-        // The bmask stack slots (retired bindings 5..7) are gone: the bmask
-        // combine pass bakes ALL enabled records into ONE texture bound at
-        // slot 3, so the layer pipeline needs no per-record slots. The grade
-        // coverage lives in the group-1 chain group (adjust.ts), not here.
-      ],
-    });
-    return this.layerBindGroupLayout;
-  }
-
-  /**
-   * Group-1 grade-chain bind group layout. Shared by the layer, blend and
-   * adjust-pre pipelines: binding 0 is the `AdjustChain` buffer (dynamic
-   * offset, FRAGMENT-only), 1 the LUT/coverage sampler, 2 the LUT atlas,
-   * 3 the coverage array, 4 the 3D LUT.
-   */
   getAdjustBindGroupLayout(): GPUBindGroupLayout {
-    if (this.adjustBindGroupLayout) return this.adjustBindGroupLayout;
-
-    this.adjustBindGroupLayout = this.device.createBindGroupLayout({
-      label: 'Adjust Bind Group Layout',
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.FRAGMENT,
-          buffer: {
-            type: 'uniform',
-            hasDynamicOffset: true,
-            minBindingSize: ADJUST_UNIFORM_BUFFER_SIZE,
-          },
+    return this.getOrCreateBindGroupLayout('adjust', 'Adjust Bind Group Layout', [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.FRAGMENT,
+        buffer: {
+          type: 'uniform',
+          hasDynamicOffset: true,
+          minBindingSize: ADJUST_UNIFORM_BUFFER_SIZE,
         },
-        {
-          binding: 1,
-          visibility: GPUShaderStage.FRAGMENT,
-          sampler: { type: 'filtering' },
-        },
-        {
-          // Per-layer 1D-LUT ATLAS (texture_2d, row = stage table).
-          binding: 2,
-          visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float', viewDimension: '2d' },
-        },
-        {
-          // Per-layer coverage ARRAY (one array layer per confined stage).
-          binding: 3,
-          visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float', viewDimension: '2d-array' },
-        },
-        {
-          // 3D `.cube` LUT. `sampleType: 'float'` + the shared filtering
-          // sampler is what gives hardware trilinear interpolation; the format is
-          // always a FILTERABLE float (rgba16float, or rgba32float only when
-          // `float32-filterable` is granted — see lut3dPlan.selectLut3dFormat).
-          binding: 4,
-          visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float', viewDimension: '3d' },
-        },
-            ],
-    });
-    return this.adjustBindGroupLayout;
+      },
+      { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+      { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '2d' } },
+      { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '2d-array' } },
+      { binding: 4, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float', viewDimension: '3d' } },
+    ]);
   }
 
-  /**
-   * Persistent identity adjustment bind group (flags = 0). Bound at group 1 for
-   * every layer that has NO grade stage, so `apply_adjust_chain`
-   * returns its input bit-exactly. Uses a NON-dynamic-offset layout variant is
-   * unnecessary — the buffer is exactly `ADJUST_UNIFORM_BUFFER_SIZE`, bound at
-   * offset 0 via a dynamic offset of 0 by the passes.
-   */
+  /** Persistent identity adjustment bind group (stage_count = 0). */
   getDefaultAdjustBindGroup(): GPUBindGroup {
     if (this.defaultAdjustBindGroup) return this.defaultAdjustBindGroup;
 
-    // A zero-filled buffer is exactly the identity: stage_count = 0.
     this.defaultAdjustBuffer = this.device.createBuffer({
       size: ADJUST_UNIFORM_BUFFER_SIZE,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
@@ -625,11 +604,6 @@ export class PipelineCache {
     return this.defaultAdjustBindGroup;
   }
 
-  /**
-   * Shared LUT sampler for the adjust group-1 1D-LUT bindings: linear filtering
-   * (hardware interpolation between LUT entries) with clamp-to-edge (out-of-range
-   * inputs saturate to the endpoint entries).
-   */
   getLutSampler(): GPUSampler {
     if (this.lutSampler) return this.lutSampler;
     this.lutSampler = this.device.createSampler({
@@ -641,12 +615,6 @@ export class PipelineCache {
     return this.lutSampler;
   }
 
-  /**
-   * A 1×1 placeholder LUT atlas bound at the atlas slot for layers that sample
-   * no table. Its value is irrelevant when the table flags are off — the
-   * shader never samples it — but a valid texture MUST be bound to satisfy the
-   * bind group layout. rgba16float matches the resident atlas format.
-   */
   getIdentityLutView(): GPUTextureView {
     if (this.identityLutView) return this.identityLutView;
     this.identityLutTexture = this.device.createTexture({
@@ -660,12 +628,6 @@ export class PipelineCache {
     return this.identityLutView;
   }
 
-  /**
-   * A 1×1×1-layer white coverage ARRAY bound at the coverage slot for layers
-   * with no confined stage. Whole-layer stages never sample it (FULL_COVERAGE
-   * bit), but the layout needs a valid `2d-array` view; white keeps an
-   * accidental sample a safe no-op (coverage 1).
-   */
   getAdjustCoverageArrayView(): GPUTextureView {
     if (this.defaultCoverageArrayView) return this.defaultCoverageArrayView;
     const texture = this.device.createTexture({
@@ -689,17 +651,6 @@ export class PipelineCache {
     return this.defaultCoverageArrayView;
   }
 
-  /**
-   * A 1×1×1 placeholder 3D LUT bound at group-1 binding 4 for every layer WITHOUT
-   * a `.cube` grade. Its value is irrelevant — the shader only samples it when
-   * `ADJUST_FLAG_LUT3D` is set, and that bit is only set once a real LUT is
-   * confirmed resident — but a valid texture MUST be bound to satisfy the layout.
-   *
-   * `rgba16float` matches the default (and degraded) resident 3D LUT format from
-   * `lut3dPlan.selectLut3dFormat`, and is unconditionally FILTERABLE, so binding it
-   * alongside the filtering `lutSampler` can never fail validation on an adapter
-   * lacking `float32-filterable`.
-   */
   getIdentityLut3dView(): GPUTextureView {
     if (this.identityLut3dView) return this.identityLut3dView;
     this.identityLut3dTexture = this.device.createTexture({
@@ -714,311 +665,90 @@ export class PipelineCache {
   }
 
   // ──────────────────────────────────────────────────────────
-  // Adjust-bake (pre-filter) pipeline — enforces adjust→filter order
+  // Compute pipelines & layouts
   // ──────────────────────────────────────────────────────────
 
-  /**
-   * Group-0 layout for {@link ADJUST_PRE_WGSL}: uv-rect uniform + sampler + source.
-   * Group 1 is the SAME adjust layout the compositing pipelines use, so the bake
-   * and the inline path share one `apply_adjust_chain` and one bind-group shape.
-   */
-  getAdjustPreBindGroupLayout(): GPUBindGroupLayout {
-    if (this.adjustPreBindGroupLayout) return this.adjustPreBindGroupLayout;
-    this.adjustPreBindGroupLayout = this.device.createBindGroupLayout({
-      label: 'Adjust Pre Bind Group Layout',
-      entries: [
-        {
-          binding: 0,
-          // VERTEX too: vs_adjust_pre reads uv_rect to build the sampling UVs.
-          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
-          buffer: {
-            type: 'uniform',
-            hasDynamicOffset: true,
-            minBindingSize: ADJUST_PRE_UNIFORM_BUFFER_SIZE,
-          },
-        },
-        { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
-        { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
-      ],
-    });
-    return this.adjustPreBindGroupLayout;
-  }
-
-  getAdjustPrePipelineLayout(): GPUPipelineLayout {
-    if (this.adjustPrePipelineLayout) return this.adjustPrePipelineLayout;
-    this.adjustPrePipelineLayout = this.device.createPipelineLayout({
-      bindGroupLayouts: [this.getAdjustPreBindGroupLayout(), this.getAdjustBindGroupLayout()],
-      label: 'Adjust Pre Pipeline Layout',
-    });
-    return this.adjustPrePipelineLayout;
-  }
-
-  getAdjustPreShaderModule(): GPUShaderModule {
-    if (this.adjustPreShaderModule) return this.adjustPreShaderModule;
-    this.adjustPreShaderModule = this.device.createShaderModule({
-      code: ADJUST_PRE_WGSL,
-      label: 'Adjust Pre WGSL Module',
-    });
-    return this.adjustPreShaderModule;
-  }
-
-  /**
-   * 1:1 adjust-bake pipeline. REPLACE blend (the pass fully owns its target) and no
-   * mask/opacity handling — those stay with the compositing pass, so this bake is a
-   * pure colour transform of the layer's own pixels.
-   */
-  getAdjustPrePipeline(targetFormat: GPUTextureFormat = 'rgba16float'): GPURenderPipeline {
-    const key = `adjustPre:${targetFormat}`;
-    const cached = this.pipelines.get(key);
-    if (cached) return cached;
-
-    const pipeline = this.device.createRenderPipeline({
-      label: `Adjust Pre Pipeline (${targetFormat})`,
-      layout: this.getAdjustPrePipelineLayout(),
-      vertex: {
-        module: this.getAdjustPreShaderModule(),
-        entryPoint: 'vs_adjust_pre',
-        buffers: [
-          {
-            arrayStride: 16,
-            stepMode: 'vertex',
-            attributes: [
-              { format: 'float32x2', offset: 0, shaderLocation: 0 }, // pos
-              { format: 'float32x2', offset: 8, shaderLocation: 1 }, // uv
-            ],
-          },
-        ],
-      },
-      fragment: {
-        module: this.getAdjustPreShaderModule(),
-        entryPoint: 'fs_adjust_pre',
-        targets: [{ format: targetFormat, blend: REPLACE_BLEND }],
-      },
-      primitive: { topology: 'triangle-list' },
-    });
-    this.pipelines.set(key, pipeline);
-    return pipeline;
-  }
-  // ──────────────────────────────────────────────────────────
-  // Separable-Gaussian compute pipeline
-  // ──────────────────────────────────────────────────────────
-
-  /**
-   * Group-0 layout for the Gaussian compute pass: uniform + sampled source +
-   * write-only storage destination.
-   *
-   * Keyed by STORAGE FORMAT because `storageTexture.format` must match the WGSL
-   * `texture_storage_2d<F, write>` declaration exactly. The source binding uses
-   * `unfilterable-float` for the 32-bit tier (the compute kernel only ever calls
-   * `textureLoad`, never `textureSample`, so filtering is not required and demanding
-   * it would break on adapters without `float32-filterable`).
-   */
   getFilterBindGroupLayout(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUBindGroupLayout {
-    const cached = this.filterBindGroupLayouts.get(storageFormat);
-    if (cached) return cached;
-
-    const layout = this.device.createBindGroupLayout({
-      label: `Filter (Gaussian) Bind Group Layout [${storageFormat}]`,
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: {
-            type: 'uniform',
-            hasDynamicOffset: true,
-            minBindingSize: GAUSS_UNIFORM_BUFFER_SIZE,
-          },
-        },
-        {
-          binding: 1,
-          visibility: GPUShaderStage.COMPUTE,
-          // textureLoad-only access ⇒ no filtering requirement (see above).
-          texture: {
-            sampleType: storageFormat === 'rgba32float' ? 'unfilterable-float' : 'float',
-          },
-        },
-        {
-          binding: 2,
-          visibility: GPUShaderStage.COMPUTE,
-          storageTexture: { access: 'write-only', format: storageFormat },
-        },
-      ],
-    });
-    this.filterBindGroupLayouts.set(storageFormat, layout);
-    return layout;
+    return this.getOrCreateComputeLayout(
+      `filter:${storageFormat}`,
+      `Filter (Gaussian) Bind Group Layout [${storageFormat}]`,
+      { uniformSize: GAUSS_UNIFORM_BUFFER_SIZE, storageFormat, inputs: ['sample'] },
+    );
   }
 
   getFilterPipelineLayout(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUPipelineLayout {
-    const cached = this.filterPipelineLayouts.get(storageFormat);
-    if (cached) return cached;
-    const layout = this.device.createPipelineLayout({
-      bindGroupLayouts: [this.getFilterBindGroupLayout(storageFormat)],
-      label: `Filter Pipeline Layout [${storageFormat}]`,
-    });
-    this.filterPipelineLayouts.set(storageFormat, layout);
-    return layout;
+    return this.getOrCreatePipelineLayout(
+      `filter:${storageFormat}`,
+      `Filter Pipeline Layout [${storageFormat}]`,
+      [this.getFilterBindGroupLayout(storageFormat)],
+    );
   }
 
-  /**
-   * Separable-Gaussian compute pipeline. BOTH passes (horizontal and vertical) reuse
-   * this ONE pipeline — the axis is a uniform, not a pipeline variant — so a blur is
-   * two dispatches with two bind groups and zero extra shader compilation. The
-   * kernel radius is also a uniform, so changing the blur slider never recompiles.
-   */
   getGaussianPipeline(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUComputePipeline {
-    const key = `gaussian:${storageFormat}`;
-    const cached = this.computePipelines.get(key);
-    if (cached) return cached;
-
-    let shaderModule = this.gaussianShaderModules.get(storageFormat);
-    if (!shaderModule) {
-      shaderModule = this.device.createShaderModule({
-        code: buildGaussianWgsl(storageFormat),
-        label: `Gaussian WGSL Module (${storageFormat})`,
-      });
-      this.gaussianShaderModules.set(storageFormat, shaderModule);
-    }
-
-    const pipeline = this.device.createComputePipeline({
-      label: `Gaussian Compute Pipeline (${storageFormat})`,
-      layout: this.getFilterPipelineLayout(storageFormat),
-      compute: { module: shaderModule, entryPoint: 'cs_gaussian' },
+    return this.getOrCreateComputePipeline({
+      cacheKey: `gaussian:${storageFormat}`,
+      label: `Gaussian (${storageFormat})`,
+      moduleKey: `gaussian:${storageFormat}`,
+      wgsl: buildGaussianWgsl(storageFormat),
+      entryPoint: 'cs_gaussian',
+      bindGroupLayout: this.getFilterBindGroupLayout(storageFormat),
+      pipelineLayout: this.getFilterPipelineLayout(storageFormat),
     });
-    this.computePipelines.set(key, pipeline);
-    return pipeline;
   }
 
-  // ──────────────────────────────────────────────────────────
-  // alphaFeather combine compute pipeline (cs_feather_combine)
-  // ──────────────────────────────────────────────────────────
-
-  /**
-   * Group-0 layout for the alphaFeather COMBINE pass: uniform + TWO sampled
-   * sources (bleed, orig) + write-only storage destination.
-   *
-   * A separate layout from {@link getFilterBindGroupLayout} because of the extra
-   * sampled binding — sharing one layout would force the Gaussian pass to declare
-   * a texture it never reads. Sample-type rule matches the Gaussian layout: the
-   * 32-bit tier demands `unfilterable-float` (textureLoad-only, no float32-filterable
-   * requirement); it also accepts filterable 8/16-bit sources, so the ORIG binding
-   * can be either the resident rgba8unorm asset or a working-format intermediate.
-   */
   getFeatherCombineBindGroupLayout(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUBindGroupLayout {
-    const cached = this.featherCombineBindGroupLayouts.get(storageFormat);
-    if (cached) return cached;
-
-    const sampleType = storageFormat === 'rgba32float' ? 'unfilterable-float' : 'float';
-    const layout = this.device.createBindGroupLayout({
-      label: `Feather Combine Bind Group Layout [${storageFormat}]`,
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: {
-            type: 'uniform',
-            hasDynamicOffset: true,
-            minBindingSize: GAUSS_UNIFORM_BUFFER_SIZE,
-          },
-        },
-        {
-          binding: 1,
-          visibility: GPUShaderStage.COMPUTE,
-          texture: { sampleType },
-        },
-        {
-          binding: 2,
-          visibility: GPUShaderStage.COMPUTE,
-          texture: { sampleType },
-        },
-        {
-          binding: 3,
-          visibility: GPUShaderStage.COMPUTE,
-          storageTexture: { access: 'write-only', format: storageFormat },
-        },
-      ],
-    });
-    this.featherCombineBindGroupLayouts.set(storageFormat, layout);
-    return layout;
+    return this.getOrCreateComputeLayout(
+      `feather-combine:${storageFormat}`,
+      `Feather Combine Bind Group Layout [${storageFormat}]`,
+      { uniformSize: GAUSS_UNIFORM_BUFFER_SIZE, storageFormat, inputs: ['sample', 'sample'] },
+    );
   }
 
   getFeatherCombinePipelineLayout(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUPipelineLayout {
-    const cached = this.featherCombinePipelineLayouts.get(storageFormat);
-    if (cached) return cached;
-    const layout = this.device.createPipelineLayout({
-      bindGroupLayouts: [this.getFeatherCombineBindGroupLayout(storageFormat)],
-      label: `Feather Combine Pipeline Layout [${storageFormat}]`,
-    });
-    this.featherCombinePipelineLayouts.set(storageFormat, layout);
-    return layout;
+    return this.getOrCreatePipelineLayout(
+      `feather-combine:${storageFormat}`,
+      `Feather Combine Pipeline Layout [${storageFormat}]`,
+      [this.getFeatherCombineBindGroupLayout(storageFormat)],
+    );
   }
 
-  /**
-   * alphaFeather combine pipeline (pointwise, workgroup 8×8). One pipeline per
-   * working format; radius/flags ride the uniform, never the pipeline.
-   */
   getFeatherCombinePipeline(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUComputePipeline {
-    const key = `feather-combine:${storageFormat}`;
-    const cached = this.computePipelines.get(key);
-    if (cached) return cached;
-
-    let shaderModule = this.featherCombineShaderModules.get(storageFormat);
-    if (!shaderModule) {
-      shaderModule = this.device.createShaderModule({
-        code: buildFeatherCombineWgsl(storageFormat),
-        label: `Feather Combine WGSL Module (${storageFormat})`,
-      });
-      this.featherCombineShaderModules.set(storageFormat, shaderModule);
-    }
-
-    const pipeline = this.device.createComputePipeline({
-      label: `Feather Combine Compute Pipeline (${storageFormat})`,
-      layout: this.getFeatherCombinePipelineLayout(storageFormat),
-      compute: { module: shaderModule, entryPoint: 'cs_feather_combine' },
+    return this.getOrCreateComputePipeline({
+      cacheKey: `feather-combine:${storageFormat}`,
+      label: `Feather Combine (${storageFormat})`,
+      moduleKey: `feather-combine:${storageFormat}`,
+      wgsl: buildFeatherCombineWgsl(storageFormat),
+      entryPoint: 'cs_feather_combine',
+      bindGroupLayout: this.getFeatherCombineBindGroupLayout(storageFormat),
+      pipelineLayout: this.getFeatherCombinePipelineLayout(storageFormat),
     });
-    this.computePipelines.set(key, pipeline);
-    return pipeline;
   }
-
-  // ──────────────────────────────────────────────────────────
-  // Dual-field 1+JFA EDT compute pipelines (cs_edt_seed, cs_edt_jfa)
-  // ──────────────────────────────────────────────────────────
 
   getEdtSeedBindGroupLayout(
     contentSampleType: 'float' | 'unfilterable-float' = 'float',
   ): GPUBindGroupLayout {
-    const key = `edt-seed:${contentSampleType}`;
-    const cached = this.edtBindGroupLayouts.get(key);
-    if (cached) return cached;
-    const layout = this.device.createBindGroupLayout({
-      label: `EDT Seed Bind Group Layout [${contentSampleType}]`,
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: EDT_SEED_UNIFORM_BUFFER_SIZE },
-        },
-        { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: contentSampleType } },
-        {
-          binding: 2,
-          visibility: GPUShaderStage.COMPUTE,
-          storageTexture: { access: 'write-only', format: 'rgba16uint' },
-        },
-      ],
-    });
-    this.edtBindGroupLayouts.set(key, layout);
-    return layout;
+    return this.getOrCreateComputeLayout(
+      `edt-seed:${contentSampleType}`,
+      `EDT Seed Bind Group Layout [${contentSampleType}]`,
+      {
+        uniformSize: EDT_SEED_UNIFORM_BUFFER_SIZE,
+        storageFormat: 'rgba16float',
+        storageTextureFormat: 'rgba16uint',
+        inputs: [contentSampleType],
+      },
+    );
   }
 
   getEdtSeedPipeline(
@@ -1035,27 +765,12 @@ export class PipelineCache {
   }
 
   getEdtJfaBindGroupLayout(): GPUBindGroupLayout {
-    const key = 'edt-jfa';
-    const cached = this.edtBindGroupLayouts.get(key);
-    if (cached) return cached;
-    const layout = this.device.createBindGroupLayout({
-      label: 'EDT JFA Bind Group Layout',
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: EDT_JFA_UNIFORM_BUFFER_SIZE },
-        },
-        { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'uint' } },
-        {
-          binding: 2,
-          visibility: GPUShaderStage.COMPUTE,
-          storageTexture: { access: 'write-only', format: 'rgba16uint' },
-        },
-      ],
+    return this.getOrCreateComputeLayout('edt-jfa', 'EDT JFA Bind Group Layout', {
+      uniformSize: EDT_JFA_UNIFORM_BUFFER_SIZE,
+      storageFormat: 'rgba16float',
+      storageTextureFormat: 'rgba16uint',
+      inputs: ['uint'],
     });
-    this.edtBindGroupLayouts.set(key, layout);
-    return layout;
   }
 
   getEdtJfaPipeline(): GPUComputePipeline {
@@ -1069,38 +784,16 @@ export class PipelineCache {
     });
   }
 
-  // ──────────────────────────────────────────────────────────
-  // Stroke compose compute pipeline (cs_stroke_compose)
-  // ──────────────────────────────────────────────────────────
-
   getStrokeComposeBindGroupLayout(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUBindGroupLayout {
-    const cached = this.strokeComposeBindGroupLayouts.get(storageFormat);
-    if (cached) return cached;
-    const sampleType = storageFormat === 'rgba32float' ? 'unfilterable-float' : 'float';
-    const layout = this.device.createBindGroupLayout({
-      label: `Stroke Compose Bind Group Layout [${storageFormat}]`,
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: STROKE_COMPOSE_UNIFORM_BUFFER_SIZE },
-        },
-        { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'uint' } },
-        { binding: 2, visibility: GPUShaderStage.COMPUTE, texture: { sampleType } },
-        {
-          binding: 3,
-          visibility: GPUShaderStage.COMPUTE,
-          storageTexture: { access: 'write-only', format: storageFormat },
-        },
-      ],
-    });
-    this.strokeComposeBindGroupLayouts.set(storageFormat, layout);
-    return layout;
+    return this.getOrCreateComputeLayout(
+      `stroke-compose:${storageFormat}`,
+      `Stroke Compose Bind Group Layout [${storageFormat}]`,
+      { uniformSize: STROKE_COMPOSE_UNIFORM_BUFFER_SIZE, storageFormat, inputs: ['uint', 'sample'] },
+    );
   }
 
-  /** Stroke compose pipeline (pointwise, workgroup 8x8), one per working format. */
   getStrokeComposePipeline(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUComputePipeline {
@@ -1114,37 +807,18 @@ export class PipelineCache {
     });
   }
 
-  // ──────────────────────────────────────────────────────────
-  // Effect mask-bake compute pipeline (cs_effect_mask_bake)
-  // ──────────────────────────────────────────────────────────
-
   getEffectMaskBakeBindGroupLayout(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUBindGroupLayout {
-    const cached = this.effectMaskBakeBindGroupLayouts.get(storageFormat);
-    if (cached) return cached;
-    const contentSampleType = storageFormat === 'rgba32float' ? 'unfilterable-float' : 'float';
-    const layout = this.device.createBindGroupLayout({
-      label: `Effect Mask Bake Bind Group Layout [${storageFormat}]`,
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: EFFECT_MASK_BAKE_UNIFORM_BUFFER_SIZE },
-        },
-        { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: contentSampleType } },
-        { binding: 2, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } },
-        { binding: 3, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } },
-        { binding: 4, visibility: GPUShaderStage.COMPUTE, sampler: { type: 'filtering' } },
-        {
-          binding: 5,
-          visibility: GPUShaderStage.COMPUTE,
-          storageTexture: { access: 'write-only', format: storageFormat },
-        },
-      ],
-    });
-    this.effectMaskBakeBindGroupLayouts.set(storageFormat, layout);
-    return layout;
+    return this.getOrCreateComputeLayout(
+      `effect-mask-bake:${storageFormat}`,
+      `Effect Mask Bake Bind Group Layout [${storageFormat}]`,
+      {
+        uniformSize: EFFECT_MASK_BAKE_UNIFORM_BUFFER_SIZE,
+        storageFormat,
+        inputs: ['sample', 'float', 'float', 'sampler'],
+      },
+    );
   }
 
   getEffectMaskBakePipeline(
@@ -1160,38 +834,16 @@ export class PipelineCache {
     });
   }
 
-  // ──────────────────────────────────────────────────────────
-  // Effect shadow compose compute pipeline (cs_effect_shadow_compose)
-  // ──────────────────────────────────────────────────────────
-
   getEffectShadowBindGroupLayout(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUBindGroupLayout {
-    const cached = this.effectBindGroupLayouts.get(storageFormat);
-    if (cached) return cached;
-    const currentSampleType = storageFormat === 'rgba32float' ? 'unfilterable-float' : 'float';
-    const layout = this.device.createBindGroupLayout({
-      label: `Effect Shadow Bind Group Layout [${storageFormat}]`,
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: EFFECT_SHADOW_UNIFORM_BUFFER_SIZE },
-        },
-        { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: currentSampleType } },
-        { binding: 2, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: currentSampleType } },
-        {
-          binding: 3,
-          visibility: GPUShaderStage.COMPUTE,
-          storageTexture: { access: 'write-only', format: storageFormat },
-        },
-      ],
-    });
-    this.effectBindGroupLayouts.set(storageFormat, layout);
-    return layout;
+    return this.getOrCreateComputeLayout(
+      `effect-shadow:${storageFormat}`,
+      `Effect Shadow Bind Group Layout [${storageFormat}]`,
+      { uniformSize: EFFECT_SHADOW_UNIFORM_BUFFER_SIZE, storageFormat, inputs: ['sample', 'sample'] },
+    );
   }
 
-  /** Shadow compose pipeline (pointwise, workgroup 8x8), one per working format. */
   getEffectShadowPipeline(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUComputePipeline {
@@ -1208,31 +860,17 @@ export class PipelineCache {
   getEffectShadowSpreadBindGroupLayout(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUBindGroupLayout {
-    const cached = this.effectBindGroupLayouts.get(`spread:${storageFormat}`);
-    if (cached) return cached;
-    const currentSampleType = storageFormat === 'rgba32float' ? 'unfilterable-float' : 'float';
-    const layout = this.device.createBindGroupLayout({
-      label: `Effect Shadow Spread Bind Group Layout [${storageFormat}]`,
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: EFFECT_SHADOW_SPREAD_UNIFORM_BUFFER_SIZE },
-        },
-        { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'uint' } },
-        { binding: 2, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: currentSampleType } },
-        {
-          binding: 3,
-          visibility: GPUShaderStage.COMPUTE,
-          storageTexture: { access: 'write-only', format: storageFormat },
-        },
-      ],
-    });
-    this.effectBindGroupLayouts.set(`spread:${storageFormat}`, layout);
-    return layout;
+    return this.getOrCreateComputeLayout(
+      `effect-shadow-spread:${storageFormat}`,
+      `Effect Shadow Spread Bind Group Layout [${storageFormat}]`,
+      {
+        uniformSize: EFFECT_SHADOW_SPREAD_UNIFORM_BUFFER_SIZE,
+        storageFormat,
+        inputs: ['uint', 'sample'],
+      },
+    );
   }
 
-  /** Shadow spread pipeline (EDT threshold dilation/erosion), one per working format. */
   getEffectShadowSpreadPipeline(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUComputePipeline {
@@ -1246,37 +884,16 @@ export class PipelineCache {
     });
   }
 
-  // ──────────────────────────────────────────────────────────
-  // Effect color-overlay compose compute pipeline (cs_effect_overlay_compose)
-  // ──────────────────────────────────────────────────────────
-
   getEffectOverlayBindGroupLayout(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUBindGroupLayout {
-    const cached = this.effectBindGroupLayouts.get(`overlay:${storageFormat}`);
-    if (cached) return cached;
-    const currentSampleType = storageFormat === 'rgba32float' ? 'unfilterable-float' : 'float';
-    const layout = this.device.createBindGroupLayout({
-      label: `Effect Overlay Bind Group Layout [${storageFormat}]`,
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: EFFECT_OVERLAY_UNIFORM_BUFFER_SIZE },
-        },
-        { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: currentSampleType } },
-        {
-          binding: 2,
-          visibility: GPUShaderStage.COMPUTE,
-          storageTexture: { access: 'write-only', format: storageFormat },
-        },
-      ],
-    });
-    this.effectBindGroupLayouts.set(`overlay:${storageFormat}`, layout);
-    return layout;
+    return this.getOrCreateComputeLayout(
+      `effect-overlay:${storageFormat}`,
+      `Effect Overlay Bind Group Layout [${storageFormat}]`,
+      { uniformSize: EFFECT_OVERLAY_UNIFORM_BUFFER_SIZE, storageFormat, inputs: ['sample'] },
+    );
   }
 
-  /** Overlay compose pipeline (pointwise, workgroup 8x8), one per working format. */
   getEffectOverlayPipeline(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUComputePipeline {
@@ -1290,37 +907,16 @@ export class PipelineCache {
     });
   }
 
-  // ──────────────────────────────────────────────────────────
-  // Effect gradient-overlay compose compute pipeline (cs_effect_gradient_compose)
-  // ──────────────────────────────────────────────────────────
-
   getEffectGradientBindGroupLayout(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUBindGroupLayout {
-    const cached = this.effectBindGroupLayouts.get(`gradient:${storageFormat}`);
-    if (cached) return cached;
-    const currentSampleType = storageFormat === 'rgba32float' ? 'unfilterable-float' : 'float';
-    const layout = this.device.createBindGroupLayout({
-      label: `Effect Gradient Bind Group Layout [${storageFormat}]`,
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: EFFECT_GRADIENT_UNIFORM_BUFFER_SIZE },
-        },
-        { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: currentSampleType } },
-        {
-          binding: 2,
-          visibility: GPUShaderStage.COMPUTE,
-          storageTexture: { access: 'write-only', format: storageFormat },
-        },
-      ],
-    });
-    this.effectBindGroupLayouts.set(`gradient:${storageFormat}`, layout);
-    return layout;
+    return this.getOrCreateComputeLayout(
+      `effect-gradient:${storageFormat}`,
+      `Effect Gradient Bind Group Layout [${storageFormat}]`,
+      { uniformSize: EFFECT_GRADIENT_UNIFORM_BUFFER_SIZE, storageFormat, inputs: ['sample'] },
+    );
   }
 
-  /** Gradient compose pipeline (pointwise, workgroup 8x8), one per working format. */
   getEffectGradientPipeline(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUComputePipeline {
@@ -1334,37 +930,16 @@ export class PipelineCache {
     });
   }
 
-  // ──────────────────────────────────────────────────────────
-  // Effect inner-edge family (Inner Glow / Inner Shadow): invert + compose
-  // ──────────────────────────────────────────────────────────
-
   getEffectInnerInvertBindGroupLayout(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUBindGroupLayout {
-    const cached = this.effectBindGroupLayouts.get(`inner-invert:${storageFormat}`);
-    if (cached) return cached;
-    const silSampleType = storageFormat === 'rgba32float' ? 'unfilterable-float' : 'float';
-    const layout = this.device.createBindGroupLayout({
-      label: `Effect Inner Invert Bind Group Layout [${storageFormat}]`,
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: EFFECT_INNER_INVERT_UNIFORM_BUFFER_SIZE },
-        },
-        { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: silSampleType } },
-        {
-          binding: 2,
-          visibility: GPUShaderStage.COMPUTE,
-          storageTexture: { access: 'write-only', format: storageFormat },
-        },
-      ],
-    });
-    this.effectBindGroupLayouts.set(`inner-invert:${storageFormat}`, layout);
-    return layout;
+    return this.getOrCreateComputeLayout(
+      `effect-inner-invert:${storageFormat}`,
+      `Effect Inner Invert Bind Group Layout [${storageFormat}]`,
+      { uniformSize: EFFECT_INNER_INVERT_UNIFORM_BUFFER_SIZE, storageFormat, inputs: ['sample'] },
+    );
   }
 
-  /** Inner invert pipeline (padded inverted silhouette, truthful 1.0 border). */
   getEffectInnerInvertPipeline(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUComputePipeline {
@@ -1381,32 +956,17 @@ export class PipelineCache {
   getEffectInnerComposeBindGroupLayout(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUBindGroupLayout {
-    const cached = this.effectBindGroupLayouts.get(`inner-compose:${storageFormat}`);
-    if (cached) return cached;
-    const sampleType = storageFormat === 'rgba32float' ? 'unfilterable-float' : 'float';
-    const layout = this.device.createBindGroupLayout({
-      label: `Effect Inner Compose Bind Group Layout [${storageFormat}]`,
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: EFFECT_INNER_UNIFORM_BUFFER_SIZE },
-        },
-        { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType } },
-        { binding: 2, visibility: GPUShaderStage.COMPUTE, texture: { sampleType } },
-        { binding: 3, visibility: GPUShaderStage.COMPUTE, texture: { sampleType } },
-        {
-          binding: 4,
-          visibility: GPUShaderStage.COMPUTE,
-          storageTexture: { access: 'write-only', format: storageFormat },
-        },
-      ],
-    });
-    this.effectBindGroupLayouts.set(`inner-compose:${storageFormat}`, layout);
-    return layout;
+    return this.getOrCreateComputeLayout(
+      `effect-inner-compose:${storageFormat}`,
+      `Effect Inner Compose Bind Group Layout [${storageFormat}]`,
+      {
+        uniformSize: EFFECT_INNER_UNIFORM_BUFFER_SIZE,
+        storageFormat,
+        inputs: ['sample', 'sample', 'sample'],
+      },
+    );
   }
 
-  /** Inner compose pipeline (band blended onto the foreground, silhouette-clipped). */
   getEffectInnerComposePipeline(
     storageFormat: 'rgba16float' | 'rgba32float' = 'rgba16float',
   ): GPUComputePipeline {
@@ -1420,289 +980,288 @@ export class PipelineCache {
     });
   }
 
-  getLayerPipelineLayout(): GPUPipelineLayout {
-    if (this.layerPipelineLayout) return this.layerPipelineLayout;
-
-    this.layerPipelineLayout = this.device.createPipelineLayout({
-      bindGroupLayouts: [this.getLayerBindGroupLayout(), this.getAdjustBindGroupLayout()],
-      label: 'Layer Pipeline Layout',
-    });
-    return this.layerPipelineLayout;
+  getStrokeExtrudeShaderModule(): GPUShaderModule {
+    return this.getOrCreateShaderModule('stroke-extrude', 'Stroke Extrude WGSL Module', STROKE_EXTRUDE_WGSL);
   }
 
-  /**
-   * Acquire a compiled render pipeline for drawing a layer.
-   * Cached by `(blendMode, targetFormat)`.
-   */
+  getStrokeExtrudeBindGroupLayout(): GPUBindGroupLayout {
+    return this.getOrCreateBindGroupLayout('stroke-extrude', 'Stroke Extrude Bind Group Layout', [
+      { binding: 0, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'storage' } },
+    ]);
+  }
+
+  getStrokeExtrudePipelineLayout(): GPUPipelineLayout {
+    return this.getOrCreatePipelineLayout(
+      'stroke-extrude',
+      'Stroke Extrude Pipeline Layout',
+      [this.getStrokeExtrudeBindGroupLayout()],
+    );
+  }
+
+  getStrokeExtrudePipeline(): GPUComputePipeline {
+    return this.getOrCreateComputePipeline({
+      cacheKey: 'stroke-extrude',
+      label: 'Stroke Extrude',
+      moduleKey: 'stroke-extrude',
+      wgsl: STROKE_EXTRUDE_WGSL,
+      entryPoint: 'cs_extrude',
+      bindGroupLayout: this.getStrokeExtrudeBindGroupLayout(),
+      pipelineLayout: this.getStrokeExtrudePipelineLayout(),
+    });
+  }
+
+  getVmaskShaderModule(): GPUShaderModule {
+    return this.getOrCreateShaderModule('vmask', 'Vmask WGSL Module', VMASK_WGSL);
+  }
+
+  getVmaskBindGroupLayout(): GPUBindGroupLayout {
+    return this.getOrCreateBindGroupLayout('vmask', 'Vmask Bind Group Layout', [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: { type: 'uniform', hasDynamicOffset: false, minBindingSize: VMASK_UNIFORM_SIZE },
+      },
+      { binding: 1, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+      { binding: 2, visibility: GPUShaderStage.COMPUTE, buffer: { type: 'read-only-storage' } },
+      {
+        binding: 3,
+        visibility: GPUShaderStage.COMPUTE,
+        storageTexture: { access: 'write-only', format: 'rgba8unorm', viewDimension: '2d' },
+      },
+    ]);
+  }
+
+  getVmaskPipelineLayout(): GPUPipelineLayout {
+    return this.getOrCreatePipelineLayout('vmask', 'Vmask Pipeline Layout', [this.getVmaskBindGroupLayout()]);
+  }
+
+  getVmaskPipeline(): GPUComputePipeline {
+    return this.getOrCreateComputePipeline({
+      cacheKey: 'vmask',
+      label: 'Vmask',
+      moduleKey: 'vmask',
+      wgsl: VMASK_WGSL,
+      entryPoint: 'cs_main',
+      bindGroupLayout: this.getVmaskBindGroupLayout(),
+      pipelineLayout: this.getVmaskPipelineLayout(),
+    });
+  }
+
+  getBmaskCombineShaderModule(): GPUShaderModule {
+    return this.getOrCreateShaderModule('bmask-combine', 'Bmask Combine WGSL Module', BMASK_COMBINE_WGSL);
+  }
+
+  getBmaskCombineBindGroupLayout(): GPUBindGroupLayout {
+    return this.getOrCreateBindGroupLayout('bmask-combine', 'Bmask Combine Bind Group Layout', [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.COMPUTE,
+        buffer: { type: 'uniform', hasDynamicOffset: false, minBindingSize: BMASK_COMBINE_UNIFORM_SIZE },
+      },
+      { binding: 1, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } },
+      { binding: 2, visibility: GPUShaderStage.COMPUTE, texture: { sampleType: 'float' } },
+      {
+        binding: 3,
+        visibility: GPUShaderStage.COMPUTE,
+        storageTexture: { access: 'write-only', format: 'rgba8unorm', viewDimension: '2d' },
+      },
+    ]);
+  }
+
+  getBmaskCombinePipelineLayout(): GPUPipelineLayout {
+    return this.getOrCreatePipelineLayout(
+      'bmask-combine',
+      'Bmask Combine Pipeline Layout',
+      [this.getBmaskCombineBindGroupLayout()],
+    );
+  }
+
+  getBmaskCombinePipeline(): GPUComputePipeline {
+    return this.getOrCreateComputePipeline({
+      cacheKey: 'bmask-combine',
+      label: 'Bmask Combine',
+      moduleKey: 'bmask-combine',
+      wgsl: BMASK_COMBINE_WGSL,
+      entryPoint: 'cs_main',
+      bindGroupLayout: this.getBmaskCombineBindGroupLayout(),
+      pipelineLayout: this.getBmaskCombinePipelineLayout(),
+    });
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Render pipelines & layouts
+  // ──────────────────────────────────────────────────────────
+
+  getAdjustPreBindGroupLayout(): GPUBindGroupLayout {
+    return this.getOrCreateBindGroupLayout('adjustPre', 'Adjust Pre Bind Group Layout', [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+        buffer: {
+          type: 'uniform',
+          hasDynamicOffset: true,
+          minBindingSize: ADJUST_PRE_UNIFORM_BUFFER_SIZE,
+        },
+      },
+      { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+      { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+    ]);
+  }
+
+  getAdjustPrePipelineLayout(): GPUPipelineLayout {
+    return this.getOrCreatePipelineLayout('adjustPre', 'Adjust Pre Pipeline Layout', [
+      this.getAdjustPreBindGroupLayout(),
+      this.getAdjustBindGroupLayout(),
+    ]);
+  }
+
+  getAdjustPreShaderModule(): GPUShaderModule {
+    return this.getOrCreateShaderModule('adjustPre', 'Adjust Pre WGSL Module', ADJUST_PRE_WGSL);
+  }
+
+  getAdjustPrePipeline(targetFormat: GPUTextureFormat = 'rgba16float'): GPURenderPipeline {
+    return this.getOrCreateRenderPipeline({
+      cacheKey: `adjustPre:${targetFormat}`,
+      label: `Adjust Pre Pipeline (${targetFormat})`,
+      layout: this.getAdjustPrePipelineLayout(),
+      module: this.getAdjustPreShaderModule(),
+      vertexEntry: 'vs_adjust_pre',
+      fragmentEntry: 'fs_adjust_pre',
+      targetFormat,
+      blend: REPLACE_BLEND,
+    });
+  }
+
+  getLayerShaderModule(): GPUShaderModule {
+    return this.getOrCreateShaderModule('layer', 'Layer WGSL Module', LAYER_WGSL);
+  }
+
+  getLayerBindGroupLayout(): GPUBindGroupLayout {
+    return this.getOrCreateBindGroupLayout('layer', 'Layer Bind Group Layout', [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+        buffer: {
+          type: 'uniform',
+          hasDynamicOffset: true,
+          minBindingSize: LAYER_UNIFORM_BUFFER_SIZE,
+        },
+      },
+      { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+      { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+      { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+      { binding: 4, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+      { binding: 5, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+    ]);
+  }
+
+  getLayerPipelineLayout(): GPUPipelineLayout {
+    return this.getOrCreatePipelineLayout('layer', 'Layer Pipeline Layout', [
+      this.getLayerBindGroupLayout(),
+      this.getAdjustBindGroupLayout(),
+    ]);
+  }
+
   getLayerPipeline(
     blendMode: LayerBlendMode = 'source-over',
     targetFormat: GPUTextureFormat = 'rgba16float',
     isBottomOpaque = false,
   ): GPURenderPipeline {
     const key = `layer:${blendMode}:${targetFormat}:${isBottomOpaque ? 'opaque' : 'blend'}`;
-    let pipeline = this.pipelines.get(key);
-    if (pipeline) return pipeline;
+    const cached = this.pipelines.get(key);
+    if (cached) return cached;
 
-    // Class-A layers only ever reach the layer pipeline (SceneCompiler routes
-    // everything else through the ping-pong BlendPass). Under premultiplied
-    // alpha the correct fixed-function factors are:
-    //   • isBottomOpaque first layer → REPLACE (src:one, dst:zero)
-    //   • source-over               → OVER (src:one, dst:one-minus-src-alpha)
-    // (When LayerBlendMode gains Add, map it to ADD_BLEND here.)
     let blendState: GPUBlendState = PREMULTIPLIED_OVER_BLEND;
     if (isBottomOpaque) {
       blendState = REPLACE_BLEND;
     } else if (!isHardwareBlendable(blendMode)) {
-      // Defensive: a class-B mode must never be drawn with a hardware blend
-      // state (would silently degrade to Normal).
       throw new Error(
         `getLayerPipeline: blend mode '${blendMode}' is not hardware-blendable; ` +
           `it must be composited via BlendPass (ping-pong), not the layer pipeline.`,
       );
     }
 
-    pipeline = this.device.createRenderPipeline({
+    return this.getOrCreateRenderPipeline({
+      cacheKey: key,
       label: `Layer Pipeline (${key})`,
       layout: this.getLayerPipelineLayout(),
-      vertex: {
-        module: this.getLayerShaderModule(),
-        entryPoint: 'vs_main',
-        buffers: [
-          {
-            arrayStride: 16,
-            stepMode: 'vertex',
-            attributes: [
-              { format: 'float32x2', offset: 0, shaderLocation: 0 }, // pos
-              { format: 'float32x2', offset: 8, shaderLocation: 1 }, // uv
-            ],
-          },
-        ],
-      },
-      fragment: {
-        module: this.getLayerShaderModule(),
-        entryPoint: 'fs_main',
-        targets: [
-          {
-            format: targetFormat,
-            blend: blendState,
-            writeMask: GPUColorWrite.ALL,
-          },
-        ],
-      },
-      primitive: {
-        topology: 'triangle-list',
-        cullMode: 'none',
-      },
+      module: this.getLayerShaderModule(),
+      vertexEntry: 'vs_main',
+      fragmentEntry: 'fs_main',
+      targetFormat,
+      blend: blendState,
     });
-
-    this.pipelines.set(key, pipeline);
-    return pipeline;
   }
 
   getBlendShaderModule(): GPUShaderModule {
-    if (this.blendShaderModule) return this.blendShaderModule;
-    this.blendShaderModule = this.device.createShaderModule({
-      code: BLEND_WGSL,
-      label: 'Blend WGSL Module',
-    });
-    return this.blendShaderModule;
+    return this.getOrCreateShaderModule('blend', 'Blend WGSL Module', BLEND_WGSL);
   }
 
   getBlendBindGroupLayout(): GPUBindGroupLayout {
-    if (this.blendBindGroupLayout) return this.blendBindGroupLayout;
-
-    this.blendBindGroupLayout = this.device.createBindGroupLayout({
-      label: 'Blend Bind Group Layout',
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
-          buffer: {
-            type: 'uniform',
-            hasDynamicOffset: true,
-            minBindingSize: BLEND_UNIFORM_BUFFER_SIZE,
-          },
+    return this.getOrCreateBindGroupLayout('blend', 'Blend Bind Group Layout', [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+        buffer: {
+          type: 'uniform',
+          hasDynamicOffset: true,
+          minBindingSize: BLEND_UNIFORM_BUFFER_SIZE,
         },
-        {
-          binding: 1,
-          visibility: GPUShaderStage.FRAGMENT,
-          sampler: { type: 'filtering' },
-        },
-        {
-          binding: 2,
-          visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float' },
-        },
-        {
-          binding: 3,
-          visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float' },
-        },
-        {
-          binding: 4,
-          visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float' },
-        },
-        {
-          // Vmask texture (polygon-baked coverage), symmetric to the
-          // layer layout's binding(4). Default white view when absent/analytic.
-          binding: 5,
-          visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float' },
-        },
-        {
-          // Clip base coverage (Photoshop-style clipping mask), symmetric to
-          // the layer layout's binding(5). Unclipped layers bind the 1×1
-          // default white view; read only behind flags bit 1 (CLIP).
-          binding: 6,
-          visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float' },
-        },
-        // The bmask stack slots (retired bindings 6..8) are gone: the bmask
-        // combine pass bakes ALL enabled records into ONE texture bound at
-        // slot 4, so the blend pipeline needs no per-record slots.
-      ],
-    });
-    return this.blendBindGroupLayout;
+      },
+      { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+      { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+      { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+      { binding: 4, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+      { binding: 5, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+      { binding: 6, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+    ]);
   }
 
   getBlendPipelineLayout(): GPUPipelineLayout {
-    if (this.blendPipelineLayout) return this.blendPipelineLayout;
-
-    this.blendPipelineLayout = this.device.createPipelineLayout({
-      bindGroupLayouts: [this.getBlendBindGroupLayout(), this.getAdjustBindGroupLayout()],
-      label: 'Blend Pipeline Layout',
-    });
-    return this.blendPipelineLayout;
+    return this.getOrCreatePipelineLayout('blend', 'Blend Pipeline Layout', [
+      this.getBlendBindGroupLayout(),
+      this.getAdjustBindGroupLayout(),
+    ]);
   }
 
-  /**
-   * Acquire a compiled render pipeline for ping-pong blend passes.
-   * Outputs the alpha-composited result directly (REPLACE_BLEND).
-   */
   getBlendPipeline(targetFormat: GPUTextureFormat = 'rgba16float'): GPURenderPipeline {
     const key = `blend:${targetFormat}`;
-    let pipeline = this.pipelines.get(key);
-    if (pipeline) return pipeline;
-
-    pipeline = this.device.createRenderPipeline({
+    return this.getOrCreateRenderPipeline({
+      cacheKey: key,
       label: `Blend Pipeline (${key})`,
       layout: this.getBlendPipelineLayout(),
-      vertex: {
-        module: this.getBlendShaderModule(),
-        entryPoint: 'vs_main',
-        buffers: [
-          {
-            arrayStride: 16,
-            stepMode: 'vertex',
-            attributes: [
-              { format: 'float32x2', offset: 0, shaderLocation: 0 },
-              { format: 'float32x2', offset: 8, shaderLocation: 1 },
-            ],
-          },
-        ],
-      },
-      fragment: {
-        module: this.getBlendShaderModule(),
-        entryPoint: 'fs_main',
-        targets: [
-          {
-            format: targetFormat,
-            blend: REPLACE_BLEND,
-            writeMask: GPUColorWrite.ALL,
-          },
-        ],
-      },
-      primitive: {
-        topology: 'triangle-list',
-        cullMode: 'none',
-      },
+      module: this.getBlendShaderModule(),
+      vertexEntry: 'vs_main',
+      fragmentEntry: 'fs_main',
+      targetFormat,
+      blend: REPLACE_BLEND,
     });
-
-    this.pipelines.set(key, pipeline);
-    return pipeline;
   }
 
-  // ─── View pipeline (composited document → swapchain, camera-applied) ───
-
-  /**
-   * Acquire a view shader module. Two variants share the concatenated prefix
-   * (structs / vertex stage / projection constant) and differ ONLY in the
-   * fragment tail: 'sdr' = project → clamp [0,1] → sRGB encode (the A-phase
-   * terminal contract, byte-identical); 'hdr' = project → lower clamp → the
-   * SAME encode, unclamped above 1 (the extended-range tail — see `view.ts`).
-   * The variant and the surface format are a matched pair with
-   * `GpuDevice.configureSurface`.
-   */
   getViewShaderModule(hdr: boolean): GPUShaderModule {
-    if (!hdr) {
-      if (this.viewShaderModule) return this.viewShaderModule;
-      this.viewShaderModule = this.device.createShaderModule({
-        code: VIEW_WGSL,
-        label: 'View WGSL Module',
-      });
-      return this.viewShaderModule;
-    }
-    if (this.viewHdrShaderModule) return this.viewHdrShaderModule;
-    this.viewHdrShaderModule = this.device.createShaderModule({
-      code: VIEW_WGSL_HDR,
-      label: 'View HDR WGSL Module',
-    });
-    return this.viewHdrShaderModule;
+    return hdr
+      ? this.getOrCreateShaderModule('view:hdr', 'View HDR WGSL Module', VIEW_WGSL_HDR)
+      : this.getOrCreateShaderModule('view:sdr', 'View WGSL Module', VIEW_WGSL);
   }
 
   getViewBindGroupLayout(): GPUBindGroupLayout {
-    if (this.viewBindGroupLayout) return this.viewBindGroupLayout;
-
-    this.viewBindGroupLayout = this.device.createBindGroupLayout({
-      label: 'View Bind Group Layout',
-      entries: [
-        {
-          binding: 0,
-          // The view VERTEX stage reads `view_u.view_matrix` + `uv_scale`
-          // (see view.ts vs_main), so binding 0 must be visible to VERTEX too —
-          // not FRAGMENT only (a FRAGMENT-only visibility would reject the pipeline
-          // at creation).
-          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
-          buffer: {
-            type: 'uniform',
-            hasDynamicOffset: true,
-            minBindingSize: VIEW_UNIFORM_BUFFER_SIZE,
-          },
+    return this.getOrCreateBindGroupLayout('view', 'View Bind Group Layout', [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+        buffer: {
+          type: 'uniform',
+          hasDynamicOffset: true,
+          minBindingSize: VIEW_UNIFORM_BUFFER_SIZE,
         },
-        {
-          binding: 1,
-          visibility: GPUShaderStage.FRAGMENT,
-          sampler: { type: 'filtering' },
-        },
-        {
-          binding: 2,
-          visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float' },
-        },
-        {
-          // The gain map (r8unorm, document-extent 1:1). Declared in BOTH view
-          // variants (shared prefix); the SDR fragment never samples it, which
-          // WebGPU allows (extra layout entries without static use are legal).
-          // Keeping the entry in the one shared layout means the gain and
-          // no-gain cases differ only in the bound texture + a uniform flag —
-          // zero extra pipeline variants.
-          binding: 3,
-          visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float' },
-        },
-      ],
-    });
-    return this.viewBindGroupLayout;
+      },
+      { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+      { binding: 2, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+      { binding: 3, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+    ]);
   }
 
-  /**
-   * The 1×1 zero-filled stand-in for binding 3 when no gain map applies (not
-   * eligible / still decoding / HDR off). Binding layouts must be fully
-   * satisfied even when a binding is unsampled, so the view bind group always
-   * has a valid texture here; with `gain_enabled = 0` the shader never reads
-   * it. Created lazily, device-owned, never destroyed with the frame.
-   */
   getGainDummyView(): GPUTextureView {
     if (this.gainDummyView) return this.gainDummyView;
 
@@ -1718,570 +1277,149 @@ export class PipelineCache {
       { bytesPerRow: 1 },
       { width: 1, height: 1 },
     );
+    this.gainDummyTexture = texture;
     this.gainDummyView = texture.createView({ label: 'View Gain Dummy View' });
     return this.gainDummyView;
   }
 
   getViewPipelineLayout(): GPUPipelineLayout {
-    if (this.viewPipelineLayout) return this.viewPipelineLayout;
-    this.viewPipelineLayout = this.device.createPipelineLayout({
-      bindGroupLayouts: [this.getViewBindGroupLayout()],
-      label: 'View Pipeline Layout',
-    });
-    return this.viewPipelineLayout;
+    return this.getOrCreatePipelineLayout('view', 'View Pipeline Layout', [this.getViewBindGroupLayout()]);
   }
 
-  /**
-   * Acquire the VIEW pipeline. Maps the composited document texture
-   * onto the swapchain applying the camera; writes with REPLACE_BLEND (the
-   * swapchain is cleared first, matching the previous BlitPass behavior).
-   *
-   * `hdr` selects the shader variant AND must agree with the target format —
-   * SDR presents compile the clamped fragment against `bgra8unorm`;
-   * HDR presents compile the unclamped-tail fragment against `rgba16float`. The
-   * pair comes from `GpuDevice.getSwapchainFormat()` / `isHdrPresentation()`,
-   * the same authority `configureSurface` used.
-   */
   getViewPipeline(targetFormat: GPUTextureFormat = 'bgra8unorm', hdr = false): GPURenderPipeline {
     const key = `view:${targetFormat}:${hdr ? 'hdr' : 'sdr'}`;
-    let pipeline = this.pipelines.get(key);
-    if (pipeline) return pipeline;
-
-    pipeline = this.device.createRenderPipeline({
+    return this.getOrCreateRenderPipeline({
+      cacheKey: key,
       label: `View Pipeline (${key})`,
       layout: this.getViewPipelineLayout(),
-      vertex: {
-        module: this.getViewShaderModule(hdr),
-        entryPoint: 'vs_main',
-        buffers: [
-          {
-            arrayStride: 16,
-            stepMode: 'vertex',
-            attributes: [
-              { format: 'float32x2', offset: 0, shaderLocation: 0 },
-              { format: 'float32x2', offset: 8, shaderLocation: 1 },
-            ],
-          },
-        ],
-      },
-      fragment: {
-        module: this.getViewShaderModule(hdr),
-        entryPoint: 'fs_main',
-        targets: [
-          {
-            format: targetFormat,
-            blend: REPLACE_BLEND,
-            writeMask: GPUColorWrite.ALL,
-          },
-        ],
-      },
-      primitive: {
-        topology: 'triangle-list',
-        cullMode: 'none',
-      },
+      module: this.getViewShaderModule(hdr),
+      vertexEntry: 'vs_main',
+      fragmentEntry: 'fs_main',
+      targetFormat,
+      blend: REPLACE_BLEND,
     });
-
-    this.pipelines.set(key, pipeline);
-    return pipeline;
   }
-
-  // ─── Vector spine SDF pipeline (procedural primitive → transient) ───
 
   getSdfShaderModule(): GPUShaderModule {
-    if (this.sdfShaderModule) return this.sdfShaderModule;
-    this.sdfShaderModule = this.device.createShaderModule({
-      code: SDF_WGSL,
-      label: 'SDF WGSL Module',
-    });
-    return this.sdfShaderModule;
+    return this.getOrCreateShaderModule('sdf', 'SDF WGSL Module', SDF_WGSL);
   }
 
-  /**
-   * ZERO-TEXTURE group-0 layout: only the SDF uniform dynamic-offset buffer. No
-   * sampler / source texture / mask binding — the SDF primitive is procedural.
-   */
   getSdfBindGroupLayout(): GPUBindGroupLayout {
-    if (this.sdfBindGroupLayout) return this.sdfBindGroupLayout;
-
-    this.sdfBindGroupLayout = this.device.createBindGroupLayout({
-      label: 'SDF Bind Group Layout',
-      entries: [
-        {
-          binding: 0,
-          // The SDF VERTEX stage reads `layer_size` (see sdf.ts vs_main), so this
-          // binding must be visible to VERTEX too — not FRAGMENT only.
-          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
-          buffer: {
-            type: 'uniform',
-            hasDynamicOffset: true,
-            minBindingSize: SDF_UNIFORM_BUFFER_SIZE,
-          },
+    return this.getOrCreateBindGroupLayout('sdf', 'SDF Bind Group Layout', [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+        buffer: {
+          type: 'uniform',
+          hasDynamicOffset: true,
+          minBindingSize: SDF_UNIFORM_BUFFER_SIZE,
         },
-      ],
-    });
-    return this.sdfBindGroupLayout;
+      },
+    ]);
   }
 
   getSdfPipelineLayout(): GPUPipelineLayout {
-    if (this.sdfPipelineLayout) return this.sdfPipelineLayout;
-    this.sdfPipelineLayout = this.device.createPipelineLayout({
-      bindGroupLayouts: [this.getSdfBindGroupLayout()],
-      label: 'SDF Pipeline Layout',
-    });
-    return this.sdfPipelineLayout;
+    return this.getOrCreatePipelineLayout('sdf', 'SDF Pipeline Layout', [this.getSdfBindGroupLayout()]);
   }
 
-  /**
-   * Acquire the SDF pipeline. Writes with REPLACE blend: the primitive draws into
-   * its OWN transparent-cleared transient, then the output is consumed downstream as
-   * a straight-alpha source — there is nothing to composite against at this stage.
-   */
   getSdfPipeline(targetFormat: GPUTextureFormat = 'rgba16float'): GPURenderPipeline {
     const key = `sdf:${targetFormat}`;
-    let pipeline = this.pipelines.get(key);
-    if (pipeline) return pipeline;
-
-    pipeline = this.device.createRenderPipeline({
+    return this.getOrCreateRenderPipeline({
+      cacheKey: key,
       label: `SDF Pipeline (${key})`,
       layout: this.getSdfPipelineLayout(),
-      vertex: {
-        module: this.getSdfShaderModule(),
-        entryPoint: 'vs_main',
-        buffers: [
-          {
-            arrayStride: 16,
-            stepMode: 'vertex',
-            attributes: [
-              { format: 'float32x2', offset: 0, shaderLocation: 0 },
-              { format: 'float32x2', offset: 8, shaderLocation: 1 },
-            ],
-          },
-        ],
-      },
-      fragment: {
-        module: this.getSdfShaderModule(),
-        entryPoint: 'fs_main',
-        targets: [
-          {
-            format: targetFormat,
-            blend: REPLACE_BLEND,
-            writeMask: GPUColorWrite.ALL,
-          },
-        ],
-      },
-      primitive: {
-        topology: 'triangle-list',
-        cullMode: 'none',
-      },
+      module: this.getSdfShaderModule(),
+      vertexEntry: 'vs_main',
+      fragmentEntry: 'fs_main',
+      targetFormat,
+      blend: REPLACE_BLEND,
     });
-
-    this.pipelines.set(key, pipeline);
-    return pipeline;
   }
-
-  // ─── Vector spine FACE pipelines (CPU-tessellated fill + boundary edge) ───
 
   getFaceShaderModule(): GPUShaderModule {
-    if (this.faceShaderModule) return this.faceShaderModule;
-    this.faceShaderModule = this.device.createShaderModule({
-      code: FACE_WGSL,
-      label: 'Face WGSL Module',
-    });
-    return this.faceShaderModule;
+    return this.getOrCreateShaderModule('face', 'Face WGSL Module', FACE_WGSL);
   }
 
-  /**
-   * Group-0-only uniform layout (dynamic offset), same shape as the SDF layout:
-   * the face draw binds just the FaceUniforms block — vertex data rides slot 0
-   * as a vertex buffer, no textures.
-   */
   getFaceBindGroupLayout(): GPUBindGroupLayout {
-    if (this.faceBindGroupLayout) return this.faceBindGroupLayout;
-    this.faceBindGroupLayout = this.device.createBindGroupLayout({
-      label: 'Face Bind Group Layout',
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
-          buffer: {
-            type: 'uniform',
-            hasDynamicOffset: true,
-            minBindingSize: FACE_UNIFORM_BUFFER_SIZE,
-          },
+    return this.getOrCreateBindGroupLayout('face', 'Face Bind Group Layout', [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+        buffer: {
+          type: 'uniform',
+          hasDynamicOffset: true,
+          minBindingSize: FACE_UNIFORM_BUFFER_SIZE,
         },
-      ],
-    });
-    return this.faceBindGroupLayout;
+      },
+    ]);
   }
 
   getFacePipelineLayout(): GPUPipelineLayout {
-    if (this.facePipelineLayout) return this.facePipelineLayout;
-    this.facePipelineLayout = this.device.createPipelineLayout({
-      bindGroupLayouts: [this.getFaceBindGroupLayout()],
-      label: 'Face Pipeline Layout',
-    });
-    return this.facePipelineLayout;
+    return this.getOrCreatePipelineLayout('face', 'Face Pipeline Layout', [this.getFaceBindGroupLayout()]);
   }
 
-  /** Vertex layout shared by both face pipelines: [x, y, dist, kind] stride 16. */
-  private getFaceVertexBuffers(): GPUVertexBufferLayout[] {
-    return [
-      {
-        arrayStride: 16,
-        stepMode: 'vertex',
-        attributes: [
-          { format: 'float32x2', offset: 0, shaderLocation: 0 },  // pos (logical px)
-          { format: 'float32', offset: 8, shaderLocation: 1 },    // dist (signed px)
-          { format: 'float32', offset: 12, shaderLocation: 2 },   // kind (0 fill, 1 edge)
-        ],
-      },
-    ];
-  }
-
-  /** Fill triangles — REPLACE blend (normalized interior triangles never overlap). */
   getFaceFillPipeline(targetFormat: GPUTextureFormat = 'rgba16float'): GPURenderPipeline {
     const key = `face-fill:${targetFormat}`;
-    const cached = this.pipelines.get(key);
-    if (cached) return cached;
-
-    const pipeline = this.device.createRenderPipeline({
+    return this.getOrCreateRenderPipeline({
+      cacheKey: key,
       label: `Face Fill Pipeline (${key})`,
       layout: this.getFacePipelineLayout(),
-      vertex: {
-        module: this.getFaceShaderModule(),
-        entryPoint: 'vs_face',
-        buffers: this.getFaceVertexBuffers(),
-      },
-      fragment: {
-        module: this.getFaceShaderModule(),
-        entryPoint: 'fs_face',
-        targets: [
-          { format: targetFormat, blend: REPLACE_BLEND, writeMask: GPUColorWrite.ALL },
-        ],
-      },
-      primitive: { topology: 'triangle-list', cullMode: 'none' },
+      module: this.getFaceShaderModule(),
+      vertexEntry: 'vs_face',
+      fragmentEntry: 'fs_face',
+      targetFormat,
+      blend: REPLACE_BLEND,
+      buffers: FACE_VERTEX_BUFFERS,
     });
-    this.pipelines.set(key, pipeline);
-    return pipeline;
   }
 
-  /**
-   * Boundary edge quads/joins — MAX blend: neighbouring edge quads overlap at
-   * joins, so a later quad's transparent AA rim must not REPLACE a neighbour's
-   * solid pixel (white speckle); per-channel max = coverage union (the stroke
-   * paint pipeline's documented fix).
-   */
   getFaceEdgePipeline(targetFormat: GPUTextureFormat = 'rgba16float'): GPURenderPipeline {
     const key = `face-edge:${targetFormat}`;
-    const cached = this.pipelines.get(key);
-    if (cached) return cached;
-
-    const pipeline = this.device.createRenderPipeline({
+    return this.getOrCreateRenderPipeline({
+      cacheKey: key,
       label: `Face Edge Pipeline (${key})`,
       layout: this.getFacePipelineLayout(),
-      vertex: {
-        module: this.getFaceShaderModule(),
-        entryPoint: 'vs_face',
-        buffers: this.getFaceVertexBuffers(),
-      },
-      fragment: {
-        module: this.getFaceShaderModule(),
-        entryPoint: 'fs_face',
-        targets: [
-          // src-over, NOT max: the edge band must PAINT OVER the fill — a
-          // dark stroke over a lighter fill would vanish channel-wise under
-          // `max`. The band geometry (quads + bevel join triangles) is built
-          // to tile its corners, so same-colour overlaps here are benign.
-          { format: targetFormat, blend: STRAIGHT_OVER_BLEND, writeMask: GPUColorWrite.ALL },
-        ],
-      },
-      primitive: { topology: 'triangle-list', cullMode: 'none' },
+      module: this.getFaceShaderModule(),
+      vertexEntry: 'vs_face',
+      fragmentEntry: 'fs_face',
+      targetFormat,
+      blend: STRAIGHT_OVER_BLEND,
+      buffers: FACE_VERTEX_BUFFERS,
     });
-    this.pipelines.set(key, pipeline);
-    return pipeline;
-  }
-
-  // ─── Vector spine STROKE pipelines (compute-extrude ribbon → paint) ───
-
-  getStrokeExtrudeShaderModule(): GPUShaderModule {
-    if (this.strokeExtrudeShaderModule) return this.strokeExtrudeShaderModule;
-    this.strokeExtrudeShaderModule = this.device.createShaderModule({
-      code: STROKE_EXTRUDE_WGSL,
-      label: 'Stroke Extrude WGSL Module',
-    });
-    return this.strokeExtrudeShaderModule;
-  }
-
-  /**
-   * Group-0 layout for `cs_extrude`: binding 0 = the trajectory `pts` (read-only
-   * storage), binding 1 = the ribbon `verts` (read_write storage). No dynamic offset —
-   * the StrokeRenderer binds each slot at an explicit offset from its own storage ring.
-   */
-  getStrokeExtrudeBindGroupLayout(): GPUBindGroupLayout {
-    if (this.strokeExtrudeBindGroupLayout) return this.strokeExtrudeBindGroupLayout;
-    this.strokeExtrudeBindGroupLayout = this.device.createBindGroupLayout({
-      label: 'Stroke Extrude Bind Group Layout',
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: 'read-only-storage' },
-        },
-        {
-          binding: 1,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: 'storage' },
-        },
-      ],
-    });
-    return this.strokeExtrudeBindGroupLayout;
-  }
-
-  getStrokeExtrudePipelineLayout(): GPUPipelineLayout {
-    if (this.strokeExtrudePipelineLayout) return this.strokeExtrudePipelineLayout;
-    this.strokeExtrudePipelineLayout = this.device.createPipelineLayout({
-      bindGroupLayouts: [this.getStrokeExtrudeBindGroupLayout()],
-      label: 'Stroke Extrude Pipeline Layout',
-    });
-    return this.strokeExtrudePipelineLayout;
-  }
-
-  /**
-   * The ribbon-extrusion COMPUTE pipeline. Format-agnostic (writes a storage buffer,
-   * not a storage texture), so a single cached instance serves every target format.
-   */
-  getStrokeExtrudePipeline(): GPUComputePipeline {
-    if (this.strokeExtrudePipeline) return this.strokeExtrudePipeline;
-    this.strokeExtrudePipeline = this.device.createComputePipeline({
-      label: 'Stroke Extrude Compute Pipeline',
-      layout: this.getStrokeExtrudePipelineLayout(),
-      compute: { module: this.getStrokeExtrudeShaderModule(), entryPoint: 'cs_extrude' },
-    });
-    return this.strokeExtrudePipeline;
-  }
-
-  // ─── vmask polygon fill COMPUTE pipeline ───
-
-  getVmaskShaderModule(): GPUShaderModule {
-    if (this.vmaskShaderModule) return this.vmaskShaderModule;
-    this.vmaskShaderModule = this.device.createShaderModule({
-      code: VMASK_WGSL,
-      label: 'Vmask WGSL Module',
-    });
-    return this.vmaskShaderModule;
-  }
-
-  /**
-   * Group-0 layout for `cs_main`: binding 0 = `VmaskUniforms` (STATIC offset — a
-   * fresh bind group is created per bake with the slot baked into `resource.offset`,
-   * so dynamic offset would buy nothing and, combined with a `setBindGroup` dynamic
-   * array, double-counted the slot offset → garbage read → transparent coverage),
-   * binding 1 =
-   * flattened edges of ALL sub-masks concatenated (read-only storage), binding 2 =
-   * the sub-mask table (`[edge_start, edge_count, feather, inverted]` per intersected
-   * sub-mask, read-only storage — mask multiplication), binding 3 = the `rgba8unorm` write-only
-   * storage texture the coverage field is baked into.
-   */
-  getVmaskBindGroupLayout(): GPUBindGroupLayout {
-    if (this.vmaskBindGroupLayout) return this.vmaskBindGroupLayout;
-    this.vmaskBindGroupLayout = this.device.createBindGroupLayout({
-      label: 'Vmask Bind Group Layout',
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: 'uniform', hasDynamicOffset: false, minBindingSize: VMASK_UNIFORM_SIZE },
-        },
-        {
-          binding: 1,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: 'read-only-storage' },
-        },
-        {
-          binding: 2,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: 'read-only-storage' },
-        },
-        {
-          binding: 3,
-          visibility: GPUShaderStage.COMPUTE,
-          storageTexture: { access: 'write-only', format: 'rgba8unorm', viewDimension: '2d' },
-        },
-      ],
-    });
-    return this.vmaskBindGroupLayout;
-  }
-
-  getVmaskPipelineLayout(): GPUPipelineLayout {
-    if (this.vmaskPipelineLayout) return this.vmaskPipelineLayout;
-    this.vmaskPipelineLayout = this.device.createPipelineLayout({
-      bindGroupLayouts: [this.getVmaskBindGroupLayout()],
-      label: 'Vmask Pipeline Layout',
-    });
-    return this.vmaskPipelineLayout;
-  }
-
-  /**
-   * The polygon-coverage COMPUTE pipeline. Fixed `rgba8unorm` storage output, so a
-   * single cached instance serves every mask size.
-   */
-  getVmaskPipeline(): GPUComputePipeline {
-    if (this.vmaskPipeline) return this.vmaskPipeline;
-    this.vmaskPipeline = this.device.createComputePipeline({
-      label: 'Vmask Compute Pipeline',
-      layout: this.getVmaskPipelineLayout(),
-      compute: { module: this.getVmaskShaderModule(), entryPoint: 'cs_main' },
-    });
-    return this.vmaskPipeline;
-  }
-
-  getBmaskCombineShaderModule(): GPUShaderModule {
-    if (this.bmaskCombineShaderModule) return this.bmaskCombineShaderModule;
-    this.bmaskCombineShaderModule = this.device.createShaderModule({
-      code: BMASK_COMBINE_WGSL,
-      label: 'Bmask Combine WGSL Module',
-    });
-    return this.bmaskCombineShaderModule;
-  }
-
-  /**
-   * Group-0 layout for the bmask combine compute pass: binding 0 = the 32B
-   * `BmaskCombineUniforms` dynamic-free uniform, binding 1 = the record texture
-   * this fold reads (textureLoad — no sampler), binding 2 = the running
-   * accumulator (previous fold's output; the record texture placeholder on the
-   * first fold), binding 3 = the `rgba8unorm` write-only storage texture the
-   * fold writes (an intermediate ping/pong accumulator, or the final combined
-   * output on the last fold).
-   */
-  getBmaskCombineBindGroupLayout(): GPUBindGroupLayout {
-    if (this.bmaskCombineBindGroupLayout) return this.bmaskCombineBindGroupLayout;
-    this.bmaskCombineBindGroupLayout = this.device.createBindGroupLayout({
-      label: 'Bmask Combine Bind Group Layout',
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.COMPUTE,
-          buffer: { type: 'uniform', hasDynamicOffset: false, minBindingSize: BMASK_COMBINE_UNIFORM_SIZE },
-        },
-        {
-          binding: 1,
-          visibility: GPUShaderStage.COMPUTE,
-          texture: { sampleType: 'float' },
-        },
-        {
-          binding: 2,
-          visibility: GPUShaderStage.COMPUTE,
-          texture: { sampleType: 'float' },
-        },
-        {
-          binding: 3,
-          visibility: GPUShaderStage.COMPUTE,
-          storageTexture: { access: 'write-only', format: 'rgba8unorm', viewDimension: '2d' },
-        },
-      ],
-    });
-    return this.bmaskCombineBindGroupLayout;
-  }
-
-  getBmaskCombinePipelineLayout(): GPUPipelineLayout {
-    if (this.bmaskCombinePipelineLayout) return this.bmaskCombinePipelineLayout;
-    this.bmaskCombinePipelineLayout = this.device.createPipelineLayout({
-      bindGroupLayouts: [this.getBmaskCombineBindGroupLayout()],
-      label: 'Bmask Combine Pipeline Layout',
-    });
-    return this.bmaskCombinePipelineLayout;
-  }
-
-  /**
-   * The bmask-coverage COMPUTE pipeline (one fold per record + the final
-   * two-family combine). Fixed `rgba8unorm` storage output, so a single cached
-   * instance serves every layer/record count.
-   */
-  getBmaskCombinePipeline(): GPUComputePipeline {
-    if (this.bmaskCombinePipeline) return this.bmaskCombinePipeline;
-    this.bmaskCombinePipeline = this.device.createComputePipeline({
-      label: 'Bmask Combine Compute Pipeline',
-      layout: this.getBmaskCombinePipelineLayout(),
-      compute: { module: this.getBmaskCombineShaderModule(), entryPoint: 'cs_main' },
-    });
-    return this.bmaskCombinePipeline;
   }
 
   getStrokePaintShaderModule(): GPUShaderModule {
-    if (this.strokePaintShaderModule) return this.strokePaintShaderModule;
-    this.strokePaintShaderModule = this.device.createShaderModule({
-      code: STROKE_PAINT_WGSL,
-      label: 'Stroke Paint WGSL Module',
-    });
-    return this.strokePaintShaderModule;
+    return this.getOrCreateShaderModule('stroke-paint', 'Stroke Paint WGSL Module', STROKE_PAINT_WGSL);
   }
 
-  /**
-   * Group-0 layout for the paint pass: the sole `StrokeUniforms` dynamic-offset buffer.
-   * VERTEX visibility too — `vs_paint` reads `u.target_size` to map the trajectory into
-   * NDC (a FRAGMENT-only visibility would reject the pipeline at creation, the classic
-   * bindgroup-visibility trap).
-   */
   getStrokeRenderBindGroupLayout(): GPUBindGroupLayout {
-    if (this.strokeRenderBindGroupLayout) return this.strokeRenderBindGroupLayout;
-    this.strokeRenderBindGroupLayout = this.device.createBindGroupLayout({
-      label: 'Stroke Render Bind Group Layout',
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
-          buffer: {
-            type: 'uniform',
-            hasDynamicOffset: true,
-            minBindingSize: STROKE_UNIFORM_BUFFER_SIZE,
-          },
+    return this.getOrCreateBindGroupLayout('stroke-render', 'Stroke Render Bind Group Layout', [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+        buffer: {
+          type: 'uniform',
+          hasDynamicOffset: true,
+          minBindingSize: STROKE_UNIFORM_BUFFER_SIZE,
         },
-      ],
-    });
-    return this.strokeRenderBindGroupLayout;
+      },
+    ]);
   }
 
   getStrokeRenderPipelineLayout(): GPUPipelineLayout {
-    if (this.strokeRenderPipelineLayout) return this.strokeRenderPipelineLayout;
-    this.strokeRenderPipelineLayout = this.device.createPipelineLayout({
-      bindGroupLayouts: [this.getStrokeRenderBindGroupLayout(), this.getStrokeConfinementBindGroupLayout()],
-      label: 'Stroke Render Pipeline Layout',
-    });
-    return this.strokeRenderPipelineLayout;
+    return this.getOrCreatePipelineLayout('stroke-render', 'Stroke Render Pipeline Layout', [
+      this.getStrokeRenderBindGroupLayout(),
+      this.getStrokeConfinementBindGroupLayout(),
+    ]);
   }
 
-  /**
-   * Group-1 layout: the confinement coverage texture + its sampler (FRAGMENT
-   * only). ALWAYS bound — unconstrained strokes bind a 1×1 alpha=1 dummy so a
-   * single pipeline serves confined and free strokes alike (no pipeline-pair
-   * explosion, no per-draw layout branching).
-   */
   getStrokeConfinementBindGroupLayout(): GPUBindGroupLayout {
-    if (this.strokeConfinementBindGroupLayout) return this.strokeConfinementBindGroupLayout;
-    this.strokeConfinementBindGroupLayout = this.device.createBindGroupLayout({
-      label: 'Stroke Confinement Bind Group Layout',
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float' },
-        },
-        {
-          binding: 1,
-          visibility: GPUShaderStage.FRAGMENT,
-          sampler: { type: 'filtering' },
-        },
-      ],
-    });
-    return this.strokeConfinementBindGroupLayout;
+    return this.getOrCreateBindGroupLayout('stroke-confinement', 'Stroke Confinement Bind Group Layout', [
+      { binding: 0, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+      { binding: 1, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+    ]);
   }
 
-  /**
-   * The group-1 bind group: either the given confinement coverage texture, or
-   * the lazily-created 1×1 dummy whose red channel is 1 (coverage multiply by
-   * 1 = unconstrained). The dummy is OWNED (never pooled — it must live for
-   * the pipeline's lifetime) and destroyed only via device loss.
-   */
   getStrokeConfinementBindGroup(coverageView?: GPUTextureView): GPUBindGroup {
     if (!coverageView) {
       if (!this.strokeConfinementDummy) {
@@ -2317,242 +1455,99 @@ export class PipelineCache {
 
   private getStrokeConfinementSampler(): GPUSampler {
     if (!this.strokeConfinementDummy) {
-      // Ensure the dummy exists so its sampler is reused (single sampler).
       this.getStrokeConfinementBindGroup(undefined);
     }
     return this.strokeConfinementDummy!.sampler;
   }
 
-  /**
-   * Acquire the stroke PAINT pipeline. The vertex buffer is the flat-f32 ribbon
-   * `cs_extrude` produced (arrayStride 40: pos @0, a @8, b @16, radii @24, alphas @32).
-   * MAX blend (coverage
-   * union): per-segment quads overlap on the inner side of every turn, so a later
-   * segment's AA edge must not REPLACE a neighbour's solid pixel with a transparent one
-   * (the white-speckle artifact). The colour is constant across the stroke, so `max`
-   * yields the union of soft-edge coverage without holes or double-darkening. Consumed
-   * downstream as an ordinary straight-alpha source.
-   */
   getStrokePipeline(targetFormat: GPUTextureFormat = 'rgba16float'): GPURenderPipeline {
     const key = `stroke:${targetFormat}`;
-    const cached = this.pipelines.get(key);
-    if (cached) return cached;
-
-    const pipeline = this.device.createRenderPipeline({
+    return this.getOrCreateRenderPipeline({
+      cacheKey: key,
       label: `Stroke Pipeline (${key})`,
       layout: this.getStrokeRenderPipelineLayout(),
-      vertex: {
-        module: this.getStrokePaintShaderModule(),
-        entryPoint: 'vs_paint',
-        buffers: [
-          {
-            arrayStride: STROKE_VERTEX_STRIDE,
-            stepMode: 'vertex',
-            attributes: [
-              { format: 'float32x2', offset: 0, shaderLocation: 0 },  // pos
-              { format: 'float32x2', offset: 8, shaderLocation: 1 },  // core_a
-              { format: 'float32x2', offset: 16, shaderLocation: 2 }, // core_b
-              { format: 'float32x2', offset: 24, shaderLocation: 3 }, // radii (ra, rb)
-              { format: 'float32x2', offset: 32, shaderLocation: 4 }, // endpoint alphas
-            ],
-          },
-        ],
-      },
-      fragment: {
-        module: this.getStrokePaintShaderModule(),
-        entryPoint: 'fs_paint',
-        targets: [
-          {
-            format: targetFormat,
-            blend: MAX_BLEND,
-            writeMask: GPUColorWrite.ALL,
-          },
-        ],
-      },
-      primitive: {
-        topology: 'triangle-list',
-        cullMode: 'none',
-      },
+      module: this.getStrokePaintShaderModule(),
+      vertexEntry: 'vs_paint',
+      fragmentEntry: 'fs_paint',
+      targetFormat,
+      blend: MAX_BLEND,
+      buffers: STROKE_VERTEX_BUFFERS,
     });
-
-    this.pipelines.set(key, pipeline);
-    return pipeline;
   }
-
-  // ─── Vector spine TEXT pipeline (instanced glyph quads × coverage atlas) ───
 
   getTextPaintShaderModule(): GPUShaderModule {
-    if (this.textPaintShaderModule) return this.textPaintShaderModule;
-    this.textPaintShaderModule = this.device.createShaderModule({
-      code: TEXT_PAINT_WGSL,
-      label: 'Text Paint WGSL Module',
-    });
-    return this.textPaintShaderModule;
+    return this.getOrCreateShaderModule('text-paint', 'Text Paint WGSL Module', TEXT_PAINT_WGSL);
   }
 
-  /**
-   * Group-0 layout for the text paint pass: the dynamic-offset uniform (VERTEX
-   * reads `target_size` for the NDC map — the classic bindgroup-visibility trap
-   * again), the coverage atlas texture (r-channel grayscale), and a filtering
-   * sampler. The texture binding has NO dynamic offset: the TextRenderer issues
-   * one draw per atlas PAGE, binding each page texture directly.
-   */
   getTextBindGroupLayout(): GPUBindGroupLayout {
-    if (this.textBindGroupLayout) return this.textBindGroupLayout;
-    this.textBindGroupLayout = this.device.createBindGroupLayout({
-      label: 'Text Bind Group Layout',
-      entries: [
-        {
-          binding: 0,
-          visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
-          buffer: {
-            type: 'uniform',
-            hasDynamicOffset: true,
-            minBindingSize: TEXT_UNIFORM_BUFFER_SIZE,
-          },
+    return this.getOrCreateBindGroupLayout('text', 'Text Bind Group Layout', [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
+        buffer: {
+          type: 'uniform',
+          hasDynamicOffset: true,
+          minBindingSize: TEXT_UNIFORM_BUFFER_SIZE,
         },
-        {
-          binding: 1,
-          visibility: GPUShaderStage.FRAGMENT,
-          texture: { sampleType: 'float' },
-        },
-        {
-          binding: 2,
-          visibility: GPUShaderStage.FRAGMENT,
-          sampler: { type: 'filtering' },
-        },
-      ],
-    });
-    return this.textBindGroupLayout;
+      },
+      { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+      { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+    ]);
   }
 
   getTextPipelineLayout(): GPUPipelineLayout {
-    if (this.textPipelineLayout) return this.textPipelineLayout;
-    this.textPipelineLayout = this.device.createPipelineLayout({
-      bindGroupLayouts: [this.getTextBindGroupLayout()],
-      label: 'Text Pipeline Layout',
-    });
-    return this.textPipelineLayout;
+    return this.getOrCreatePipelineLayout('text', 'Text Pipeline Layout', [this.getTextBindGroupLayout()]);
   }
 
-  /**
-   * Acquire the text PAINT pipeline. Vertex input: buffer 0 = the shared unit
-   * quad (stride 16, `corner` at location 0 — location 1 carries the quad's uv
-   * which this shader does not consume; unused vertex attributes are legal),
-   * buffer 1 = per-glyph instances (stride {@link TEXT_INSTANCE_STRIDE},
-   * stepMode `instance`: origin/size/uv_min/uv_size at locations 2-5). MAX
-   * blend (coverage union) like the stroke paint pass: overlapping glyph
-   * coverage (negative letterSpacing, decoration × descender) must merge
-   * without holes or double-darkening.
-   */
   getTextPipeline(targetFormat: GPUTextureFormat = 'rgba16float'): GPURenderPipeline {
     const key = `text:${targetFormat}`;
-    const cached = this.pipelines.get(key);
-    if (cached) return cached;
-
-    const pipeline = this.device.createRenderPipeline({
+    return this.getOrCreateRenderPipeline({
+      cacheKey: key,
       label: `Text Pipeline (${key})`,
       layout: this.getTextPipelineLayout(),
-      vertex: {
-        module: this.getTextPaintShaderModule(),
-        entryPoint: 'vs_text_instanced',
-        buffers: [
-          {
-            arrayStride: 16,
-            stepMode: 'vertex',
-            attributes: [
-              { format: 'float32x2', offset: 0, shaderLocation: 0 },  // corner
-              { format: 'float32x2', offset: 8, shaderLocation: 1 },  // quad uv (unused)
-            ],
-          },
-          {
-            arrayStride: TEXT_INSTANCE_STRIDE,
-            stepMode: 'instance',
-            attributes: [
-              { format: 'float32x2', offset: 0, shaderLocation: 2 },  // origin
-              { format: 'float32x2', offset: 8, shaderLocation: 3 },  // size
-              { format: 'float32x2', offset: 16, shaderLocation: 4 }, // uv_min
-              { format: 'float32x2', offset: 24, shaderLocation: 5 }, // uv_size
-            ],
-          },
-        ],
-      },
-      fragment: {
-        module: this.getTextPaintShaderModule(),
-        entryPoint: 'fs_text',
-        targets: [
-          {
-            format: targetFormat,
-            blend: MAX_BLEND,
-            writeMask: GPUColorWrite.ALL,
-          },
-        ],
-      },
-      primitive: {
-        topology: 'triangle-list',
-        cullMode: 'none',
-      },
+      module: this.getTextPaintShaderModule(),
+      vertexEntry: 'vs_text_instanced',
+      fragmentEntry: 'fs_text',
+      targetFormat,
+      blend: MAX_BLEND,
+      buffers: TEXT_VERTEX_BUFFERS,
     });
-
-    this.pipelines.set(key, pipeline);
-    return pipeline;
   }
 
   destroy(): void {
     this.pipelines.clear();
+    this.computePipelines.clear();
+    this.shaderModules.clear();
+    this.bindGroupLayouts.clear();
+    this.pipelineLayouts.clear();
+
     this.quadVertexBuffer?.destroy();
     this.defaultMaskTexture?.destroy();
+    this.defaultSourceTexture?.destroy();
     this.defaultAdjustBuffer?.destroy();
     this.identityLutTexture?.destroy();
     this.identityLut3dTexture?.destroy();
     this.defaultCoverageArrayTexture?.destroy();
-    this.defaultCoverageArrayTexture = null;
-    this.defaultCoverageArrayView = null;
+    this.gainDummyTexture?.destroy();
+    this.strokeConfinementDummy?.texture.destroy();
+
     this.quadVertexBuffer = null;
     this.linearSampler = null;
     this.nearestSampler = null;
     this.defaultMaskTexture = null;
     this.defaultMaskView = null;
-    this.layerShaderModule = null;
-    this.layerBindGroupLayout = null;
-    this.layerPipelineLayout = null;
-    this.blendShaderModule = null;
-    this.blendBindGroupLayout = null;
-    this.blendPipelineLayout = null;
-    this.viewShaderModule = null;
-    this.viewHdrShaderModule = null;
-    this.viewBindGroupLayout = null;
-    this.viewPipelineLayout = null;
-    this.sdfShaderModule = null;
-    this.sdfBindGroupLayout = null;
-    this.sdfPipelineLayout = null;
-    this.faceShaderModule = null;
-    this.faceBindGroupLayout = null;
-    this.facePipelineLayout = null;
-    this.strokeExtrudeShaderModule = null;
-    this.strokeExtrudeBindGroupLayout = null;
-    this.strokeExtrudePipelineLayout = null;
-    this.strokeExtrudePipeline = null;
-    this.strokePaintShaderModule = null;
-    this.strokeRenderBindGroupLayout = null;
-    this.strokeRenderPipelineLayout = null;
-    this.textPaintShaderModule = null;
-    this.textBindGroupLayout = null;
-    this.textPipelineLayout = null;
-    this.vmaskShaderModule = null;
-    this.vmaskBindGroupLayout = null;
-    this.vmaskPipelineLayout = null;
-    this.vmaskPipeline = null;
-    this.bmaskCombineShaderModule = null;
-    this.bmaskCombineBindGroupLayout = null;
-    this.bmaskCombinePipelineLayout = null;
-    this.bmaskCombinePipeline = null;
-    this.adjustBindGroupLayout = null;
+    this.defaultSourceTexture = null;
     this.defaultAdjustBuffer = null;
     this.defaultAdjustBindGroup = null;
     this.lutSampler = null;
     this.identityLutTexture = null;
     this.identityLutView = null;
+    this.defaultCoverageArrayTexture = null;
+    this.defaultCoverageArrayView = null;
+    this.identityLut3dTexture = null;
+    this.identityLut3dView = null;
+    this.gainDummyTexture = null;
     this.gainDummyView = null;
+    this.strokeConfinementDummy = null;
   }
 }
