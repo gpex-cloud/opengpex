@@ -29,6 +29,8 @@
  */
 
 import React from 'react';
+import FancySvgSlider from '@opengpex/editor/widgets/FancySvgSlider';
+import type { EffectNumericParamSpec } from '@opengpex/editor/core/layer/effects';
 
 /** Section row: the tiny uppercase label above one parameter control. */
 export function PanelSection({
@@ -44,6 +46,56 @@ export function PanelSection({
         {label}
       </span>
       {children}
+    </div>
+  );
+}
+
+/**
+ * SpecSliderRow — the generic numeric parameter row driven by the core spec
+ * table (`EFFECT_PARAM_SPECS`): label/range/step/precision/unit/aria all
+ * come from the spec, the panel only feeds the value and the gesture
+ * channel (onDragStart/onChange/onDragEnd/onFieldCommit — the fast-track
+ * lifecycle whose shape is identical across panels; spread a panel's
+ * `bindNumericParam` result straight into these props).
+ */
+export function SpecSliderRow({
+  spec,
+  value,
+  disabled,
+  onDragStart,
+  onChange,
+  onDragEnd,
+  onFieldCommit,
+}: {
+  spec: EffectNumericParamSpec;
+  value: number;
+  disabled?: boolean;
+  onDragStart?: () => void;
+  onChange: (value: number) => void;
+  onDragEnd?: () => void;
+  onFieldCommit?: (value: number) => void;
+}) {
+  return (
+    <div className="flex items-center gap-1">
+      <FancySvgSlider
+        className="flex-1"
+        value={value}
+        min={spec.min}
+        max={spec.max}
+        step={spec.step}
+        precision={spec.precision}
+        slim
+        withInput
+        disabled={disabled}
+        ariaLabel={spec.ariaLabel}
+        onDragStart={onDragStart}
+        onChange={onChange}
+        onDragEnd={onDragEnd}
+        onFieldCommit={onFieldCommit}
+      />
+      {spec.unit && (
+        <span className="text-[8px] font-bold text-[var(--text-muted)] shrink-0">{spec.unit}</span>
+      )}
     </div>
   );
 }

@@ -44,15 +44,14 @@
 
 import React, { useState } from 'react';
 import ColorSwatchRow from '@opengpex/editor/widgets/ColorSwatchRow';
-import FancySvgSlider from '@opengpex/editor/widgets/FancySvgSlider';
 import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
 import { BLEND_MODE_DROPDOWN_OPTIONS, BLEND_MODE_LABEL_MAP } from '@opengpex/editor/widgets/blendModes';
 import type { EffectInstance, Layer, OuterGlowParams, LayerBlendMode } from '@opengpex/editor/core/types/models';
-import { updateEffectParams } from '@opengpex/editor/core/layer/effects';
+import { upsertEffectParams, effectParamSpecs } from '@opengpex/editor/core/layer/effects';
 import { usePluginCommands } from '@opengpex/editor/core/context';
 import { useFilterGesture } from '@opengpex/editor/plugins/base/drawers/AdjustmentDrawer/hooks';
 import type { LayerEffectsDrawerCommandsMap } from '../../commands.d';
-import { PanelSection } from './shared';
+import { PanelSection, SpecSliderRow } from './shared';
 
 export function OuterGlowPanel({
   layer,
@@ -70,6 +69,9 @@ export function OuterGlowPanel({
   const gesture = useFilterGesture(beginEffectEditCmd);
 
   const params = instance.params as OuterGlowParams;
+  // Numeric rows are SPEC-DRIVEN (core EFFECT_PARAM_SPECS — the single
+  // source of truth for label/range/step/unit/aria; see arch/26).
+  const specs = effectParamSpecs(instance.category);
 
   // Fast-drag mirrors: while a drag runs, the store stays frozen until the
   // gesture's single commit, so the controls feed from THIS local state.
@@ -80,11 +82,11 @@ export function OuterGlowPanel({
 
   // Shared fast write: full OuterGlowParams against the freshest draft.
   const fastWrite = (next: OuterGlowParams) => {
-    fastUpdateEffectCmd?.execute({ instanceId: instance.id, params: next });
+    fastUpdateEffectCmd?.execute({ instanceId: instance.id, category: instance.category, params: next });
   };
 
   const applyOneShot = (next: OuterGlowParams) => {
-    const patch = updateEffectParams(layer, instance.id, next);
+    const patch = upsertEffectParams(layer, instance.category, instance.id, next);
     if (patch) applyEffectPatchCmd?.execute({ patch });
   };
 
@@ -221,55 +223,27 @@ export function OuterGlowPanel({
           onValueCommit={handleColorCommit}
         />
       </div>
-      <PanelSection label="Blur">
-        {/* The unit sits inline after the slider's numeric field (house
-            pattern). UI range 0..50 px — the translator clamps the same
-            bounds. */}
-        <div className="flex items-center gap-1">
-          <FancySvgSlider
-            className="flex-1"
-            value={fastBlur ?? params.blurRadius}
-            min={0}
-            max={50}
-            step={1}
-            precision={0}
-            slim
-            withInput
-            ariaLabel="Outer glow blur"
-            {...blurChannel}
-          />
-          <span className="text-[8px] font-bold text-[var(--text-muted)] shrink-0">px</span>
-        </div>
+      <PanelSection label={specs.blurRadius.label}>
+        {/* UI range 0..50 px — the translator clamps the same bounds. */}
+        <SpecSliderRow
+          spec={specs.blurRadius}
+          value={fastBlur ?? params.blurRadius}
+          {...blurChannel}
+        />
       </PanelSection>
-      <PanelSection label="Spread">
+      <PanelSection label={specs.spreadPx.label}>
         {/* Silhouette dilation before the blur — grows the halo WITHOUT
             softening it. The glow's Spread has no negative range: 0..50 px. */}
-        <div className="flex items-center gap-1">
-          <FancySvgSlider
-            className="flex-1"
-            value={fastSpread ?? params.spreadPx ?? 0}
-            min={0}
-            max={50}
-            step={1}
-            precision={0}
-            slim
-            withInput
-            ariaLabel="Outer glow spread"
-            {...spreadChannel}
-          />
-          <span className="text-[8px] font-bold text-[var(--text-muted)] shrink-0">px</span>
-        </div>
+        <SpecSliderRow
+          spec={specs.spreadPx}
+          value={fastSpread ?? params.spreadPx ?? 0}
+          {...spreadChannel}
+        />
       </PanelSection>
-      <PanelSection label="Strength">
-        <FancySvgSlider
+      <PanelSection label={specs.strength.label}>
+        <SpecSliderRow
+          spec={specs.strength}
           value={fastStrength ?? params.strength ?? 1}
-          min={0}
-          max={1}
-          step={0.01}
-          precision={2}
-          slim
-          withInput
-          ariaLabel="Outer glow strength"
           {...strengthChannel}
         />
       </PanelSection>

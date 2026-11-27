@@ -22,26 +22,27 @@
 /**
  * LayerEffectsDrawerComponent (A8 P3) — the vertical-tab drawer.
  *
- * TAB MODEL (user rulings 20261125 + 20261126): the rail ALWAYS renders all
- * TEN PS categories (the family's final shape stays visible; unimplemented
- * ones are empty placeholder tabs exactly like Shadow before P5), and
- * the header dropdown is the SAME data's second entry point — both stay.
- * Each AVAILABLE category carries at least one tab:
+ * TAB MODEL (user rulings 20261125 + 20261126; entry-write ruling
+ * 20261127): the rail ALWAYS renders all shipped PS categories (the
+ * family's final shape stays visible; unimplemented ones are empty
+ * placeholder tabs exactly like Shadow before P5), and the header dropdown
+ * is the SAME data's second entry point — both stay. Each AVAILABLE
+ * category resolves to:
  *
- *   • zero instances → one transient VIRTUAL tab, auto-materialized the
- *     moment the category's panel is entered (the lazy-floor ensure writes a
- *     DISABLED instance with default parameters through the patch channel);
- *     the eye on it creates the instance enabled directly (PS checkbox
- *     semantics — one click lands a visibly-on effect);
- *   • n instances → n tabs in chain order, the first anchored at the
- *     category's PS-menu position, ordinally labelled ("Stroke", "Stroke 2").
+ *   • zero instances → one placeholder VIRTUAL tab. OPENING it writes
+ *     NOTHING (the retired lazy-floor auto-materialization was the original
+ *     sin: an undoable write per drawer open — a meaningless Undo step and
+ *     a ⌘Z fight). The eye on it creates the instance enabled (PS checkbox
+ *     semantics); the FIRST parameter edit lands a DISABLED carrier with
+ *     the edited values (editing must not switch the effect on);
+ *   • n instances → n tabs in chain order — enabled AND disabled (a
+ *     disabled instance is the OFF tab carrying its edited parameters),
+ *     ordinally labelled ("Stroke", "Stroke 2").
  *
- * Inside the drawer a category is therefore UNIFORMLY "enabled vs disabled"
- * instances — the panel always addresses a real chain instance and shows its
- * parameters even while the eye is off. Delete is floor-guarded (a category
- * never empties — "no effect" is a disabled instance, never a missing one).
- * The header "+" inserts a new same-category instance beneath the active tab
- * (chain order = tab order).
+ * The eye is a pure enabled-flag flip (params survive the toggle); deletion
+ * is the trash's job and is unconditional (a category may empty back to its
+ * placeholder). The header "+" inserts a new same-category instance beneath
+ * the active tab (chain order = tab order).
  *
  * Parameter rows run the Q4 fast channel (identical to the adjustments
  * sliders): one undoable checkpoint on pointerdown, volatile-buffer writes
@@ -51,7 +52,7 @@
  * tab resolution, header, panel routing).
  */
 
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Eye, EyeOff, Plus, RotateCcw as ResetIcon, Trash2 } from "lucide-react";
 import { EfxIcon } from "../icon";
@@ -67,10 +68,8 @@ import {
   defaultParamsFor,
   disableAllEffectInstances,
   updateEffectParams,
-  ensureEffectCategoryInstance,
   effectInstanceOrdinal,
   getEffectChain,
-  isCategoryFloorInstance,
   newEffectInstanceId,
 } from "@opengpex/editor/core/layer/effects";
 import type { LayerEffectsDrawerCommandsMap, LayerEffectsDrawerSignalsMap } from "../commands.d";
@@ -180,15 +179,6 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
     [activeLayer],
   );
   const rail = useMemo(() => buildRail(chain), [chain]);
-  // [A8-DEBUG-RAILLABEL] temporary diagnosis log — remove once the
-  // "Stroke 2 shows as Stroke" mismatch is closed.
-  React.useEffect(() => {
-    console.debug(
-      `[A8 rail] layer=${activeLayer?.id ?? "none"} chainLen=${chain.length}`
-      + ` chain=[${chain.map((i) => `${i.category}:${i.id}:${i.enabled}`).join(", ")}]`
-      + ` rail=[${rail.map((t) => `${t.label}<${t.id.slice(0, 10)}${t.instance ? "inst" : "virt"}>`).join(", ")}]`,
-    );
-  }, [activeLayer, chain, rail]);
 
   // Active-tab resolution, fully render-derived (no effects, no
   // set-state-in-effect), three inputs in priority order:
@@ -199,82 +189,75 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
   //   3. the layer-switch default (chain mutations / layer switches fall back
   //      here): the first ENABLED instance's tab — the panel follows what is
   //      actually rendering on the newly-selected layer; when NOTHING is
-  //      enabled, the first AVAILABLE category's tab (stroke), which the
-  //      lazy-floor ensure below materializes into a real disabled instance
-  //      the moment the drawer opens on it.
-  const [override, setOverride] = useState<{ id: string; nonce: number } | null>(null);
-  // (layer, category) pairs this mount already materialized a floor instance
-  // for — see the undo guard inside the lazy-floor effect below.
-  const materializedRef = React.useRef<Set<string>>(new Set());
-  const selectTab = (id: string) => setOverride({ id, nonce: jumpNonce });
-  const overrideActive = !!override
-    && override.nonce === jumpNonce
-    && rail.some((t) => t.id === override.id);
+  //      enabled, the first AVAILABLE category's tab (stroke).
+  const [override, setOverride] = useState<{
+    layerId: string;
+    id: string;
+    category: string;
+    nonce: number;
+  } | null>(null);
+  const selectTab = (id: string, category?: string) => {
+    if (!activeLayer) return;
+    const resolvedCategory =
+      category ??
+      (isVirtualTabId(id)
+        ? virtualTabCategory(id)
+        : rail.find((t) => t.id === id)?.category ?? activeCategory);
+    setOverride({ layerId: activeLayer.id, id, category: resolvedCategory, nonce: jumpNonce });
+  };
+  // Resolve the user's manual override when it belongs to the active layer and
+  // hasn't been superseded by a newer jump signal:
+  //   1. Exact tab id match (normal selection, or multi-instance selection);
+  //   2. Same-category fallback when the exact id disappears — covers both a
+  //      placeholder (`virtual:<cat>`) materializing into a real instance on
+  //      first parameter edit, and deleting/undoing an instance back to its
+  //      sibling or placeholder without snapping back to Stroke.
+  const overrideTab =
+    override && activeLayer && override.layerId === activeLayer.id && override.nonce === jumpNonce
+      ? (rail.find((t) => t.id === override.id) ??
+         rail.find((t) => t.category === override.category) ??
+         null)
+      : null;
   const signalTab = jump && rail.some((t) => t.id === jump.instanceId)
     ? jump.instanceId
     : null;
   const firstAvailableTabId = rail.find((t) => t.available)?.id ?? rail[0]?.id ?? "";
   const defaultTabId =
     rail.find((t) => t.instance?.enabled)?.id ?? firstAvailableTabId;
-  const resolvedActiveId = overrideActive
-    ? override.id
+  // Placeholder tab → pre-generated STABLE carrier id, lazily registered
+  // per (layer, category) in a ref map so React keys and the fast-drag
+  // channel stay stable across the virtual → materialized transition.
+  const pendingIdsRef = useRef<Map<string, string>>(new Map());
+  const pendingIdFor = (layerId: string, category: string): string => {
+    const k = `${layerId}:${category}`;
+    let id = pendingIdsRef.current.get(k);
+    if (!id) {
+      id = newEffectInstanceId();
+      pendingIdsRef.current.set(k, id);
+    }
+    return id;
+  };
+  const resolvedActiveId = overrideTab
+    ? overrideTab.id
     : signalTab ?? defaultTabId;
   const activeRailTab = rail.find((t) => t.id === resolvedActiveId) ?? null;
   const activeCategory = activeRailTab?.category ?? "stroke";
-  // [A8-DEBUG-RAILLABEL] temporary diagnosis log — remove with the block above.
-  console.debug(
-    `[A8 rail] resolved=${resolvedActiveId.slice(0, 10)} override=${override ? `${override.id.slice(0, 10)}@${override.nonce}` : "null"}`
-    + ` jumpNonce=${jumpNonce} signalTab=${signalTab?.slice(0, 10) ?? "null"}`
-    + ` activeLabel=${activeRailTab?.label ?? "none"}`,
-  );
   const canAdd = !!activeLayer
     && activeRailTab?.available === true
     && (ADDABLE_CATEGORIES as readonly string[]).includes(activeCategory);
 
-  // Lazy floor materialization (user ruling 20261126): entering an AVAILABLE
-  // category that has no instance yet lands its DISABLED floor instance via
-  // the patch channel — the panel's parameters then always address a real
-  // chain instance, and "no effect" is uniformly a disabled instance, never
-  // a missing one. Idempotent (ensure returns null when the category already
-  // has an instance), so the effect only ever fires for the transient
-  // zero-instance frame; one Undo step per category, at the moment the user
-  // first edits that category on this layer.
-  React.useEffect(() => {
-    if (!activeLayer || !applyEffectPatchCmd) return;
-    if (!activeRailTab?.available || activeRailTab.instance) return;
-    // UNDO GUARD: the floor patch is undoable, so ⌘Z can strip the instance
-    // back off. Re-running this effect would immediately re-materialize it
-    // (a fresh undoable patch + a tab-select flash), so every subsequent
-    // ⌘Z gets silently eaten by a remove/re-add loop and undo appears dead
-    // while the drawer is open. Materializing once per (layer, category) is
-    // enough: after an undo the category stays on its virtual tab (the eye
-    // still creates an instance on demand), and a real re-entry — switching
-    // to another layer and back — remounts state through a different key.
-    const materializedKey = `${activeLayer.id}:${activeRailTab.category}`;
-    if (materializedRef.current.has(materializedKey)) return;
-    // The drawer generates the id (appendEffectInstance precedent) so the
-    // tab selection can FOLLOW the materialized instance: the virtual-tab
-    // override would otherwise dangle once the rail replaces `virtual:<cat>`
-    // with the real instance id (observed on device: the first click on an
-    // untouched category flashed and fell back to the previous tab).
-    const id = newEffectInstanceId();
-    const patch = ensureEffectCategoryInstance(
-      activeLayer,
-      activeRailTab.category as EffectCategory,
-      { id },
-    );
-    if (patch) {
-      materializedRef.current.add(materializedKey);
-      applyEffectPatchCmd.execute({ patch });
-      selectTab(id);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeLayer, activeRailTab?.available, activeRailTab?.instance, applyEffectPatchCmd]);
+  // NO ENTRY WRITE (20261127 ruling): opening a category's panel — or the
+  // drawer itself — must never write the layer. The retired lazy-floor
+  // auto-materialization spent an Undo step per drawer open and fought ⌘Z
+  // (its undoable patch was the step ⌘Z consumed, and the ensure effect
+  // re-materialized what ⌘Z removed). Instances exist only after an
+  // explicit user act: the eye (enable with defaults) or a parameter edit
+  // (disabled carrier — see handlePanelEdit below).
 
-  // The EYE is the on/off switch: real instance → toggle enabled. On the
-  // transient zero-instance tab (a category never touched on this layer) it
-  // CREATES the instance enabled — one click lands a visibly-on effect, the
-  // PS checkbox semantics (§5.2).
+  // The EYE is the on/off switch: a real instance flips `enabled` (params
+  // survive the toggle). On the untouched zero-instance tab it CREATES the
+  // instance enabled — one click lands a visibly-on effect, the PS checkbox
+  // semantics (§5.2).
   const handleEye = (railTab: RailTab) => {
     if (!activeLayer || !applyEffectPatchCmd) return;
     if (railTab.instance) {
@@ -293,18 +276,29 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
     // instance enabled (PS checkbox semantics).
     const patch = appendEffectInstance(activeLayer, virtualTabCategory(railTab.id), { id, enabled: true });
     applyEffectPatchCmd.execute({ patch });
-    selectTab(id);
+    selectTab(id, railTab.category);
   };
+
+  // ─── First-interaction materialization (20261127 ruling) ─────────────────
+  // A placeholder tab renders the FULL parameter panel against factory
+  // defaults (so an OFF effect can be configured before it is switched on),
+  // but nothing exists in the chain yet. Materialization happens INSIDE the
+  // first parameter write — NOT on pointerdown (an entry-time write was its
+  // own undo step, the exact "meaningless undo" this model removes): the
+  // panels write through the commands' UPSERT channel (upsertEffectParams),
+  // which lands the DISABLED carrier with the edited values under this
+  // pre-generated STABLE id (declared above the tab resolution — the
+  // pending-tab carry reads it), so "instance + first parameters" hit
+  // history as the gesture's ONE undo step. Opening the panel alone writes
+  // nothing.
 
   const tabs: VerticalTabItem[] = useMemo(() => {
     return rail.map((railTab) => {
-      // Delete-button floor guard: a virtual (not-yet-materialized) tab has
-      // nothing to delete, so its trash renders in the same dimmed floor
-      // state — the button ROW stays aligned across every tab (user ruling
-      // 20261126: keep the virtual tabs, render the delete button everywhere).
-      const floor = railTab.instance
-        ? (activeLayer ? isCategoryFloorInstance(activeLayer, railTab.instance.id) : false)
-        : true;
+      // Presence of the delete affordance: a real instance is deletable
+      // outright (deletion is unconditional — a category may empty back to
+      // its placeholder tab); a placeholder tab has nothing to delete, so
+      // its trash renders dimmed (the button ROW stays aligned across every
+      // tab — user ruling 20261126).
       const enabled = railTab.instance ? railTab.instance.enabled : false;
       const eyeVisible = railTab.available;
       return {
@@ -343,19 +337,19 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
               <span
                 role="button"
                 aria-label={railTab.instance
-                  ? (floor ? "The last instance of a kind cannot be deleted" : "Delete instance")
+                  ? "Delete instance"
                   : "Nothing added yet on this layer"}
-                aria-disabled={floor}
+                aria-disabled={!railTab.instance}
                 title={railTab.instance
-                  ? (floor ? "The last instance of a kind cannot be deleted" : "Delete instance")
+                  ? "Delete instance"
                   : "Nothing added yet on this layer"}
-                className={`p-0.5 rounded outline-none ${floor
-                  ? "opacity-30 cursor-not-allowed"
-                  : "hover:text-red-500 text-[var(--text-muted)] cursor-pointer"}`}
+                className={`p-0.5 rounded outline-none ${railTab.instance
+                  ? "hover:text-red-500 text-[var(--text-muted)] cursor-pointer"
+                  : "opacity-30 cursor-not-allowed"}`}
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (floor || !railTab.instance) return;
+                  if (!railTab.instance) return;
                   removeEffectInstanceCmd?.execute({ instanceId: railTab.instance.id });
                 }}
               >
@@ -463,7 +457,7 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
                 const id = newEffectInstanceId();
                 const patch = appendEffectInstance(activeLayer, activeCategory as EffectCategory, { afterId: activeRailTab?.instance?.id, id });
                 applyEffectPatchCmd.execute({ patch });
-                selectTab(id);
+                selectTab(id, activeCategory);
               }}
               dropdownOptions={[
                 { label: "Disable all effects", value: 'disable-all', icon: <EyeOff size={10} />, variant: 'danger' },
@@ -516,63 +510,51 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
             onSelect={(id) => selectTab(id)}
           >
             {/* Default panel height (P1 baseline); auto-expand when content
-                exceeds it — never scroll (user ruling 20261125). */}
-            <div className="flex flex-col" style={{ minHeight: PANEL_MIN_HEIGHT_PX }}>
-              {activeRailTab?.instance ? (
-                activeRailTab.instance.category === "stroke" ? (
-                  <StrokePanel
-                    key={activeRailTab.instance.id}
-                    layer={activeLayer}
-                    instance={activeRailTab.instance}
-                  />
-                ) : activeRailTab.instance.category === "shadow" ? (
-                  <ShadowPanel
-                    key={activeRailTab.instance.id}
-                    layer={activeLayer}
-                    instance={activeRailTab.instance}
-                  />
-                ) : activeRailTab.instance.category === "colorOverlay" ? (
-                  <ColorOverlayPanel
-                    key={activeRailTab.instance.id}
-                    layer={activeLayer}
-                    instance={activeRailTab.instance}
-                  />
-                ) : activeRailTab.instance.category === "outerGlow" ? (
-                  <OuterGlowPanel
-                    key={activeRailTab.instance.id}
-                    layer={activeLayer}
-                    instance={activeRailTab.instance}
-                  />
-                ) : activeRailTab.instance.category === "gradientOverlay" ? (
-                  <GradientOverlayPanel
-                    key={activeRailTab.instance.id}
-                    layer={activeLayer}
-                    instance={activeRailTab.instance}
-                  />
-                ) : activeRailTab.instance.category === "innerGlow" ? (
-                  <InnerGlowPanel
-                    key={activeRailTab.instance.id}
-                    layer={activeLayer}
-                    instance={activeRailTab.instance}
-                  />
-                ) : activeRailTab.instance.category === "innerShadow" ? (
-                  <InnerShadowPanel
-                    key={activeRailTab.instance.id}
-                    layer={activeLayer}
-                    instance={activeRailTab.instance}
-                  />
-                ) : (
-                  <EmptyCategoryPanel
-                    label={EFFECT_CATEGORY_LABELS[activeRailTab.instance.category] ?? activeRailTab.instance.category}
-                    available={activeRailTab.available}
-                  />
-                )
-              ) : (
-                <EmptyCategoryPanel
-                  label={activeRailTab?.label ?? ""}
-                  available={activeRailTab?.available ?? false}
-                />
-              )}
+                exceeds it — never scroll (user ruling 20261125). The wrapper
+                owns the first-interaction materialization (capture phase —
+                ahead of any slider gesture inside the panel). */}
+            <div
+              className="flex flex-col"
+              style={{ minHeight: PANEL_MIN_HEIGHT_PX }}
+            >
+              {(() => {
+                // A placeholder (zero-instance) AVAILABLE tab renders the
+                // FULL panel against factory defaults under a pre-generated
+                // stable id — the first parameter write lands the DISABLED
+                // carrier with that id through the commands' UPSERT channel
+                // (see pendingIdFor above), as the gesture's single
+                // undo step. Only UNAVAILABLE categories keep the empty
+                // placeholder.
+                const tab = activeRailTab;
+                if (!tab || !activeLayer) return null;
+                if (!tab.available) {
+                  return <EmptyCategoryPanel label={tab.label} available={false} />;
+                }
+                const instance: EffectInstance = tab.instance ?? {
+                  id: pendingIdFor(activeLayer.id, tab.category),
+                  category: tab.category as EffectCategory,
+                  enabled: false,
+                  params: defaultParamsFor(tab.category as EffectCategory),
+                };
+                switch (instance.category) {
+                  case "stroke":
+                    return <StrokePanel key={instance.id} layer={activeLayer} instance={instance} />;
+                  case "shadow":
+                    return <ShadowPanel key={instance.id} layer={activeLayer} instance={instance} />;
+                  case "colorOverlay":
+                    return <ColorOverlayPanel key={instance.id} layer={activeLayer} instance={instance} />;
+                  case "outerGlow":
+                    return <OuterGlowPanel key={instance.id} layer={activeLayer} instance={instance} />;
+                  case "gradientOverlay":
+                    return <GradientOverlayPanel key={instance.id} layer={activeLayer} instance={instance} />;
+                  case "innerGlow":
+                    return <InnerGlowPanel key={instance.id} layer={activeLayer} instance={instance} />;
+                  case "innerShadow":
+                    return <InnerShadowPanel key={instance.id} layer={activeLayer} instance={instance} />;
+                  default:
+                    return <EmptyCategoryPanel label={EFFECT_CATEGORY_LABELS[instance.category] ?? instance.category} available={tab.available} />;
+                }
+              })()}
             </div>
           </VerticalTabs>
         </motion.div>

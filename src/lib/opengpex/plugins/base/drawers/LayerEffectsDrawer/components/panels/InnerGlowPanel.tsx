@@ -36,14 +36,13 @@
 
 import React, { useState } from 'react';
 import ColorSwatchRow from '@opengpex/editor/widgets/ColorSwatchRow';
-import FancySvgSlider from '@opengpex/editor/widgets/FancySvgSlider';
 import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
 import type { EffectInstance, Layer, InnerGlowParams, LayerBlendMode } from '@opengpex/editor/core/types/models';
-import { updateEffectParams } from '@opengpex/editor/core/layer/effects';
+import { upsertEffectParams, effectParamSpecs } from '@opengpex/editor/core/layer/effects';
 import { usePluginCommands } from '@opengpex/editor/core/context';
 import { useFilterGesture } from '@opengpex/editor/plugins/base/drawers/AdjustmentDrawer/hooks';
 import type { LayerEffectsDrawerCommandsMap } from '../../commands.d';
-import { PanelSection } from './shared';
+import { PanelSection, SpecSliderRow } from './shared';
 import { BLEND_MODE_DROPDOWN_OPTIONS, BLEND_MODE_LABEL_MAP } from '@opengpex/editor/widgets/blendModes';
 
 export function InnerGlowPanel({
@@ -62,6 +61,9 @@ export function InnerGlowPanel({
   const gesture = useFilterGesture(beginEffectEditCmd);
 
   const params = instance.params as InnerGlowParams;
+  // Numeric rows are SPEC-DRIVEN (core EFFECT_PARAM_SPECS — the single
+  // source of truth for label/range/step/unit/aria; see arch/26).
+  const specs = effectParamSpecs(instance.category);
 
   const [fastColor, setFastColor] = useState<InnerGlowParams['color'] | null>(null);
   const [fastBlur, setFastBlur] = useState<number | null>(null);
@@ -69,11 +71,11 @@ export function InnerGlowPanel({
   const [fastStrength, setFastStrength] = useState<number | null>(null);
 
   const fastWrite = (next: InnerGlowParams) => {
-    fastUpdateEffectCmd?.execute({ instanceId: instance.id, params: next });
+    fastUpdateEffectCmd?.execute({ instanceId: instance.id, category: instance.category, params: next });
   };
 
   const applyOneShot = (next: InnerGlowParams) => {
-    const patch = updateEffectParams(layer, instance.id, next);
+    const patch = upsertEffectParams(layer, instance.category, instance.id, next);
     if (patch) applyEffectPatchCmd?.execute({ patch });
   };
 
@@ -195,50 +197,24 @@ export function InnerGlowPanel({
         onValueChange={handleColorChange}
         onValueCommit={handleColorCommit}
       />
-      <PanelSection label="Blur">
-        <div className="flex items-center gap-1">
-          <FancySvgSlider
-            className="flex-1"
-            value={fastBlur ?? params.blurRadius}
-            min={0}
-            max={50}
-            step={1}
-            precision={0}
-            slim
-            withInput
-            ariaLabel="Inner glow blur"
-            {...blurChannel}
-          />
-          <span className="text-[8px] font-bold text-[var(--text-muted)] shrink-0">px</span>
-        </div>
+      <PanelSection label={specs.blurRadius.label}>
+        <SpecSliderRow
+          spec={specs.blurRadius}
+          value={fastBlur ?? params.blurRadius}
+          {...blurChannel}
+        />
       </PanelSection>
-      <PanelSection label="Spread">
-        <div className="flex items-center gap-1">
-          <FancySvgSlider
-            className="flex-1"
-            value={fastSpread ?? params.spreadPx ?? 0}
-            min={0}
-            max={50}
-            step={1}
-            precision={0}
-            slim
-            withInput
-            ariaLabel="Inner glow spread"
-            {...spreadChannel}
-          />
-          <span className="text-[8px] font-bold text-[var(--text-muted)] shrink-0">px</span>
-        </div>
+      <PanelSection label={specs.spreadPx.label}>
+        <SpecSliderRow
+          spec={specs.spreadPx}
+          value={fastSpread ?? params.spreadPx ?? 0}
+          {...spreadChannel}
+        />
       </PanelSection>
-      <PanelSection label="Strength">
-        <FancySvgSlider
+      <PanelSection label={specs.strength.label}>
+        <SpecSliderRow
+          spec={specs.strength}
           value={fastStrength ?? params.strength ?? 1}
-          min={0}
-          max={1}
-          step={0.01}
-          precision={2}
-          slim
-          withInput
-          ariaLabel="Inner glow strength"
           {...strengthChannel}
         />
       </PanelSection>

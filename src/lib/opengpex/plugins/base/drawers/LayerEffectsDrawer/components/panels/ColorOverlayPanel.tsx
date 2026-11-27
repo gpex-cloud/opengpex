@@ -36,15 +36,14 @@
 
 import React, { useMemo, useState } from 'react';
 import ColorSwatchRow from '@opengpex/editor/widgets/ColorSwatchRow';
-import FancySvgSlider from '@opengpex/editor/widgets/FancySvgSlider';
 import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
 import { BLEND_MODE_DROPDOWN_OPTIONS, BLEND_MODE_LABEL_MAP } from '@opengpex/editor/widgets/blendModes';
 import type { EffectInstance, Layer, ColorOverlayParams, LayerBlendMode } from '@opengpex/editor/core/types/models';
-import { updateEffectParams } from '@opengpex/editor/core/layer/effects';
+import { upsertEffectParams, effectParamSpecs } from '@opengpex/editor/core/layer/effects';
 import { usePluginCommands } from '@opengpex/editor/core/context';
 import { useFilterGesture } from '@opengpex/editor/plugins/base/drawers/AdjustmentDrawer/hooks';
 import type { LayerEffectsDrawerCommandsMap } from '../../commands.d';
-import { PanelSection } from './shared';
+import { PanelSection, SpecSliderRow } from './shared';
 
 export function ColorOverlayPanel({
   layer,
@@ -62,6 +61,9 @@ export function ColorOverlayPanel({
   const gesture = useFilterGesture(beginEffectEditCmd);
 
   const params = instance.params as ColorOverlayParams;
+  // Numeric rows are SPEC-DRIVEN (core EFFECT_PARAM_SPECS — the single
+  // source of truth for label/range/step/unit/aria; see arch/26).
+  const specs = effectParamSpecs(instance.category);
 
   // Fast-drag mirrors: while a drag runs, the store stays frozen until the
   // gesture's single commit, so the controls feed from THIS local state.
@@ -73,11 +75,11 @@ export function ColorOverlayPanel({
 
   // Shared fast write: full ColorOverlayParams against the freshest draft.
   const fastWrite = (next: ColorOverlayParams) => {
-    fastUpdateEffectCmd?.execute({ instanceId: instance.id, params: next });
+    fastUpdateEffectCmd?.execute({ instanceId: instance.id, category: instance.category, params: next });
   };
 
   const applyOneShot = (next: ColorOverlayParams) => {
-    const patch = updateEffectParams(layer, instance.id, next);
+    const patch = upsertEffectParams(layer, instance.category, instance.id, next);
     if (patch) applyEffectPatchCmd?.execute({ patch });
   };
 
@@ -203,16 +205,10 @@ export function ColorOverlayPanel({
           onValueCommit={handleColorCommit}
         />
       </div>
-      <PanelSection label="Strength">
-        <FancySvgSlider
+      <PanelSection label={specs.opacity.label}>
+        <SpecSliderRow
+          spec={specs.opacity}
           value={fastOpacity ?? params.opacity ?? 1}
-          min={0}
-          max={1}
-          step={0.01}
-          precision={2}
-          slim
-          withInput
-          ariaLabel="Color overlay strength"
           onDragStart={handleOpacityDragStart}
           onChange={handleOpacityChange}
           onDragEnd={handleOpacityDragEnd}

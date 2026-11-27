@@ -35,16 +35,15 @@
 
 import React, { useState } from 'react';
 import ColorSwatchRow from '@opengpex/editor/widgets/ColorSwatchRow';
-import FancySvgSlider from '@opengpex/editor/widgets/FancySvgSlider';
 import AngleDial, { angleDistanceFromOffset } from '@opengpex/editor/widgets/AngleDial';
 import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
 import { BLEND_MODE_DROPDOWN_OPTIONS, BLEND_MODE_LABEL_MAP } from '@opengpex/editor/widgets/blendModes';
 import type { EffectInstance, Layer, ShadowParams, LayerBlendMode } from '@opengpex/editor/core/types/models';
-import { updateEffectParams } from '@opengpex/editor/core/layer/effects';
+import { upsertEffectParams, effectParamSpecs } from '@opengpex/editor/core/layer/effects';
 import { usePluginCommands } from '@opengpex/editor/core/context';
 import { useFilterGesture } from '@opengpex/editor/plugins/base/drawers/AdjustmentDrawer/hooks';
 import type { LayerEffectsDrawerCommandsMap } from '../../commands.d';
-import { PanelSection } from './shared';
+import { PanelSection, SpecSliderRow } from './shared';
 
 export function ShadowPanel({
   layer,
@@ -62,6 +61,9 @@ export function ShadowPanel({
   const gesture = useFilterGesture(beginEffectEditCmd);
 
   const params = instance.params as ShadowParams;
+  // Numeric rows are SPEC-DRIVEN (core EFFECT_PARAM_SPECS — the single
+  // source of truth for label/range/step/unit/aria; see arch/26).
+  const specs = effectParamSpecs(instance.category);
 
   // Fast-drag mirrors: while a drag runs, the store stays frozen until the
   // gesture's single commit, so the controls feed from THIS local state.
@@ -70,14 +72,17 @@ export function ShadowPanel({
   const [fastBlur, setFastBlur] = useState<number | null>(null);
   const [fastSpread, setFastSpread] = useState<number | null>(null);
   const [fastOpacity, setFastOpacity] = useState<number | null>(null);
+  // The inline Distance/Angle readout yields while the expanded dial
+  // (which carries its own live badge) is open.
+  const [dialExpanded, setDialExpanded] = useState(false);
 
   // Shared fast write: full ShadowParams against the freshest draft.
   const fastWrite = (next: ShadowParams) => {
-    fastUpdateEffectCmd?.execute({ instanceId: instance.id, params: next });
+    fastUpdateEffectCmd?.execute({ instanceId: instance.id, category: instance.category, params: next });
   };
 
   const applyOneShot = (next: ShadowParams) => {
-    const patch = updateEffectParams(layer, instance.id, next);
+    const patch = upsertEffectParams(layer, instance.category, instance.id, next);
     if (patch) applyEffectPatchCmd?.execute({ patch });
   };
 
@@ -260,62 +265,38 @@ export function ShadowPanel({
             onDragStart={handleOffsetDragStart}
             onChange={handleOffsetChange}
             onDragEnd={handleOffsetDragEnd}
+            onExpandedChange={setDialExpanded}
           />
-          <div className="flex flex-col text-[10px] tabular-nums text-[var(--text-secondary)] leading-tight pt-1">
-            <span>Distance {Math.round(polar.distance)} px</span>
-            <span className="text-[var(--text-muted)]">Angle {Math.round(polar.angleDeg)}°</span>
-          </div>
+          {!dialExpanded && (
+            <div className="flex flex-col text-[10px] tabular-nums text-[var(--text-secondary)] leading-tight pt-1">
+              <span>Distance {Math.round(polar.distance)} px</span>
+              <span className="text-[var(--text-muted)]">Angle {Math.round(polar.angleDeg)}°</span>
+            </div>
+          )}
         </div>
       </div>
-      <PanelSection label="Softness">
-        {/* The unit sits inline after the slider's numeric field (house
-            pattern). Kernel-capped at σ=20 — past it the separable Gaussian's
-            60px radius saturates, so larger values add nothing. */}
-        <div className="flex items-center gap-1">
-          <FancySvgSlider
-            className="flex-1"
-            value={fastBlur ?? params.blurRadius}
-            min={0}
-            max={20}
-            step={1}
-            precision={0}
-            slim
-            withInput
-            ariaLabel="Shadow softness"
-            {...blurChannel}
-          />
-          <span className="text-[8px] font-bold text-[var(--text-muted)] shrink-0">px</span>
-        </div>
+      <PanelSection label={specs.blurRadius.label}>
+        {/* Kernel-capped at σ=20 — past it the separable Gaussian's 60px
+            radius saturates, so larger values add nothing (spec max=20). */}
+        <SpecSliderRow
+          spec={specs.blurRadius}
+          value={fastBlur ?? params.blurRadius}
+          {...blurChannel}
+        />
       </PanelSection>
-      <PanelSection label="Spread">
+      <PanelSection label={specs.spreadPx.label}>
         {/* Silhouette dilation before the blur — grows the shadow WITHOUT
             softening it. PS's Spread has no negative range: 0..50 px. */}
-        <div className="flex items-center gap-1">
-          <FancySvgSlider
-            className="flex-1"
-            value={fastSpread ?? params.spreadPx ?? 0}
-            min={0}
-            max={50}
-            step={1}
-            precision={0}
-            slim
-            withInput
-            ariaLabel="Shadow spread"
-            {...spreadChannel}
-          />
-          <span className="text-[8px] font-bold text-[var(--text-muted)] shrink-0">px</span>
-        </div>
+        <SpecSliderRow
+          spec={specs.spreadPx}
+          value={fastSpread ?? params.spreadPx ?? 0}
+          {...spreadChannel}
+        />
       </PanelSection>
-      <PanelSection label="Strength">
-        <FancySvgSlider
+      <PanelSection label={specs.opacity.label}>
+        <SpecSliderRow
+          spec={specs.opacity}
           value={fastOpacity ?? params.opacity}
-          min={0}
-          max={1}
-          step={0.01}
-          precision={2}
-          slim
-          withInput
-          ariaLabel="Shadow strength"
           {...opacityChannel}
         />
       </PanelSection>

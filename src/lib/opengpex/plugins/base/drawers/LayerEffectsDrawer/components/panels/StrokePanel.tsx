@@ -36,16 +36,15 @@
 
 import React, { useState } from 'react';
 import ColorSwatchRow from '@opengpex/editor/widgets/ColorSwatchRow';
-import FancySvgSlider from '@opengpex/editor/widgets/FancySvgSlider';
 import FunctionTabs from '@opengpex/editor/widgets/FunctionTabs';
 import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
 import { BLEND_MODE_DROPDOWN_OPTIONS, BLEND_MODE_LABEL_MAP } from '@opengpex/editor/widgets/blendModes';
 import type { EffectInstance, Layer, StrokeParams, StrokePosition, LayerBlendMode } from '@opengpex/editor/core/types/models';
-import { updateEffectParams } from '@opengpex/editor/core/layer/effects';
+import { upsertEffectParams, effectParamSpecs } from '@opengpex/editor/core/layer/effects';
 import { usePluginCommands } from '@opengpex/editor/core/context';
 import { useFilterGesture } from '@opengpex/editor/plugins/base/drawers/AdjustmentDrawer/hooks';
 import type { LayerEffectsDrawerCommandsMap } from '../../commands.d';
-import { PanelSection } from './shared';
+import { PanelSection, SpecSliderRow } from './shared';
 
 export function StrokePanel({
   layer,
@@ -63,6 +62,9 @@ export function StrokePanel({
   const gesture = useFilterGesture(beginEffectEditCmd);
 
   const params = instance.params as StrokeParams;
+  // Numeric rows are SPEC-DRIVEN (core EFFECT_PARAM_SPECS — the single
+  // source of truth for label/range/step/unit/aria; see arch/26).
+  const specs = effectParamSpecs(instance.category);
 
   // Fast-drag mirrors: while a drag runs, the store stays frozen until the
   // gesture's single commit, so the thumb/swatch feed from THIS local state
@@ -72,7 +74,7 @@ export function StrokePanel({
 
   // Shared fast write: full StrokeParams against the freshest draft.
   const fastWrite = (next: StrokeParams) => {
-    fastUpdateEffectCmd?.execute({ instanceId: instance.id, params: next });
+    fastUpdateEffectCmd?.execute({ instanceId: instance.id, category: instance.category, params: next });
   };
 
   const handleWidthDragStart = () => {
@@ -86,7 +88,7 @@ export function StrokePanel({
       return;
     }
     applyEffectPatchCmd?.execute({
-      patch: updateEffectParams(layer, instance.id, { ...params, widthPx: value }) ?? {},
+      patch: upsertEffectParams(layer, instance.category, instance.id, { ...params, widthPx: value }) ?? {},
     });
     setFastWidth(value);
   };
@@ -104,7 +106,7 @@ export function StrokePanel({
     // Typed-value commit is a ONE-SHOT write in a mini gesture (one undo
     // step) — the fast track has no dragEnd to commit it.
     gesture.begin();
-    const patch = updateEffectParams(layer, instance.id, { ...params, widthPx: value });
+    const patch = upsertEffectParams(layer, instance.category, instance.id, { ...params, widthPx: value });
     if (patch) applyEffectPatchCmd?.execute({ patch });
     gesture.end();
   };
@@ -118,7 +120,7 @@ export function StrokePanel({
       setFastColor(color);
       return;
     }
-    const patch = updateEffectParams(layer, instance.id, { ...params, color });
+    const patch = upsertEffectParams(layer, instance.category, instance.id, { ...params, color });
     if (patch) applyEffectPatchCmd?.execute({ patch });
     setFastColor(color);
   };
@@ -151,7 +153,7 @@ export function StrokePanel({
 
   const handlePositionChange = (position: StrokePosition) => {
     gesture.begin();
-    const patch = updateEffectParams(layer, instance.id, { ...params, position });
+    const patch = upsertEffectParams(layer, instance.category, instance.id, { ...params, position });
     if (patch) applyEffectPatchCmd?.execute({ patch });
     gesture.end();
   };
@@ -164,7 +166,7 @@ export function StrokePanel({
   const blendMode: LayerBlendMode = params.blendMode ?? 'source-over';
   const handleBlendSelect = (value: string) => {
     gesture.begin();
-    const patch = updateEffectParams(layer, instance.id, { ...params, blendMode: value as LayerBlendMode });
+    const patch = upsertEffectParams(layer, instance.category, instance.id, { ...params, blendMode: value as LayerBlendMode });
     if (patch) applyEffectPatchCmd?.execute({ patch });
     gesture.end();
   };
@@ -213,27 +215,15 @@ export function StrokePanel({
           onValueCommit={handleColorCommit}
         />
       </div>
-      <PanelSection label="Size">
-        {/* The unit sits inline after the slider's numeric field (house
-            pattern) — a standalone row under the slider reads as a wrap. */}
-        <div className="flex items-center gap-1">
-          <FancySvgSlider
-            className="flex-1"
-            value={fastWidth ?? params.widthPx}
-            min={1}
-            max={250}
-            step={1}
-            precision={0}
-            slim
-            withInput
-            ariaLabel="Stroke size"
-            onDragStart={handleWidthDragStart}
-            onChange={handleWidthChange}
-            onDragEnd={handleWidthDragEnd}
-            onFieldCommit={handleWidthFieldCommit}
-          />
-          <span className="text-[8px] font-bold text-[var(--text-muted)] shrink-0">px</span>
-        </div>
+      <PanelSection label={specs.widthPx.label}>
+        <SpecSliderRow
+          spec={specs.widthPx}
+          value={fastWidth ?? params.widthPx}
+          onDragStart={handleWidthDragStart}
+          onChange={handleWidthChange}
+          onDragEnd={handleWidthDragEnd}
+          onFieldCommit={handleWidthFieldCommit}
+        />
       </PanelSection>
       <PanelSection label="Position">
         <FunctionTabs<StrokePosition>

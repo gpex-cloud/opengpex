@@ -2,6 +2,11 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.1.5
+
+- Effects: the effects drawer no longer adds hidden Undo steps — Cmd+Z always reverts your real edits, and tweaking a switched-off effect keeps its values while the effect stays off.
+- Interface: the shadow direction dial now expands into a large floating dial while you drag (Shift for fine adjustment), with a live distance/angle readout.
+
 ## 2.1.4
 
 - Effects: pressing Undo (Cmd+Z) with the layer effects drawer open no longer gets stuck undoing the drawer's own setup; it now undoes your actual last edit again.

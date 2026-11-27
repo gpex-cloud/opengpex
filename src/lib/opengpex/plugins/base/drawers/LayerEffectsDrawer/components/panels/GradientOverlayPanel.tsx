@@ -41,15 +41,14 @@
 
 import React, { useState } from 'react';
 import ColorSwatchRow from '@opengpex/editor/widgets/ColorSwatchRow';
-import FancySvgSlider from '@opengpex/editor/widgets/FancySvgSlider';
 import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
 import FunctionTabs from '@opengpex/editor/widgets/FunctionTabs';
 import type { EffectInstance, Layer, GradientOverlayParams, GradientOverlayStyle, LayerBlendMode } from '@opengpex/editor/core/types/models';
-import { GRADIENT_PRESETS, updateEffectParams } from '@opengpex/editor/core/layer/effects';
+import { GRADIENT_PRESETS,upsertEffectParams, effectParamSpecs } from '@opengpex/editor/core/layer/effects';
 import { usePluginCommands } from '@opengpex/editor/core/context';
 import { useFilterGesture } from '@opengpex/editor/plugins/base/drawers/AdjustmentDrawer/hooks';
 import type { LayerEffectsDrawerCommandsMap } from '../../commands.d';
-import { PanelSection } from './shared';
+import { PanelSection, SpecSliderRow } from './shared';
 import { BLEND_MODE_DROPDOWN_OPTIONS, BLEND_MODE_LABEL_MAP } from '@opengpex/editor/widgets/blendModes';
 
 export function GradientOverlayPanel({
@@ -68,6 +67,9 @@ export function GradientOverlayPanel({
   const gesture = useFilterGesture(beginEffectEditCmd);
 
   const params = instance.params as GradientOverlayParams;
+  // Numeric rows are SPEC-DRIVEN (core EFFECT_PARAM_SPECS — the single
+  // source of truth for label/range/step/unit/aria; see arch/26).
+  const specs = effectParamSpecs(instance.category);
 
   // Fast-drag mirrors: while a drag runs, the store stays frozen until the
   // gesture's single commit, so the controls feed from THIS local state.
@@ -79,11 +81,11 @@ export function GradientOverlayPanel({
 
   // Shared fast write: full GradientOverlayParams against the freshest draft.
   const fastWrite = (next: GradientOverlayParams) => {
-    fastUpdateEffectCmd?.execute({ instanceId: instance.id, params: next });
+    fastUpdateEffectCmd?.execute({ instanceId: instance.id, category: instance.category, params: next });
   };
 
   const applyOneShot = (next: GradientOverlayParams) => {
-    const patch = updateEffectParams(layer, instance.id, next);
+    const patch = upsertEffectParams(layer, instance.category, instance.id, next);
     if (patch) applyEffectPatchCmd?.execute({ patch });
   };
 
@@ -289,57 +291,33 @@ export function GradientOverlayPanel({
             direction-free, so the row greys out (no-op, value kept) when the
             style is radial instead of hiding — switching back to linear
             restores the previous angle. */}
-      <PanelSection label="Angle">
-        {/* FancySvgSlider + input over the AngleDial: the dial is a DISTANCE
+      <PanelSection label={specs.angleDeg.label}>
+        {/* Slider + numeric field (NOT the AngleDial): the dial is a DISTANCE
             dial (its drag encodes an (x, y) vector for the shadow offset);
             the gradient needs pure 0–360 angle semantics with wrap, which a
             slider + numeric field expresses without ambiguity. */}
         <div className={`flex items-center gap-1 ${style === 'radial' ? 'opacity-40 pointer-events-none' : ''}`}>
-          <FancySvgSlider
-            className="flex-1"
-            value={fastAngle ?? params.angleDeg ?? 90}
-            min={0}
-            max={360}
-            step={1}
-            precision={0}
-            slim
-            withInput
-            disabled={style === 'radial'}
-            ariaLabel="Gradient angle"
-            {...angleChannel}
-          />
-          <span className="text-[8px] font-bold text-[var(--text-muted)] shrink-0">°</span>
+          <SpecSliderRow
+                    spec={specs.angleDeg}
+                    value={fastAngle ?? params.angleDeg ?? 90}
+                    disabled={style === 'radial'}
+                    {...angleChannel}
+                  />
         </div>
       </PanelSection>
-      <PanelSection label="Scale">
-        <div className="flex items-center gap-1">
-          <FancySvgSlider
-            className="flex-1"
-            value={fastScale ?? params.scale ?? 100}
-            min={1}
-            max={200}
-            step={1}
-            precision={0}
-            slim
-            withInput
-            ariaLabel="Gradient scale"
-            {...scaleChannel}
-          />
-          <span className="text-[8px] font-bold text-[var(--text-muted)] shrink-0">%</span>
-        </div>
+      <PanelSection label={specs.scale.label}>
+        <SpecSliderRow
+                    spec={specs.scale}
+                    value={fastScale ?? params.scale ?? 100}
+                    {...scaleChannel}
+                  />
       </PanelSection>
-      <PanelSection label="Strength">
-        <FancySvgSlider
-          value={fastStrength ?? params.opacity ?? 1}
-          min={0}
-          max={1}
-          step={0.01}
-          precision={2}
-          slim
-          withInput
-          ariaLabel="Gradient strength"
-          {...strengthChannel}
-        />
+      <PanelSection label={specs.opacity.label}>
+        <SpecSliderRow
+                    spec={specs.opacity}
+                    value={fastStrength ?? params.opacity ?? 1}
+                    {...strengthChannel}
+                  />
       </PanelSection>
     </div>
   );

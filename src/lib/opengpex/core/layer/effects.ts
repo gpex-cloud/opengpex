@@ -33,12 +33,14 @@
  *   render order is physically fixed (shadow beneath, stroke above, content
  *   on top) and is materialized by {@link sortEffectInstancesForRender}; no
  *   mutation here ever relies on global array position for semantics.
- * - Per category at least ONE instance always exists ONCE THE DRAWER HAS
- *   TOUCHED that category: entering a category's panel lazily lands its
- *   floor instance via {@link ensureEffectCategoryInstance}; the drawer
- *   toggles an instance's `enabled` instead of deleting it, and {@link
- *   removeEffectInstance} refuses to empty a category ("no stroke" = a
- *   disabled stroke instance, so drawer tabs never vanish).
+ * - ON/OFF semantics (20261127 ruling, final shape): a DISABLED instance is
+ *   a legitimate chain resident — it carries the user's edited parameters
+ *   while the effect is off (the drawer renders it as the OFF tab; the
+ *   renderer skips it). Nothing here auto-materializes instances on UI
+ *   entry (the retired lazy-floor behavior — opening a panel must never
+ *   write the layer or spend an Undo step); instances exist only after an
+ *   explicit user act (eye enable / "+" / a parameter edit on a tab whose
+ *   category has no instance yet). "No stroke" is an ABSENT stroke.
  * - `shape` / `feather` / `origin` are reserved seams (coverage scoping and
  *   preset provenance); no function here writes them in the first release.
  *
@@ -76,6 +78,75 @@ export const EFFECT_CATEGORY_LABELS: Readonly<Record<string, string>> = {
   innerShadow: 'Inner Shadow',
 };
 
+// ─── Parameter specs (the config seat — see arch/26_effect_param_specs.md) ────
+
+/**
+ * One NUMERIC parameter's presentation + constraint spec. The single source
+ * of truth for the drawer's slider rows: label (PS Layer Style dialog
+ * vernacular — NOT the internal field name), range, step, precision, unit
+ * and accessibility copy. Color / blend / dial / tabs / preset controls are
+ * deliberately NOT spec'd (their layouts are structural, not parametric).
+ *
+ * ⚠️ blurRadius caps are PER FAMILY by design: shadow's separable Gaussian
+ * kernel runs σ = 2×blur and saturates at a 60px radius, so its UI caps at
+ * 20; the glow / inner-shadow families clamp at 50 in the scene translator
+ * (effects.ts clampShadowScalar). Do NOT "unify" these caps without
+ * re-verifying each family's kernel.
+ */
+export interface EffectNumericParamSpec {
+  /** Params field key (the FastParams object property this row drives). */
+  readonly key: string;
+  /** UI label — the PS dialog word ("Size", "Spread", "Opacity", …). */
+  readonly label: string;
+  readonly ariaLabel: string;
+  readonly min: number;
+  readonly max: number;
+  readonly step: number;
+  readonly precision: number;
+  /** Display unit suffix after the slider's numeric field (e.g. "px", "%"). */
+  readonly unit?: string;
+}
+
+/** Numeric slider specs per category, in the panel's display order. */
+export const EFFECT_PARAM_SPECS: Readonly<Record<EffectCategory, readonly EffectNumericParamSpec[]>> = {
+  stroke: [
+    { key: 'widthPx', label: 'Size', ariaLabel: 'Stroke size', min: 1, max: 250, step: 1, precision: 0, unit: 'px' },
+  ],
+  shadow: [
+    { key: 'blurRadius', label: 'Size', ariaLabel: 'Shadow size', min: 0, max: 20, step: 1, precision: 0, unit: 'px' },
+    { key: 'spreadPx', label: 'Spread', ariaLabel: 'Shadow spread', min: 0, max: 50, step: 1, precision: 0, unit: 'px' },
+    { key: 'opacity', label: 'Opacity', ariaLabel: 'Shadow opacity', min: 0, max: 1, step: 0.01, precision: 2 },
+  ],
+  outerGlow: [
+    { key: 'blurRadius', label: 'Size', ariaLabel: 'Outer glow size', min: 0, max: 50, step: 1, precision: 0, unit: 'px' },
+    { key: 'spreadPx', label: 'Spread', ariaLabel: 'Outer glow spread', min: 0, max: 50, step: 1, precision: 0, unit: 'px' },
+    { key: 'strength', label: 'Opacity', ariaLabel: 'Outer glow opacity', min: 0, max: 1, step: 0.01, precision: 2 },
+  ],
+  gradientOverlay: [
+    { key: 'angleDeg', label: 'Angle', ariaLabel: 'Gradient angle', min: 0, max: 360, step: 1, precision: 0, unit: '°' },
+    { key: 'scale', label: 'Scale', ariaLabel: 'Gradient scale', min: 1, max: 200, step: 1, precision: 0, unit: '%' },
+    { key: 'opacity', label: 'Opacity', ariaLabel: 'Gradient opacity', min: 0, max: 1, step: 0.01, precision: 2 },
+  ],
+  colorOverlay: [
+    { key: 'opacity', label: 'Opacity', ariaLabel: 'Color overlay opacity', min: 0, max: 1, step: 0.01, precision: 2 },
+  ],
+  innerGlow: [
+    { key: 'blurRadius', label: 'Size', ariaLabel: 'Inner glow size', min: 0, max: 50, step: 1, precision: 0, unit: 'px' },
+    { key: 'spreadPx', label: 'Spread', ariaLabel: 'Inner glow spread', min: 0, max: 50, step: 1, precision: 0, unit: 'px' },
+    { key: 'strength', label: 'Opacity', ariaLabel: 'Inner glow opacity', min: 0, max: 1, step: 0.01, precision: 2 },
+  ],
+  innerShadow: [
+    { key: 'blurRadius', label: 'Size', ariaLabel: 'Inner shadow size', min: 0, max: 50, step: 1, precision: 0, unit: 'px' },
+    { key: 'spreadPx', label: 'Spread', ariaLabel: 'Inner shadow spread', min: 0, max: 50, step: 1, precision: 0, unit: 'px' },
+    { key: 'strength', label: 'Opacity', ariaLabel: 'Inner shadow opacity', min: 0, max: 1, step: 0.01, precision: 2 },
+  ],
+};
+
+/** The numeric specs of one category, keyed by params field. */
+export function effectParamSpecs(category: EffectCategory): Readonly<Record<string, EffectNumericParamSpec>> {
+  return Object.fromEntries(EFFECT_PARAM_SPECS[category].map((s) => [s.key, s]));
+}
+
 // ─── Defaults ─────────────────────────────────────────────────────────────────
 
 /** First-release stroke defaults: black, 3px outside — usable result on open (the "one-shot success" contract). */
@@ -106,6 +177,11 @@ export function defaultShadowParams(): ShadowParams {
     offsetX: diagonal,
     offsetY: diagonal,
     blurRadius: 8,
+    // PS factory Spread = 0. The field is optional on the type (documents
+    // written before Spread existed omit it — the translator reads ?? 0);
+    // new defaults write it explicitly so the spec-table guard (every spec
+    // key present on defaults) holds.
+    spreadPx: 0,
     opacity: 0.6,
     // Factory blend = Multiply — the reference product's Drop Shadow dialog
     // factory state. Documents written before the field existed still read
@@ -300,16 +376,10 @@ export function effectInstanceLabel(chain: readonly EffectInstance[], instanceId
   return effectInstanceOrdinal(chain, instanceId) === 1 ? base : `${base} ${effectInstanceOrdinal(chain, instanceId)}`;
 }
 
-/** Count of instances (enabled or not) for one category — the removal floor is 1. */
+/** Count of instances (enabled or not) for one category — the drawer tab
+ *  population (disabled instances render as OFF tabs). */
 export function countEffectInstances(layer: Layer, category: EffectCategory): number {
   return getEffectChain(layer).filter((e) => e.category === category).length;
-}
-
-/** True when `id` is the last remaining instance of its category (removal must be refused). */
-export function isCategoryFloorInstance(layer: Layer, id: string): boolean {
-  const instance = findEffectInstance(layer, id);
-  if (!instance) return false;
-  return countEffectInstances(layer, instance.category) <= 1;
 }
 
 /**
@@ -377,11 +447,12 @@ export function appendEffectInstance(
      */
     id?: string;
     /**
-     * New instances arrive DISABLED (default): "+" adds a parametric shell the
-     * user turns on deliberately — an off-by-default effect can never surprise
-     * by re-painting pixels the moment it lands. The ONE exception is the
-     * virtual-floor eye create, which IS an explicit on-request and passes
-     * `enabled: true` (PS checkbox semantics: the click itself is the on).
+     * New instances arrive DISABLED by default (the "+" parametric-shell
+     * precedent: an off-by-default effect can never surprise by re-painting
+     * pixels the moment it lands). Explicit creators pass what they mean —
+     * the drawer's eye-on-virtual passes `enabled: true` (the click itself
+     * is the on), the drawer's first-parameter-edit lands the DISABLED
+     * carrier with the edited values.
      */
     enabled?: boolean;
   } = {},
@@ -400,41 +471,12 @@ export function appendEffectInstance(
 }
 
 /**
- * Lazily materialize a category's floor instance: when the category has NO
- * instance yet, append one DISABLED instance with default parameters (the
- * resident floor); when it already has any instance, return `null` — the
- * patch is a no-op and must not be executed.
- *
- * This is the drawer's entry write: merely OPENING a category's panel lands
- * its floor instance, so the drawer's tab/panel/trash model never has to
- * reason about a truly empty category — only about enabled vs disabled.
- * Idempotent by construction; the floor starts disabled (the eye turns it
- * on), and the drawer's explicit "+" is the only path that creates further
- * enabled instances.
- */
-export function ensureEffectCategoryInstance(
-  layer: Layer,
-  category: EffectCategory,
-  opts: {
-    /** Caller-supplied id (the drawer generates one so it can activate the
-     * newly materialized tab immediately — see appendEffectInstance). */
-    id?: string;
-  } = {},
-): Partial<Layer> | null {
-  if (countEffectInstances(layer, category) > 0) return null;
-  const chain = getEffectChain(layer);
-  return {
-    effects: [...chain, createEffectInstance(category, { enabled: false, id: opts.id })],
-  };
-}
-
-/**
- * Remove one instance by id. Returns the patch, or `null` when the removal is
- * refused: unknown id, or the instance is its category's floor (the last
- * remaining one — deletion must not empty a category).
+ * Remove one instance by id (the trash — deletion is UNCONDITIONAL, unlike
+ * the eye which only flips `enabled`). Returns the patch, or `null` for an
+ * unknown id. Deleting the last instance of a category returns it to the
+ * placeholder tab ("no stroke" is an absent stroke).
  */
 export function removeEffectInstance(layer: Layer, id: string): Partial<Layer> | null {
-  if (isCategoryFloorInstance(layer, id)) return null;
   const chain = getEffectChain(layer);
   const at = chain.findIndex((e) => e.id === id);
   if (at < 0) return null;
@@ -461,10 +503,30 @@ export function updateEffectParams(
 }
 
 /**
- * Toggle one instance's enabled flag (the drawer tab eye / layers-drawer
- * member-row eye). Returns `null` when the id is unknown. The floor rule does
- * NOT apply here: disabling is always allowed — "no effect" is expressed as
- * every instance disabled, never as an empty category.
+ * Update-or-insert parameters for a VIRTUAL tab edit (20261127 ruling):
+ * when `id` resolves, behave exactly like {@link updateEffectParams}; when
+ * it does NOT (the placeholder tab's pre-generated stable id), land a
+ * DISABLED carrier instance with the edited values in the same patch —
+ * editing an off effect's parameters must not switch it on, and the
+ * instance + its first parameters must hit history as ONE step (the
+ * gesture's only undo boundary), never as a separate "layer write" step.
+ */
+export function upsertEffectParams(
+  layer: Layer,
+  category: EffectCategory,
+  id: string,
+  params: StrokeParams | ShadowParams | ColorOverlayParams | OuterGlowParams | GradientOverlayParams | InnerGlowParams | InnerShadowParams,
+): Partial<Layer> {
+  const existing = updateEffectParams(layer, id, params);
+  if (existing) return existing;
+  return appendEffectInstance(layer, category, { id, enabled: false, params });
+}
+
+/**
+ * Toggle one instance's enabled flag — the eye's PRIMARY channel (drawer
+ * tab eye / layers-drawer member-row eye). Disabling KEEPS the instance so
+ * its edited parameters survive the toggle; deletion is the trash's job
+ * ({@link removeEffectInstance}). Returns `null` when the id is unknown.
  */
 export function setEffectInstanceEnabled(
   layer: Layer,
@@ -481,9 +543,11 @@ export function setEffectInstanceEnabled(
 
 /**
  * Disable every effect instance on the layer in ONE patch (the drawer's
- * "disable all" action). Returns null when there is nothing to do — no chain,
- * or every instance is already disabled — so callers keep the patch channel's
- * no-op-write hygiene (a null patch never lands a Redux write).
+ * "disable all" action). Disabling keeps every instance so all edited
+ * parameters survive the sweep. Returns null when there is nothing to do —
+ * no chain, or every instance is already disabled — so callers keep the
+ * patch channel's no-op-write hygiene (a null patch never lands a Redux
+ * write).
  */
 export function disableAllEffectInstances(layer: Layer): Partial<Layer> | null {
   const chain = getEffectChain(layer);
