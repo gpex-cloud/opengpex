@@ -27,8 +27,7 @@ import type { CraftDrawerConfig } from '../../drawers/CraftDrawer/protocols';
 import { resolveMarkerToolState, type MarkerToolState } from './protocols';
 
 // Fast-track (Ticker/DOM) synchronizers live in the sibling `useFastSync.ts`,
-// per the overlay convention (Brush/Clip/Layer/Text): useMarkerPreviewFastSync,
-// useMarkerSelectionFastSync.
+// per the overlay convention (Brush/Clip/Layer/Text): useMarkerSelectionFastSync.
 
 /**
  * useMarkerOverlayState: reads whether the marker tool is active (drives the

@@ -85,31 +85,85 @@ function strokeBoxToLayerOffset(strokeBox: {
   return { dx: strokeBox.x, dy: strokeBox.y };
 }
 
+const INITIAL_PACK_CAPACITY_POINTS = 256;
+
+interface IncrementalPackEntry {
+  buf: Float32Array;
+  packedSolidified: number;
+  size: number;
+}
+
+const incrementalPackCache = new Map<string, IncrementalPackEntry>();
+
+function packPointRange(
+  dst: Float32Array,
+  src: StrokeData['points'],
+  start: number,
+  end: number,
+  size: number,
+  dx: number,
+  dy: number,
+): void {
+  for (let i = start; i < end; i++) {
+    const p = src[i];
+    const base = i * FLOATS_PER_POINT;
+    dst[base + 0] = p.x + dx;
+    dst[base + 1] = p.y + dy;
+    dst[base + 2] = size * p.pressure;
+    dst[base + 3] = p.alpha ?? 1;
+  }
+}
+
 /** Pack one stroke's trajectory into the `Pt` stream the extrude compute reads. */
 function packStrokePoints(
+  layerId: string,
   data: StrokeData,
   dx: number,
   dy: number,
 ): { readonly points: Float32Array; readonly pointCount: number } {
-  // Pack the trajectory into [x, y, width, alpha] × N — the exact `Pt` layout
-  // `cs_extrude` reads.
-  //
-  // WIDTH LANE: the compute pass extrudes `half-width = lane * 0.5` and has no
-  // access to the paint uniform's `size`, so the EFFECTIVE TIP DIAMETER
-  // (`size × pressure`) has to ride the point stream. Packing raw 0..1 pressure here
-  // would render every stroke as a ≤1px hairline regardless of the brush size.
-  // ALPHA LANE: the per-point paint-opacity multiplier (pressure-opacity
-  // dynamics); absent samples read as 1 (full opacity).
   const pointCount = data.points.length;
-  const points = new Float32Array(pointCount * FLOATS_PER_POINT);
-  for (let i = 0; i < pointCount; i++) {
-    const p = data.points[i];
-    const base = i * FLOATS_PER_POINT;
-    points[base + 0] = p.x + dx;
-    points[base + 1] = p.y + dy;
-    points[base + 2] = data.size * p.pressure;
-    points[base + 3] = p.alpha ?? 1;
+
+  // Incremental live-preview path: only pack newly solidified points and the
+  // bounded dynamic tail into a growable per-layer Float32Array.
+  if (data.solidifiedCount !== undefined && dx === 0 && dy === 0) {
+    const solidified = Math.min(data.solidifiedCount, pointCount);
+    let entry = incrementalPackCache.get(layerId);
+    const neededFloats = pointCount * FLOATS_PER_POINT;
+    if (!entry) {
+      const cap = Math.max(INITIAL_PACK_CAPACITY_POINTS * FLOATS_PER_POINT, neededFloats);
+      entry = { buf: new Float32Array(cap), packedSolidified: 0, size: data.size };
+      if (incrementalPackCache.size > 4) {
+        const oldestKey = incrementalPackCache.keys().next().value;
+        if (oldestKey !== undefined) incrementalPackCache.delete(oldestKey);
+      }
+      incrementalPackCache.set(layerId, entry);
+    } else if (entry.size !== data.size || solidified < entry.packedSolidified) {
+      entry.packedSolidified = 0;
+      entry.size = data.size;
+    }
+
+    if (neededFloats > entry.buf.length) {
+      let nextCap = entry.buf.length;
+      while (nextCap < neededFloats) nextCap *= 2;
+      const grown = new Float32Array(nextCap);
+      grown.set(entry.buf.subarray(0, entry.packedSolidified * FLOATS_PER_POINT));
+      entry.buf = grown;
+    }
+
+    if (solidified > entry.packedSolidified) {
+      packPointRange(entry.buf, data.points, entry.packedSolidified, solidified, data.size, 0, 0);
+      entry.packedSolidified = solidified;
+    }
+    packPointRange(entry.buf, data.points, entry.packedSolidified, pointCount, data.size, 0, 0);
+
+    return {
+      points: entry.buf.subarray(0, neededFloats),
+      pointCount,
+    };
   }
+
+  const points = new Float32Array(pointCount * FLOATS_PER_POINT);
+  packPointRange(points, data.points, 0, pointCount, data.size, dx, dy);
   return { points, pointCount };
 }
 
@@ -149,7 +203,7 @@ export function strokeToVectorSource(
     const { dx, dy } = data.box
       ? strokeBoxToLayerOffset(data.box)
       : { dx: 0, dy: 0 };
-    const { points, pointCount } = packStrokePoints(data, dx, dy);
+    const { points, pointCount } = packStrokePoints(layer.id, data, dx, dy);
 
     return {
       points,
@@ -174,6 +228,7 @@ export function strokeToVectorSource(
             feather: data.confinement.feather,
           }
         : undefined,
+      solidifiedCount: data.solidifiedCount,
     } satisfies StrokeParams;
   });
 

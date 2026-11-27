@@ -310,17 +310,45 @@ export function densifyTaperZones(
 }
 
 /**
- * Append-taper envelope: multiply each sample's pressure by a smooth 0→1 ramp
+ * Smooth calligraphic taper ramp over `[0, zone]`.
+ * Keeps a `minTipRatio` floor at `d = 0` so the tip never vanishes completely
+ * under the cursor, and supports asymmetric head/tail exponents. Shared by
+ * `applyTaper` (commit-time envelope) and `IncrementalStrokeTrajectory`
+ * (live preview) so both paths stay numerically identical by construction.
+ */
+export function taperEnvelope(
+  d: number,
+  zone: number,
+  power = 2,
+  minTipRatio = 0,
+): number {
+  if (zone <= 0 || d >= zone) return 1;
+  const t = Math.max(0, d / zone);
+  const s = Math.sin((t * Math.PI) / 2) ** power;
+  return minTipRatio + (1 - minTipRatio) * s;
+}
+
+// Asymmetric calligraphic exponents: the entry ramp is slightly fuller (a
+// fatter entry reads as a confident pen-down) while the exit is sharper (a
+// quicker falloff reads as a lifted stroke). Both paths (commit + preview)
+// MUST use the same pair.
+const TAPER_HEAD_POWER = 1.6;
+const TAPER_TAIL_POWER = 2.2;
+
+/**
+ * Append-taper envelope: multiply each sample's pressure by a smooth ramp
  * over the first `headZone` / last `tailZone` px of ARC LENGTH, independently
- * per end (a zone of 0 leaves that end's round cap untouched — "one end sharp,
- * one end round" calligraphy). This is how the taper brush preset works — it
- * WRITES pressure (the width lane is `size × pressure` and the alpha lane can
- * derive from it), so the shape survives re-render, undo replay and export
- * with no extra state.
+ * per end (a zone of 0 leaves that end's round cap untouched — "one end
+ * sharp, one end round" calligraphy). This is how the taper brush preset
+ * works — it WRITES pressure (the width lane is `size × pressure` and the
+ * alpha lane can derive from it), so the shape survives re-render, undo
+ * replay and export with no extra state.
  *
- * The ramp is `sin²` over the zone (zero exactly at the tip, tangent-flat where
- * it meets the untouched body) — the classic calligraphic entry/exit. Samples
- * beyond the zones keep `pressure × 1`. Both zones <= 0 is the no-op.
+ * The ramp is a `sin^power` curve over the zone (at its minimum exactly at
+ * the tip, tangent-flat where it meets the untouched body) — the classic
+ * calligraphic entry/exit, with `minTipRatio` keeping a visible filament at
+ * the very tip. Samples beyond the zones keep `pressure × 1`. Both zones <= 0
+ * is the no-op.
  *
  * With `fadeAlpha` set (pressure-opacity dynamics on) the envelope multiplies
  * each sample's alpha by the same ramp: width alone narrows the tip but keeps
@@ -333,6 +361,7 @@ export function applyTaper(
   headZone: number,
   tailZone: number,
   fadeAlpha = false,
+  minTipRatio = 0,
 ): StrokePoint[] {
   if ((headZone <= 0 && tailZone <= 0) || points.length < 2) return points as StrokePoint[];
 
@@ -347,16 +376,14 @@ export function applyTaper(
 
   const head = Math.min(Math.max(0, headZone), total / 2);
   const tail = Math.min(Math.max(0, tailZone), total / 2);
-  const ramp = (d: number, zone: number) => {
-    if (zone <= 0 || d >= zone) return 1;
-    const t = d / zone;
-    return Math.sin(t * Math.PI / 2) ** 2;
-  };
 
   return points.map((p, i) => {
     const fromStart = cum[i];
     const fromEnd = total - cum[i];
-    const f = Math.min(ramp(fromStart, head), ramp(fromEnd, tail));
+    const f = Math.min(
+      taperEnvelope(fromStart, head, TAPER_HEAD_POWER, minTipRatio),
+      taperEnvelope(fromEnd, tail, TAPER_TAIL_POWER, minTipRatio),
+    );
     if (fadeAlpha && p.alpha !== undefined) {
       return { ...p, pressure: p.pressure * f, alpha: p.alpha * f };
     }
@@ -389,4 +416,211 @@ export function advanceRope(
   if (dist <= slack) return rope;
   const excess = (dist - slack) / dist;
   return { x: rope.x + dx * excess, y: rope.y + dy * excess };
+}
+
+/** Head/tail envelope factors for one arc position, using the shared curve. */
+function taperFactors(
+  arc: number,
+  totalArc: number,
+  head: number,
+  tail: number,
+  minTipRatio: number,
+): number {
+  return Math.min(
+    taperEnvelope(arc, head, TAPER_HEAD_POWER, minTipRatio),
+    taperEnvelope(totalArc - arc, tail, TAPER_TAIL_POWER, minTipRatio),
+  );
+}
+
+/**
+ * O(1)-per-move CPU trajectory accumulator for live brush previews.
+ *
+ * Separates the monotonically solidified prefix (whose head taper and arc
+ * position are permanently frozen) from the bounded dynamic tail (whose tail
+ * taper shrinks/slides as total arc grows), without touching GPU buffer layouts.
+ */
+export class IncrementalStrokeTrajectory {
+  readonly rawPoints: StrokePoint[] = [];
+  private readonly cumArc: number[] = [];
+  private readonly combinedPoints: StrokePoint[] = [];
+
+  private readonly headZone: number;
+  private readonly maxTailZone: number;
+  private readonly fadeAlpha: boolean;
+  private readonly minSampleDist: number;
+  private readonly minTipRatio: number;
+
+  private solidifiedRawEnd = 0;
+  private solidifiedOutCount = 0;
+
+  constructor(
+    headZone: number,
+    maxTailZone: number,
+    fadeAlpha: boolean,
+    minSampleDist: number,
+    minTipRatio = 0,
+  ) {
+    this.headZone = Math.max(0, headZone);
+    this.maxTailZone = Math.max(0, maxTailZone);
+    this.fadeAlpha = fadeAlpha;
+    this.minSampleDist = minSampleDist;
+    this.minTipRatio = minTipRatio;
+  }
+
+  get length(): number {
+    return this.rawPoints.length;
+  }
+
+  get lastPoint(): StrokePoint | undefined {
+    return this.rawPoints[this.rawPoints.length - 1];
+  }
+
+  /** Append a landed trajectory sample in O(1) and advance the solidified prefix. */
+  push(p: StrokePoint): void {
+    const n = this.rawPoints.length;
+    if (n === 0) {
+      this.rawPoints.push(p);
+      this.cumArc.push(0);
+      return;
+    }
+    const prev = this.rawPoints[n - 1];
+    const segLen = Math.hypot(p.x - prev.x, p.y - prev.y);
+    this.rawPoints.push(p);
+    this.cumArc.push(this.cumArc[n - 1] + segLen);
+    this.advanceSolidified();
+  }
+
+  /**
+   * Build the O(1) tapered StrokePoint array and solidified prefix count for
+   * the current frame (optionally including a non-landed sub-threshold preview tail).
+   */
+  buildPointsView(previewTail?: StrokePoint): {
+    readonly points: readonly StrokePoint[];
+    readonly solidifiedCount: number;
+  } {
+    const n = this.rawPoints.length;
+    if (n === 0) {
+      return { points: [], solidifiedCount: 0 };
+    }
+
+    const lastRaw = this.rawPoints[n - 1];
+    const extraArc = previewTail ? Math.hypot(previewTail.x - lastRaw.x, previewTail.y - lastRaw.y) : 0;
+    const totalArc = this.cumArc[n - 1] + extraArc;
+
+    // Zone capping MUST match the commit path's `taperZones` exactly (the same
+    // requested zone clamped to TAPER_ARC_FRACTION of the total arc) — the
+    // live preview is a promise about the stroke the release will commit, and
+    // any clamp mismatch shows on screen as the tip reshaping at pointer-up.
+    const head = totalArc > 0 ? Math.min(this.headZone, totalArc * TAPER_ARC_FRACTION) : 0;
+    const tail = totalArc > 0 ? Math.min(this.maxTailZone, totalArc * TAPER_ARC_FRACTION) : 0;
+
+    // Truncate dynamic tail from previous frame while keeping solidified prefix intact.
+    this.combinedPoints.length = this.solidifiedOutCount;
+    const startRaw = this.solidifiedRawEnd;
+
+    if (this.solidifiedOutCount === 0) {
+      const p0 = this.rawPoints[0];
+      const f0 = totalArc > 0 ? taperFactors(0, totalArc, head, tail, this.minTipRatio) : 1;
+      this.combinedPoints.push(this.applyFactor(p0, f0));
+    }
+
+    const tailCount = n - startRaw + (previewTail ? 1 : 0);
+    for (let k = 1; k < tailCount; k++) {
+      const isPreview = previewTail !== undefined && k === tailCount - 1;
+      const a = this.rawPoints[startRaw + k - 1];
+      const b = isPreview ? previewTail! : this.rawPoints[startRaw + k];
+      const d0 = this.cumArc[startRaw + k - 1];
+      const d1 = isPreview ? totalArc : this.cumArc[startRaw + k];
+
+      const touchesTaper =
+        totalArc > 0 &&
+        ((head > 0 && (d0 < head || d1 < head)) ||
+          (tail > 0 && (totalArc - d0 < tail || totalArc - d1 < tail)));
+
+      if (touchesTaper) {
+        const segLen = d1 - d0;
+        const steps = Math.max(1, Math.ceil(segLen / this.minSampleDist));
+        for (let j = 1; j < steps; j++) {
+          const t = j / steps;
+          const arc = d0 + segLen * t;
+          const f = taperFactors(arc, totalArc, head, tail, this.minTipRatio);
+          const interp: StrokePoint = {
+            x: a.x + (b.x - a.x) * t,
+            y: a.y + (b.y - a.y) * t,
+            pressure: a.pressure + (b.pressure - a.pressure) * t,
+            ...(a.alpha !== undefined && b.alpha !== undefined
+              ? { alpha: a.alpha + (b.alpha - a.alpha) * t }
+              : {}),
+          };
+          this.combinedPoints.push(this.applyFactor(interp, f));
+        }
+      }
+
+      const f1 = totalArc > 0 ? taperFactors(d1, totalArc, head, tail, this.minTipRatio) : 1;
+      this.combinedPoints.push(this.applyFactor(b, f1));
+    }
+
+    return {
+      points: this.combinedPoints,
+      solidifiedCount: this.solidifiedOutCount,
+    };
+  }
+
+  private advanceSolidified(): void {
+    const n = this.rawPoints.length;
+    if (n < 2) return;
+
+    const totalArc = this.cumArc[n - 1];
+    // Wait until the arc clamp (TAPER_ARC_FRACTION of total) can no longer
+    // shrink the head zone — head = min(headZone, totalArc × fraction) is
+    // permanently frozen once totalArc × fraction >= headZone.
+    if (this.headZone > 0 && totalArc * TAPER_ARC_FRACTION < this.headZone) return;
+
+    const safeBoundaryArc = totalArc - this.maxTailZone;
+    this.combinedPoints.length = this.solidifiedOutCount;
+
+    while (this.solidifiedRawEnd + 1 < n && this.cumArc[this.solidifiedRawEnd + 1] <= safeBoundaryArc) {
+      const i0 = this.solidifiedRawEnd;
+      const i1 = i0 + 1;
+      const a = this.rawPoints[i0];
+      const b = this.rawPoints[i1];
+      const d0 = this.cumArc[i0];
+      const d1 = this.cumArc[i1];
+
+      if (i0 === 0 && this.solidifiedOutCount === 0) {
+        this.combinedPoints.push(this.applyFactor(a, taperEnvelope(0, this.headZone, TAPER_HEAD_POWER, this.minTipRatio)));
+      }
+
+      if (this.headZone > 0 && d0 < this.headZone) {
+        const segLen = d1 - d0;
+        const steps = Math.max(1, Math.ceil(segLen / this.minSampleDist));
+        for (let j = 1; j < steps; j++) {
+          const t = j / steps;
+          const arc = d0 + segLen * t;
+          const f = taperEnvelope(arc, this.headZone, TAPER_HEAD_POWER, this.minTipRatio);
+          const interp: StrokePoint = {
+            x: a.x + (b.x - a.x) * t,
+            y: a.y + (b.y - a.y) * t,
+            pressure: a.pressure + (b.pressure - a.pressure) * t,
+            ...(a.alpha !== undefined && b.alpha !== undefined
+              ? { alpha: a.alpha + (b.alpha - a.alpha) * t }
+              : {}),
+          };
+          this.combinedPoints.push(this.applyFactor(interp, f));
+        }
+      }
+
+      this.combinedPoints.push(this.applyFactor(b, taperEnvelope(d1, this.headZone, TAPER_HEAD_POWER, this.minTipRatio)));
+      this.solidifiedOutCount = this.combinedPoints.length;
+      this.solidifiedRawEnd = i1;
+    }
+  }
+
+  private applyFactor(p: StrokePoint, factor: number): StrokePoint {
+    if (factor === 1) return p;
+    if (this.fadeAlpha && p.alpha !== undefined) {
+      return { ...p, pressure: p.pressure * factor, alpha: p.alpha * factor };
+    }
+    return { ...p, pressure: p.pressure * factor };
+  }
 }

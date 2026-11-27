@@ -17,63 +17,10 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { useRef } from 'react';
 import { useEditorServices } from '@opengpex/editor/core/context';
 import { useFastSync } from '@opengpex/editor/core/state/volatile';
 import { straightenPreviewPose } from '@opengpex/editor/core/state/volatile/straighten';
 import { VolatileState, Frame, CameraState } from '@opengpex/editor/core/types';
-import { markerToSvg } from './marker/svg';
-import { getMarkerPreview, getMarkerPreviewVersion } from './interactions';
-
-/**
- * useMarkerPreviewFastSync: drives the drag-preview SVG group.
- *
- * Follows the camera via CSS transform and re-renders the SVG content only when
- * the module-level preview version changes (same dirty-check idea as
- * BrushOverlay's useStrokePreviewFastSync). The preview SVG itself is produced
- * by `markerToSvg` (marker/svg.ts), guaranteeing pixel parity with the final rasterized
- * output.
- */
-export function useMarkerPreviewFastSync(
-  containerRef: React.RefObject<HTMLDivElement | null>,
-  groupRef: React.RefObject<SVGGElement | null>,
-) {
-  const lastVersionRef = useRef<number>(-1);
-  const lastCamRef = useRef<{ x: number; y: number; k: number } | null>(null);
-
-  useFastSync(containerRef, true, (_v: VolatileState, _f: Frame, cam: CameraState) => {
-    const el = containerRef.current;
-    const g = groupRef.current;
-    if (!el || !g) return;
-
-    // Camera follow (canvas-local origin → screen).
-    const camChanged = !lastCamRef.current ||
-      lastCamRef.current.x !== cam.x ||
-      lastCamRef.current.y !== cam.y ||
-      lastCamRef.current.k !== cam.k;
-    if (camChanged) {
-      lastCamRef.current = { x: cam.x, y: cam.y, k: cam.k };
-      el.style.transform = `translate(${cam.x}px, ${cam.y}px) scale(${cam.k})`;
-    }
-
-    // Dirty-check the preview store.
-    const version = getMarkerPreviewVersion();
-    if (version === lastVersionRef.current) return;
-    lastVersionRef.current = version;
-
-    const preview = getMarkerPreview();
-    if (!preview) {
-      g.innerHTML = '';
-      g.removeAttribute('transform');
-      return;
-    }
-
-    // Position the SVG fragment at the marker's canvas-local top-left, then let
-    // markerToSvg draw in layer-local coordinates (0,0 = bounding top-left).
-    g.setAttribute('transform', `translate(${preview.topLeftLocal.x}, ${preview.topLeftLocal.y})`);
-    g.innerHTML = markerToSvg(preview.markerData, preview.bounding);
-  }, { throttleHz: 60 });
-}
 
 // ─── useMarkerSelectionFastSync ────────────────────────────────────────────────
 

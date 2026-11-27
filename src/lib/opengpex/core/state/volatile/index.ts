@@ -53,3 +53,5 @@ export {
 } from './useFastSync';
 export type { MatrixRect } from './useFastSync';
 export type { VolatileState, VolatileInteraction, VolatileStateHandle } from './types';
+export { VECTOR_TRANSIENT_KEY } from './vector';
+export type { VectorPreviewPayload } from './vector';

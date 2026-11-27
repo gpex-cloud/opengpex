@@ -31,6 +31,7 @@ import { GpuDevice, getSharedGpuDevice, type SurfaceConfig } from '@opengpex/edi
 import type { Scene } from '@opengpex/editor/core/engine/pipeline/scene/Scene';
 import { TexturePool } from '@opengpex/editor/core/engine/gpu/resources/TexturePool';
 import { ResidentTransientCache } from '@opengpex/editor/core/engine/gpu/resources/ResidentTransientCache';
+import { strokeRenderer } from '@opengpex/editor/core/engine/pipeline/graph/build/vectorRenderers/StrokeRenderer';
 import { ResidentAssetRegistry } from '@opengpex/editor/core/engine/gpu/resources/ResidentAssetRegistry';
 import { derivePoolBudget } from '@opengpex/editor/core/engine/gpu/resources/poolBudget';
 import { WorkingSet } from '@opengpex/editor/core/engine/gpu/resources/WorkingSet';
@@ -130,6 +131,7 @@ export class WebGpuEngine implements IEngine {
         if (!this.pipelineCache || this.pipelineCache.device !== device) {
           this.pipelineCache?.destroy();
           this.pipelineCache = new PipelineCache(device);
+          this.#warmUpCommonPipelines();
         }
         if (!this.bufferRing || this.bufferRing.device !== device) {
           this.bufferRing?.destroy();
@@ -460,6 +462,7 @@ export class WebGpuEngine implements IEngine {
     this.channelCache.clear();
     this.perf.destroy();
     engineContentCache.clear();
+    strokeRenderer.clearLiveCache();
   }
 
   #adoptDevice(device: GPUDevice, caps: Capabilities | null): void {
@@ -470,8 +473,32 @@ export class WebGpuEngine implements IEngine {
     this.residentTransients = new ResidentTransientCache(device);
     this.pipelineCache?.destroy();
     this.pipelineCache = new PipelineCache(device);
+    this.#warmUpCommonPipelines();
     this.bufferRing?.destroy();
     this.bufferRing = new BufferRing(device);
+  }
+
+  /**
+   * Pre-compile frequently shared GPU pipelines in a microtask after device
+   * creation so the first interactive gesture does not pay shader compilation.
+   */
+  #warmUpCommonPipelines(): void {
+    const cache = this.pipelineCache;
+    if (!cache) return;
+    const format: GPUTextureFormat = this.gpu.getCapabilities()?.workingFormat ?? 'rgba16float';
+    queueMicrotask(() => {
+      if (this.pipelineCache !== cache || !this.gpu.isReady()) return;
+      // Warm-up is best-effort: a device that cannot create pipelines (test
+      // doubles, feature-limited adapters) must not let the compile error
+      // escape as an unhandled async exception — the first real stroke still
+      // compiles the pipelines synchronously on its own path.
+      try {
+        cache.getStrokeExtrudePipeline();
+        cache.getStrokePipeline(format);
+      } catch {
+        /* ignore — compilation happens on demand at first use */
+      }
+    });
   }
 }
 

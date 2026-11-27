@@ -69,6 +69,10 @@
 import type { Frame, CameraState, Dimensions, TransformLayer, GeometryService, AssetService, BitmapMaskOverrideMap } from '@opengpex/editor/core/types';
 import { rotatePoseAboutPivot } from '@opengpex/editor/core/geometry/operators/transform';
 import { STRAIGHTEN_TRANSIENT_KEY, type StraightenPreviewPayload } from '@opengpex/editor/core/state/volatile/straighten';
+import {
+  VECTOR_TRANSIENT_KEY,
+  type VectorPreviewPayload,
+} from '@opengpex/editor/core/state/volatile/vector';
 import { CHANNEL_MASK_RGB } from '@opengpex/editor/core/engine';
 import type { SceneChannelMask } from '@opengpex/editor/core/engine/pipeline/scene/Scene';
 import { PERF_MON } from '@opengpex/editor/core/helpers/config';
@@ -181,6 +185,7 @@ export class RenderController {
    * a transient-only drag changes neither the frame nor the camera reference,
    * so the stamp diff is what makes the preview repaint per pointermove. */
   private lastStraightenKey = '';
+  private lastVectorPreview: VectorPreviewPayload | undefined = undefined;
 
   // ── [PERF_MON] rolling-window diagnostics (assemble vs render split) ──
   private lastTickTs = 0;
@@ -322,6 +327,10 @@ export class RenderController {
     // dirty diff and the pose-override seam below.
     const straighten = readStraightenPreview(input.volatile);
     const straightenKey = straightenStamp(straighten);
+    const vectorPreview = input.volatile.transient[VECTOR_TRANSIENT_KEY] as
+      | VectorPreviewPayload
+      | undefined;
+    const vectorPreviewChanged = vectorPreview !== this.lastVectorPreview;
 
     const inputChanged =
       channelMask !== this.lastChannelMask ||
@@ -331,7 +340,7 @@ export class RenderController {
       this.needsRender || inputChanged || this.syncCanvasBuffer(input.canvas, input.viewportDim, input.dpr);
 
     // Skip render if scene is completely static
-    if (!isDirty && input.frame === this.lastFrame && input.camera === this.lastCam) return;
+    if (!isDirty && !vectorPreviewChanged && input.frame === this.lastFrame && input.camera === this.lastCam) return;
     if (!this.gpuEngine.isReady()) return;
 
     const isInteracting = input.volatile.activeState.interacting;
@@ -345,6 +354,7 @@ export class RenderController {
     this.lastChannelMask = channelMask;
     this.lastAdaptiveDensity = input.adaptiveDensity;
     this.lastStraightenKey = straightenKey;
+    this.lastVectorPreview = vectorPreview;
     this.needsRender = false;
 
     if (PERF_MON) assembleT0 = performance.now();
@@ -437,6 +447,8 @@ export class RenderController {
         if (!input.volatile.activeState.interacting) return false;
         return !!input.volatile.buffered.layers[`${input.frame.id}:${layerId}`]?.useIncreComp;
       },
+      vectorPreview:
+        vectorPreview && vectorPreview.frameId === input.frame.id ? vectorPreview : undefined,
     });
 
     // Gain-map presentation warm: probe the source cache once for a

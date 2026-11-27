@@ -28,6 +28,7 @@
 import { useRef } from 'react';
 import { useFastSync } from '@opengpex/editor/core/state/volatile';
 import { VolatileState, Frame, CameraState } from '@opengpex/editor/core/types';
+import { BRUSH_STABILIZER_GUIDE_KEY, type BrushStabilizerGuide } from './protocols';
 
 /**
  * useBrushCursorFastSync: resize the brush ring when the camera zoom changes,
@@ -83,6 +84,78 @@ export function useBrushCursorFastSync(
     if (crossH) {
       crossH.style.left = `${halfSize - 3}px`;
       crossH.style.top = `${halfSize - 0.5}px`;
+    }
+  }, { throttleHz: 60 });
+}
+
+/**
+ * useBrushStabilizerGuideFastSync: draw the rope-model stabilizer's
+ * pull-string guide — a dotted line from the pointer to the rope point plus a
+ * small dot at the rope end — so the stabilizer's intentional lag reads as a
+ * feature instead of a pointer that "doesn't keep up".
+ *
+ * Both elements are hidden when the guide transient is absent or no gesture
+ * is in flight; while visible, positions are re-projected every throttled
+ * tick. Note the `useFastSync` contract: only `lineRef` gets the automatic
+ * null-guard; `anchorRef` must be null-checked inside the callback.
+ */
+export function useBrushStabilizerGuideFastSync(
+  lineRef: React.RefObject<SVGLineElement | null>,
+  anchorRef: React.RefObject<SVGCircleElement | null>,
+  isActive: boolean,
+) {
+  // Skip-write caches: without them this hook writes two identical inline
+  // styles per ticker frame while idle (the 60Hz throttle only runs during
+  // interaction) and six identical SVG attributes per tick whenever the
+  // pointer holds still mid-drag — SVG setAttribute always re-runs the
+  // attribute-changed steps even for an unchanged value, dirty-marking the
+  // element for nothing. Initial `hidden = true` matches the JSX defaults,
+  // so a remount needs no extra reset.
+  const hiddenRef = useRef(true);
+  const lastCoordsRef = useRef<number[]>([]);
+
+  useFastSync(lineRef, isActive, (v: VolatileState, _f: Frame, cam: CameraState) => {
+    const line = lineRef.current;
+    const anchor = anchorRef.current;
+    if (!line || !anchor) return;
+
+    const guide = v.transient[BRUSH_STABILIZER_GUIDE_KEY] as unknown as
+      | BrushStabilizerGuide
+      | undefined;
+    if (!guide || !v.activeState.interacting) {
+      if (!hiddenRef.current) {
+        line.style.display = 'none';
+        anchor.style.display = 'none';
+        hiddenRef.current = true;
+        lastCoordsRef.current = [];
+      }
+      return;
+    }
+
+    const x1 = cam.x + guide.pointerCanvas.x * cam.k;
+    const y1 = cam.y + guide.pointerCanvas.y * cam.k;
+    const x2 = cam.x + guide.ropeCanvas.x * cam.k;
+    const y2 = cam.y + guide.ropeCanvas.y * cam.k;
+
+    const last = lastCoordsRef.current;
+    if (
+      last.length === 4 &&
+      last[0] === x1 && last[1] === y1 && last[2] === x2 && last[3] === y2
+    ) {
+      return;
+    }
+    lastCoordsRef.current = [x1, y1, x2, y2];
+
+    line.setAttribute('x1', `${x1}`);
+    line.setAttribute('y1', `${y1}`);
+    line.setAttribute('x2', `${x2}`);
+    line.setAttribute('y2', `${y2}`);
+    anchor.setAttribute('cx', `${x2}`);
+    anchor.setAttribute('cy', `${y2}`);
+    if (hiddenRef.current) {
+      line.style.display = '';
+      anchor.style.display = '';
+      hiddenRef.current = false;
     }
   }, { throttleHz: 60 });
 }

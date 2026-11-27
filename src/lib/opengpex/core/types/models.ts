@@ -674,6 +674,11 @@ export interface StrokeData {
    * for; the two semantics must not collide).
    */
   readonly confinement?: LocalPolygon;
+  /**
+   * Optional monotonic prefix length in `points` whose geometry and taper
+   * envelope are frozen for incremental CPU/GPU caching during live previews.
+   */
+  readonly solidifiedCount?: number;
 }
 
 /**

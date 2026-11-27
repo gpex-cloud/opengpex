@@ -68,6 +68,7 @@ import { GPUTextureUsage } from '@opengpex/editor/core/engine/gpu/constants';
 import { hasEffectiveFilters } from '../composite/FilterPass';
 import type { VectorRenderContext } from './vectorRenderers/VectorRenderer';
 import { resolveVectorRenderer } from './vectorRenderers';
+import { strokeRenderer } from './vectorRenderers/StrokeRenderer';
 import { vectorTransientSize } from '../support/vectorTransient';
 import { runFilterChain } from './runFilterChain';
 import {
@@ -140,7 +141,8 @@ export function prepareVectorSources(
     // resident slots that never idle out) — the live-vector flag restricts the
     // bypass to the single actively live-edited layer (composeView stamps it,
     // gestures are exclusive).
-    const usage = GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING;
+    const usage = GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST;
+    const isExport = !!ctx.exportViewport;
     const oversized =
       isOversizedTransient(reqW, reqH) ||
       (layer.useIncreComp &&
@@ -202,7 +204,15 @@ export function prepareVectorSources(
     // BEFORE the render pass opens so a compute-based strategy can encode its prepass —
     // WebGPU forbids beginning a compute pass while a render pass is active.
     const renderer = resolveVectorRenderer(source.renderer);
-    renderer.encodePrepass?.(encoder, vectorCtx, { params: source, frameToken });
+    const baseVectorArgs = {
+      params: source,
+      density: Math.max(scale[0], scale[1]),
+      frameToken,
+      layerId: layer.id,
+      targetExtent: [reqW, reqH] as const,
+      isExport,
+    };
+    renderer.encodePrepass?.(encoder, vectorCtx, baseVectorArgs);
 
     // Confinement multiply: bake each stroke's frozen selection snapshot into a
     // coverage texture BEFORE the render pass opens (compute), sized to the
@@ -233,10 +243,22 @@ export function prepareVectorSources(
       });
     }
 
+    const prepopulated =
+      renderer.prepareTransient?.(encoder, vectorCtx, {
+        ...baseVectorArgs,
+        confinementCoverages,
+        targetTexture: raw,
+      }) ?? false;
+
     const vectorPass = encoder.beginRenderPass({
       label: `Vector Pass (${layer.id})`,
       colorAttachments: [
-        { view: transient.texture.createView(), clearValue: CLEAR_COLOR, loadOp: 'clear', storeOp: 'store' },
+        {
+          view: transient.texture.createView(),
+          clearValue: CLEAR_COLOR,
+          loadOp: prepopulated ? 'load' : 'clear',
+          storeOp: 'store',
+        },
       ],
       timestampWrites: ctx.gpuTimer?.pass(`vector(${source.renderer})`),
     });
@@ -249,9 +271,7 @@ export function prepareVectorSources(
     // PHYSICAL texel cell, so it must know the cell's logical size). The
     // stroke ribbon and the remaining SDF shapes stay smoothstep/fwidth.
     renderer.render(vectorPass, vectorCtx, {
-      params: source,
-      density: Math.max(scale[0], scale[1]),
-      frameToken,
+      ...baseVectorArgs,
       confinementCoverages,
     });
     vectorPass.end();
@@ -302,4 +322,7 @@ export function prepareVectorSources(
     );
   }
   sweepFrozenSelectionNamespace(seenConfinementKeys, 'stroke:');
+  if (!ctx.exportViewport) {
+    strokeRenderer.sweepLiveCache();
+  }
 }

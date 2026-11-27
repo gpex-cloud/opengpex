@@ -28,17 +28,12 @@
  */
 
 import type { MarkerData, SegmentMarkerData, SdfGeometry } from '../../types';
-import { svgStroke } from '../shared';
-import { sdfSolverOutline } from '@opengpex/editor/core/engine/pipeline/graph/build/vectorRenderers/sdfPolygonSolver';
 
 /** 2D point (canvas-local or layer-local px, used interchangeably by value). */
 interface Pt {
   x: number;
   y: number;
 }
-
-/** Midpoint of two points. */
-const midpoint = (p: Pt, q: Pt): Pt => ({ x: (p.x + q.x) / 2, y: (p.y + q.y) / 2 });
 
 /**
  * AA headroom added on EVERY side of the segment family's tight bounding. The
@@ -312,65 +307,6 @@ export function isSegmentData(data: MarkerData): data is SegmentMarkerData {
 export function shiftSegmentEndpoints(data: SegmentMarkerData, shiftX: number, shiftY: number): SegmentMarkerData {
   const moved = (p: Pt) => ({ x: p.x + shiftX, y: p.y + shiftY });
   return { ...data, a: moved(data.a), b: moved(data.b) };
-}
-
-// ─── Segment family: SVG preview + engine SDF translation ─────────────────────
-
-/**
- * SVG preview of a segment marker: ONE filled path from the ENGINE'S OWN
- * solver outline — the exact artifact the L2 coverage solver renders — so the
- * preview is one-to-one with the release by construction, and a single path
- * cannot self-overlap: translucent ink never double-blends. (The previous
- * round-cap `<line>` under the head triangles double-blended at each base,
- * and SVG cannot even express the shipped ink — a round tail cap AND a flush
- * head base — on one stroked element without overlapping pieces.)
- *
- * When the outline degenerates the preview falls back to the classic
- * `<line>` + head `<polygon>` markup built from the SAME `segmentHeadAt*`
- * vertices the tight bounding eats — best effort, never empty for a valid
- * drag.
- */
-export function segmentToSvg(data: SegmentMarkerData): string {
-  const layout = segmentLayoutOf(data);
-  if (!layout) return '';
-  const { a, b } = layout;
-  if (Math.hypot(b.x - a.x, b.y - a.y) <= 0) return '';
-  const sw = Math.max(0, data.stroke.width);
-  const color = svgStroke(data);
-  const geometry = segmentToSdf(data);
-  // `size` is unused by the line-segment solver branch (the endpoints ride in
-  // shapeParams); zeros are safe.
-  const outline = sdfSolverOutline(geometry.prim, [0, 0], sw, geometry.shapeParams, geometry.headScale ?? 0);
-  if (outline && outline.outer.length >= 6) {
-    let d = `M ${outline.outer[0]} ${outline.outer[1]}`;
-    for (let i = 2; i < outline.outer.length; i += 2) {
-      d += ` L ${outline.outer[i]} ${outline.outer[i + 1]}`;
-    }
-    return `<path d="${d} Z" fill="${color}" fill-rule="evenodd" stroke="none" />`;
-  }
-  return segmentToSvgFallback(data, layout);
-}
-
-/** Legacy preview markup (round-cap shaft + head polygons) for degenerate outlines. */
-function segmentToSvgFallback(data: SegmentMarkerData, layout: SegmentLayout): string {
-  const { a, b, headLen, headA, headB } = layout;
-  const sw = Math.max(0, data.stroke.width);
-  const halfW = sw / 2;
-  const color = svgStroke(data);
-  const headAVerts = headA ? segmentHeadAtA(a, b, headLen, halfW) : null;
-  const headBVerts = headB ? segmentHeadAtB(a, b, headLen, halfW) : null;
-  const poly = (h: SegmentHeadVertices) =>
-    `<polygon points="${h.tip.x},${h.tip.y} ${h.cornerM.x},${h.cornerM.y} ${h.cornerP.x},${h.cornerP.y}" fill="${color}" />`;
-  const headFragments = [headAVerts, headBVerts].filter((h): h is SegmentHeadVertices => h !== null).map(poly).join('');
-  // Shaft ends at each head's base centre (corner midpoint), mirroring the
-  // shader's flush base so no shaft overpaints its head.
-  const shaftA = headAVerts ? midpoint(headAVerts.cornerM, headAVerts.cornerP) : a;
-  const shaftB = headBVerts ? midpoint(headBVerts.cornerM, headBVerts.cornerP) : b;
-  return (
-    `<line x1="${shaftA.x}" y1="${shaftA.y}" x2="${shaftB.x}" y2="${shaftB.y}" ` +
-    `stroke="${color}" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round" />` +
-    headFragments
-  );
 }
 
 /** Engine SDF translation for a segment marker: one primitive, head flags in params. */

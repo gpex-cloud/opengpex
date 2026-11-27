@@ -29,15 +29,17 @@ import {
   useBrushParams,
   useBrushColor,
 } from './hooks';
+import { useBrushStabilizerGuideFastSync } from './useFastSync';
 
 // ─── BrushOverlayMain ─────────────────────────────────────────────────────────
 
 /**
  * BrushOverlayMain: STAGE_OVERLAY surface for the vector brush.
  *
- * It renders ONE thing: the brush cursor ring. There is deliberately no stroke
- * preview element — the in-progress stroke is a genuine scene layer composited
- * by the render pipeline (see interactions.ts).
+ * It renders TWO things: the brush cursor ring and the stabilizer pull-string
+ * guide. There is deliberately no stroke preview element — the in-progress
+ * stroke is a genuine scene layer composited by the render pipeline (see
+ * interactions.ts).
  */
 export const BrushOverlayMain = React.memo(function BrushOverlayMain() {
   const { isBrushMode } = useBrushOverlayState();
@@ -45,7 +47,50 @@ export const BrushOverlayMain = React.memo(function BrushOverlayMain() {
   useBrushToolLifecycle(isBrushMode);
 
   if (!isBrushMode) return null;
-  return <BrushCursor />;
+  return (
+    <>
+      <BrushCursor />
+      <StabilizerGuide />
+    </>
+  );
+});
+
+// ─── StabilizerGuide ──────────────────────────────────────────────────────────
+
+/**
+ * StabilizerGuide: the rope-model pull-string visualisation shown while
+ * dragging with the stabilizer enabled — a dotted line from the pointer to
+ * the lagging rope point, with a small dot marking the rope end (the actual
+ * pen tip of the stroke). Geometry is written imperatively by
+ * `useBrushStabilizerGuideFastSync`; the elements start hidden and only
+ * appear while a stabilizer gesture is in flight.
+ */
+const StabilizerGuide = React.memo(function StabilizerGuide() {
+  const lineRef = useRef<SVGLineElement>(null);
+  const anchorRef = useRef<SVGCircleElement>(null);
+
+  useBrushStabilizerGuideFastSync(lineRef, anchorRef, true);
+
+  return (
+    <svg
+      className="absolute inset-0 w-full h-full pointer-events-none"
+      style={{ zIndex: EDITOR_Z_INDEX.FULLSCREEN.OVERLAY }}
+    >
+      <line
+        ref={lineRef}
+        stroke="rgba(99, 102, 241, 0.55)"
+        strokeWidth={1}
+        strokeDasharray="3 3"
+        style={{ display: 'none' }}
+      />
+      <circle
+        ref={anchorRef}
+        r={2.5}
+        fill="rgba(99, 102, 241, 0.8)"
+        style={{ display: 'none' }}
+      />
+    </svg>
+  );
 });
 
 // ─── BrushCursor ──────────────────────────────────────────────────────────────

@@ -28,12 +28,14 @@
 import { InteractionHandler, InteractionEvent, Layer, StrokeData, StrokePoint, asLocalShape } from '@opengpex/editor/core/types';
 import { LayerFactory } from '@opengpex/editor/core/layer';
 import { fromHex, type ColorValue } from '@opengpex/editor/core/engine/color';
-import { PERF_MON } from '@opengpex/editor/core/helpers/config';
+import { VECTOR_TRANSIENT_KEY } from '@opengpex/editor/core/state/volatile/vector';
 import { InteractionTransaction } from '@opengpex/editor/stage/interaction/Transaction';
 import { CraftDrawerAPI } from '../../drawers/CraftDrawer/protocols';
 import { ColorOptionsAPI } from '../../options/ColorOptions/protocols';
-import { advanceRope, applyTaper, densifyTaperZones, taperZones, tightenStroke } from './geometry';
+import { advanceRope, applyTaper, densifyTaperZones, IncrementalStrokeTrajectory, taperZones, tightenStroke } from './geometry';
 import * as P from './protocols';
+
+let ephemeralPreviewSeq = 0;
 
 const ACTIVE_CRAFT_KEY = CraftDrawerAPI.signals.activeCraft;
 const DRAWING_STROKE_KEY = P.BrushOverlayAPI.signals.drawingStroke;
@@ -103,14 +105,25 @@ function readPaintParams(e: InteractionEvent): PaintParams {
  * A MOUSE reports 0.5 whenever a button is down (PointerEvent spec), which
  * would silently halve the painted tip against both the size slider and the
  * on-screen cursor ring — so mouse input is pinned to 1. Pen and touch keep
- * their reported pressure, with 0 (unsupported / hover) falling back to 0.5.
+ * their reported pressure. A 0 report needs two different answers: at gesture
+ * START it is the digitizer's first-contact artifact, so a small fixed
+ * fallback seeds the stroke (0 would collapse the first tip segment to zero
+ * width); MID-STROKE it is a hover/grip artifact, so the LAST known good
+ * pressure is reused instead of snapping back to a constant (which would
+ * jump the width every time the hardware dropped the signal).
  */
-function samplePressure(e: InteractionEvent): number {
-  const type = e.pointer.pointerType;
-  if (type !== 'pen' && type !== 'touch') return 1;
-  const raw = e.pointer.pressure;
-  return raw > 0 ? Math.min(1, raw) : 0.5;
-}
+const makeSamplePressure = () => {
+  let lastPenPressure = P.PEN_INITIAL_FALLBACK_PRESSURE;
+  return (rawPressure: number, pointerType: string, isStart: boolean): number => {
+    if (pointerType !== 'pen' && pointerType !== 'touch') return 1;
+    if (rawPressure > 0) {
+      const clamped = Math.min(1, rawPressure);
+      lastPenPressure = clamped;
+      return clamped;
+    }
+    return isStart ? P.PEN_INITIAL_FALLBACK_PRESSURE : lastPenPressure;
+  };
+};
 
 /**
  * Build the stroke payload for the given trajectory. `box` is the trajectory's
@@ -144,6 +157,7 @@ const buildStrokeData = (
       head,
       tail,
       params.pressureOpacity === true,
+      P.TAPER_MIN_TIP_RATIO,
     ),
     box,
     color: params.color,
@@ -164,10 +178,14 @@ const buildStrokeData = (
  */
 export const createBrushStrokeHandler = (): InteractionHandler => {
   let tx: InteractionTransaction | null = null;
-  let layerId: string | null = null;
-  let points: StrokePoint[] = [];
+  let previewLayerId: string | null = null;
+  let insertAfterLayerId: string | undefined;
+  let strokeBuf: IncrementalStrokeTrajectory | null = null;
   let params: PaintParams | null = null;
   let drawing = false;
+  // Pen pressure tracker — recreated per gesture so the "last known good
+  // pressure" never leaks across strokes.
+  let samplePressure = makeSamplePressure();
   // Rope-model stabilizer state (canvas px). Only advances when the stabilizer
   // is on; otherwise the raw pointer position samples directly.
   let ropeX = 0;
@@ -202,16 +220,18 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
 
   const reset = (e: InteractionEvent) => {
     tx = null;
-    layerId = null;
-    points = [];
+    previewLayerId = null;
+    insertAfterLayerId = undefined;
+    strokeBuf = null;
     params = null;
     drawing = false;
     confinement = undefined;
+    samplePressure = makeSamplePressure();
     e.actions.setStateSignal(DRAWING_STROKE_KEY, false);
   };
 
-  /** Build the stroke's OWN layer (legacy single-stroke payload while drawing). */
-  const buildLayer = (
+  /** Build the persisted stroke layer (committed once on pointer-up). */
+  const buildCommittedLayer = (
     e: InteractionEvent,
     strokeData: StrokeData,
     geom: { w: number; h: number; cx: number; cy: number },
@@ -226,64 +246,9 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
       visibleShape: asLocalShape({ x: 0, y: 0, w: geom.w, h: geom.h }),
       visible: true,
       opacity: params?.opacity ?? 1,
-      strokeData,
+      strokes: [{ ...strokeData, box: { x: 0, y: 0, w: geom.w, h: geom.h } }],
       metadata: { sourceTool: 'brush' },
     });
-  };
-
-  /**
-   * Place the stroke's REAL layer + open the silent transaction on the first
-   * sample pair that can actually draw something. The layer starts CANVAS-SIZED
-   * (`cx = cy = 0`, trajectory in plain canvas coordinates) — per-move
-   * tightening is avoided: a stable full-canvas box keeps the stroke's vector
-   * transient at fixed dims frame-to-frame, which is the precondition for the
-   * engine's resident-transient reuse (mechanism B). The box is tightened once
-   * at pointerup (`onEnd`, through the same silent track) so the committed
-   * layer is snug in the layers panel / transforms / export (see geometry.ts).
-   *
-   * `cmd.place` is undoable and IS the gesture's only checkpoint — and it runs
-   * at drag start, not pointerup: the layer the user watches grow IS the
-   * committed layer, so nothing is created, renamed, or swapped at the end of
-   * the gesture. Idempotent; returns false if there is nothing to place yet.
-   */
-  const ensureLayer = (e: InteractionEvent): boolean => {
-    if (layerId) return true;
-    if (!params) return false;
-
-    const { w, h } = e.activeFrame.canvas;
-    const layer = buildLayer(
-      e,
-      buildStrokeData(params, points, { x: 0, y: 0, w, h }, confinement ?? undefined),
-      { w, h, cx: 0, cy: 0 },
-    );
-
-    // [PERF_MON] Isolate the drag-start hitch: this dispatch is the ONE store
-    // commit of the whole gesture — ADD_LAYER → a synchronous React re-render
-    // cascade the volatile drag path avoids on every subsequent move.
-    // `syncMs` = the store dispatch itself; `paintMs` (double-rAF) = the full
-    // stall until the browser next paints, i.e. React reconcile + the first
-    // composite of the brand-new vector layer.
-    const _t0 = PERF_MON ? performance.now() : 0;
-    e.actions.executeCommand(P._CMD_PLACE_UID, { frameId: e.activeFrame.id, layer });
-    layerId = layer.id;
-
-    // silent: `cmd.place` already took the gesture's undo checkpoint.
-    // Vector source redefinition → opt this gesture into Incremental Compositing.
-    tx = new InteractionTransaction(e, { useIncreComp: true });
-    tx.begin(true);
-
-    if (PERF_MON) {
-      const syncMs = performance.now() - _t0;
-      requestAnimationFrame(() =>
-        requestAnimationFrame(() => {
-          const paintMs = performance.now() - _t0;
-          console.warn(
-            `[Brush.dragStart] stage+txBegin sync=${syncMs.toFixed(2)}ms → next-paint=${paintMs.toFixed(2)}ms (canvas ${w}×${h})`,
-          );
-        }),
-      );
-    }
-    return true;
   };
 
   /**
@@ -299,10 +264,27 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
    * 0.1px-per-event pseudo speeds that would drag the smoothed velocity far
    * below the real hand speed — the estimator must only ever observe REAL
    * landed samples.
+   *
+   * `isStart` feeds the pressure tracker's first-contact fallback (only the
+   * gesture's very first sample is a start). `pressureOverride` carries the
+   * per-sub-event pressure from a coalesced batch (each historical event
+   * reports its own hardware pressure); absent, the live pointer pressure
+   * is used.
    */
-  const samplePoint = (e: InteractionEvent, x: number, y: number, advanceVelocity = true): StrokePoint => {
+  const samplePoint = (
+    e: InteractionEvent,
+    x: number,
+    y: number,
+    advanceVelocity = true,
+    isStart = false,
+    pressureOverride?: number,
+  ): StrokePoint => {
     if (!params) return { x, y, pressure: 1 };
-    const base = samplePressure(e);
+    const base = samplePressure(
+      pressureOverride ?? e.pointer.pressure,
+      e.pointer.pointerType,
+      isStart,
+    );
 
     let velocityFactor = 1;
     if (params.velocity) {
@@ -352,21 +334,55 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
     return { x, y, pressure, alpha: params.pressureOpacity ? pressure : 1 };
   };
 
-  /** Stream the (tapered) trajectory into the preview layer's volatile slot. */
-  const streamPreview = (e: InteractionEvent) => {
-    if (!params || !layerId) return;
+  /** Stream the O(1) incremental trajectory into the engine-neutral ephemeral preview slot. */
+  const streamPreview = (e: InteractionEvent, previewTail?: StrokePoint) => {
+    if (!params || !previewLayerId || !strokeBuf) return;
     const { w, h } = e.activeFrame.canvas;
-    tx?.update(
-      { strokeData: buildStrokeData(params, points, { x: 0, y: 0, w, h }, confinement ?? undefined) },
-      'layer',
-      layerId,
-    );
+    const { points, solidifiedCount } = strokeBuf.buildPointsView(previewTail);
+    const previewLayer: Layer = {
+      ...LayerFactory.createLayer('vector', {
+        name: 'Brush Preview',
+        cx: 0,
+        cy: 0,
+        bounding: { w, h },
+        visibleShape: asLocalShape({ x: 0, y: 0, w, h }),
+        visible: true,
+        opacity: params.opacity,
+        blendMode: 'source-over',
+        strokeData: {
+          points,
+          solidifiedCount,
+          box: { x: 0, y: 0, w, h },
+          color: params.color,
+          size: params.size,
+          hardness: params.hardness,
+          antiAliased: params.antiAliased,
+          confinement: confinement ?? undefined,
+        },
+      }),
+      id: previewLayerId,
+    };
+    e.actions.fast.setTransient(VECTOR_TRANSIENT_KEY, {
+      frameId: e.activeFrame.id,
+      layer: previewLayer,
+      insertAfterLayerId,
+    });
+    // Stabilizer pull-string guide: publish the pointer↔rope gap so the
+    // overlay can draw the lag while dragging (only meaningful when the
+    // stabilizer is actually on).
+    if (params.stabilizer > 0) {
+      e.actions.fast.setTransient(P.BRUSH_STABILIZER_GUIDE_KEY, {
+        pointerCanvas: e.point.canvas,
+        ropeCanvas: { x: ropeX, y: ropeY },
+      });
+    }
   };
 
-  /** Drop the staged preview layer (cancel / degenerate click). */
-  const discardLayer = (e: InteractionEvent) => {
+  /** Clear the ephemeral preview channel and abort the silent interaction transaction. */
+  const clearPreview = (e: InteractionEvent) => {
+    e.actions.fast.setTransient(VECTOR_TRANSIENT_KEY, null);
+    e.actions.fast.setTransient(P.BRUSH_STABILIZER_GUIDE_KEY, null);
     tx?.abort();
-    if (layerId) e.actions.removeLayers(e.activeFrame.id, [layerId]);
   };
 
   return {
@@ -390,18 +406,20 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
     onStart: (e) => {
       params = readPaintParams(e);
       confinement = e.activeFrame.confinement ?? undefined;
-
-      // Every stroke commits into its OWN fresh collection layer — the
-      // append-into-existing-collection merge was deliberately removed: it
-      // required the resolved active host to be an unposed brush collection,
-      // and the tangle of guards (triplet resolution, rotation/flip refusal,
-      // implicit "whatever happens to be selected owns the stroke") bought
-      // little over one-layer-per-stroke plus manual grouping in the layers
-      // panel. The commit always creates the layer, inserted above the active
-      // layer, so implicit z-order still follows the current selection.
+      previewLayerId = `__ephemeral_vector__-${++ephemeralPreviewSeq}`;
+      insertAfterLayerId = e.activeFrame.activeLayerId ?? undefined;
+      samplePressure = makeSamplePressure();
+      const maxTaperLen = params.size * P.TAPER_LENGTH_PER_SIZE;
+      strokeBuf = new IncrementalStrokeTrajectory(
+        maxTaperLen * params.taperHead,
+        maxTaperLen * params.taperTail,
+        params.pressureOpacity === true,
+        P.MIN_SAMPLE_DISTANCE_PX,
+        P.TAPER_MIN_TIP_RATIO,
+      );
 
       const p = e.point.canvas;
-      points = [samplePoint(e, p.x, p.y)];
+      strokeBuf.push(samplePoint(e, p.x, p.y, true, true));
       ropeX = p.x;
       ropeY = p.y;
       anchorX = p.x;
@@ -412,92 +430,106 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
       velocityReady = false;
       smoothV = 0;
       drawing = true;
+
+      tx = new InteractionTransaction(e, { useIncreComp: true });
+      tx.begin(true);
+      streamPreview(e);
       e.actions.setStateSignal(DRAWING_STROKE_KEY, true);
     },
 
     onMove: (e) => {
-      if (!drawing || !params) return;
-      // Crash-prevention guard (see MAX_STROKE_POINTS): once hit, the stroke
-      // drawn so far just stops extending — no new samples are recorded.
-      if (points.length >= P.MAX_STROKE_POINTS) return;
+      if (!drawing || !params || !strokeBuf) return;
 
-      const raw = e.point.canvas;
+      // One sample step: advance the rope, land the sample when it escapes
+      // the sampling threshold, otherwise keep it as a transient preview
+      // tail. Re-entry guarded so a coalesced batch cannot overshoot the
+      // trajectory's hard point cap (a StrokeRenderer ring-overflow guard).
+      let pendingPreviewTail: StrokePoint | undefined;
+      const stepSample = (canvasX: number, canvasY: number, pressureOverride?: number) => {
+        if (!params || !strokeBuf) return;
+        if (strokeBuf.length >= P.MAX_STROKE_POINTS) return;
+        const raw = { x: canvasX, y: canvasY };
+        const slack = params.stabilizer > 0 ? params.stabilizer / (e.activeFrame.camera.k || 1) : 0;
+        const rp = advanceRope({ x: ropeX, y: ropeY }, raw, slack);
+        ropeX = rp.x;
+        ropeY = rp.y;
 
-      // Rope-model stabilizer: the rope chases the pointer, moving only the
-      // slack EXCESS, so tremor inside the slack never enters the stroke. The
-      // slack is configured in screen px and divided by the camera zoom so the
-      // felt smoothness is zoom-independent. With the stabilizer off the rope
-      // IS the pointer.
-      const slack = params.stabilizer > 0 ? params.stabilizer / (e.activeFrame.camera.k || 1) : 0;
-      const rp = advanceRope({ x: ropeX, y: ropeY }, raw, slack);
-      ropeX = rp.x;
-      ropeY = rp.y;
-
-      // Sampling guard (see MIN_SAMPLE_DISTANCE_PX): a new sample only lands
-      // when the ROPE has travelled ≥ threshold from the last LANDED one (the
-      // anchor), so sub-threshold displacement still accumulates across
-      // events. Below the threshold, drag the trailing endpoint along as a
-      // preview-only tail — no new sample, no quad growth, the last segment
-      // follows the rope and the trail-tip gap never appears. (With a single
-      // point nothing is painted yet, so the stroke origin stays put.)
-      if (Math.hypot(rp.x - anchorX, rp.y - anchorY) < P.MIN_SAMPLE_DISTANCE_PX) {
-        if (points.length >= 2) {
-          // Preview tail only — do NOT advance the velocity reference frame
-          // (see samplePoint: micro moves are estimator poison).
-          points[points.length - 1] = samplePoint(e, rp.x, rp.y, false);
-          streamPreview(e);
+        if (Math.hypot(rp.x - anchorX, rp.y - anchorY) < P.MIN_SAMPLE_DISTANCE_PX) {
+          if (strokeBuf.length >= 1) {
+            pendingPreviewTail = samplePoint(e, rp.x, rp.y, false, false, pressureOverride);
+          }
+          return;
         }
-        return;
+
+        strokeBuf.push(samplePoint(e, rp.x, rp.y, true, false, pressureOverride));
+        anchorX = rp.x;
+        anchorY = rp.y;
+        pendingPreviewTail = undefined;
+      };
+
+      // High-frequency input: a 240Hz+ digitizer batches several historical
+      // events into one pointermove. Feeding them all keeps the rope and the
+      // velocity estimator sampling at true input rate instead of the batch
+      // rate. Each sub-event's canvas position is recovered by its SCREEN
+      // offset from the batch's final event (whose canvas position the
+      // interaction layer already computed) divided by camera zoom — valid
+      // because the stage projection is a pure translate+scale.
+      const native = e.nativeEvent;
+      // Duck-typed on purpose: `instanceof PointerEvent` fails in environments
+      // that shadow or omit the global (some WebViews, test harnesses) even
+      // though the event carries the real coalesced feed — the function check
+      // is the only reliable capability test.
+      const coalesced =
+        typeof (native as Partial<PointerEvent>).getCoalescedEvents === 'function'
+          ? (native as PointerEvent).getCoalescedEvents()
+          : null;
+      if (coalesced && coalesced.length > 1) {
+        const k = e.activeFrame.camera.k || 1;
+        for (const ev of coalesced) {
+          const dxScreen = ev.clientX - native.clientX;
+          const dyScreen = ev.clientY - native.clientY;
+          stepSample(e.point.canvas.x + dxScreen / k, e.point.canvas.y + dyScreen / k, ev.pressure);
+        }
+      } else {
+        stepSample(e.point.canvas.x, e.point.canvas.y);
       }
 
-      points.push(samplePoint(e, rp.x, rp.y));
-      anchorX = rp.x;
-      anchorY = rp.y;
-
-      // Full-canvas preview: the box is fixed for the whole drag, so a new
-      // sample is just appended and only the growing trajectory is streamed —
-      // no per-move tighten, no re-base, no box write. A single point draws
-      // nothing (`cs_extrude` emits `pointCount - 1` quads), so wait for the
-      // second sample before staging the preview layer.
-      if (points.length < 2 || !ensureLayer(e) || !layerId) return;
-
-      streamPreview(e);
+      // One preview stream per batch, carrying at most the last sub-threshold tail.
+      streamPreview(e, pendingPreviewTail);
     },
 
     onEnd: (e) => {
-      if (!drawing || !params) {
+      if (!drawing || !params || !strokeBuf) {
+        clearPreview(e);
         reset(e);
         return;
       }
 
-      // The final sample always lands, whatever the sampling threshold says —
-      // the stroke has to end exactly where the pointer was released (the RAW
-      // release point, not the lagging rope: the tail is the one place where
-      // exactness beats smoothing).
-      const last = points[points.length - 1];
-      const x = e.point.canvas.x;
-      const y = e.point.canvas.y;
-      if (x !== last.x || y !== last.y) {
-        points.push(samplePoint(e, x, y));
+      if (params.stabilizer > 0) {
+        // Stabilizer on: end at the rope — the last point the drag preview
+        // actually painted — so the committed stroke is continuous with the
+        // final preview frame (connecting to the raw release would snap a
+        // hard straight line across the whole slack distance). The raw
+        // release point is deliberately discarded here; see
+        // MIN_SAMPLE_DISTANCE_PX's JSDoc for the contract.
+        const last = strokeBuf.lastPoint;
+        if (!last || Math.hypot(ropeX - last.x, ropeY - last.y) > 0.5) {
+          strokeBuf.push(samplePoint(e, ropeX, ropeY, false));
+        }
+      } else {
+        const last = strokeBuf.lastPoint;
+        const x = e.point.canvas.x;
+        const y = e.point.canvas.y;
+        if (!last || x !== last.x || y !== last.y) {
+          strokeBuf.push(samplePoint(e, x, y));
+        }
       }
 
       const frame = e.activeFrame;
-
-      // A click that never moved has no segment (`cs_extrude` emits
-      // pointCount-1 quads), but the shader's degenerate-segment fallback
-      // renders a coincident a==b pair as a full round dab — so a single tap
-      // paints a dot by duplicating the point. The dab diameter follows the
-      // sample's pressure (width = size × pressure), same as any segment.
+      const rawPoints = strokeBuf.rawPoints;
       const strokePoints =
-        points.length === 1 ? [points[0], { ...points[0] }] : points;
-      // Selection intersection: clamp the committed box to the selection's
-      // reach — the polygon bbox expanded by the feather's soft band (each
-      // side f, coverage only reaches zero at distance f beyond the contour;
-      // under-clipping here would cut off the stroke's soft falloff) plus the
-      // 1px AA margin. The snapshot is frozen (deep copy, re-based into the
-      // tightened box) so the committed stroke is replay-self-sufficient:
-      // undo/redo re-renders it identically even after the selection changes
-      // or clears.
+        rawPoints.length === 1 ? [rawPoints[0], { ...rawPoints[0] }] : rawPoints;
+
       const featherPad = confinement?.feather ? Math.ceil(confinement.feather) : 0;
       const clipRect = confinement
         ? {
@@ -509,19 +541,13 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
         : undefined;
       const tight = tightenStroke(strokePoints, params.size, frame.canvas, clipRect);
 
+      clearPreview(e);
+
       if (!tight) {
-        discardLayer(e);
         reset(e);
         return;
       }
 
-      // The committed stroke payload: box-local trajectory + the CANVAS-SPACE
-      // commit box (the commit command re-bases it into the collection
-      // layer's local space) + the confinement snapshot re-based by the same
-      // box-origin shift (PAIRING OBLIGATION — snapshot and points land in
-      // one coordinate frame; never re-read the live selection here, undo
-      // replay self-sufficiency). The taper envelope rides along because
-      // `buildStrokeData` applies it.
       const strokeData = buildStrokeData(
         params,
         tight.points,
@@ -529,44 +555,21 @@ export const createBrushStrokeHandler = (): InteractionHandler => {
         confinement ? e.geometry.polygon.translatePolygon(confinement, -tight.box.x, -tight.box.y) : undefined,
       );
 
-      if (layerId && tx) {
-        // Tighten and commit in one shot through the same silent track that
-        // carried the in-progress trajectory — onto the layer cmd.place placed
-        // at drag start. Pixel-invariant by construction (see geometry.ts), so
-        // there is no jump between the last live frame and the committed
-        // layer; the single legacy strokeData payload converts to the strokes
-        // collection schema (one entry, box origin = layer-local origin).
-        tx.update(
-          {
-            strokes: [{ ...strokeData, box: { x: 0, y: 0, w: tight.box.w, h: tight.box.h } }],
-            // Shared pose-preserving rebaser (factory); the tighten box is
-            // exactly the bounds rect its cx/cy describe (pixel-invariant,
-            // see geometry.ts).
-            ...e.layers.factory.rebaseToBounds({ x: tight.cx - tight.box.w / 2, y: tight.cy - tight.box.h / 2, w: tight.box.w, h: tight.box.h }),
-          },
-          'layer',
-          layerId,
-        );
-        tx.commit();
-      } else {
-        // Drag too small to have crossed the sampling threshold mid-gesture, so
-        // no layer was ever placed — place the finished one directly.
-        e.actions.executeCommand(P._CMD_PLACE_UID, {
-          frameId: frame.id,
-          layer: buildLayer(e, strokeData, {
-            w: tight.box.w,
-            h: tight.box.h,
-            cx: tight.cx,
-            cy: tight.cy,
-          }),
-        });
-      }
+      e.actions.executeCommand(P._CMD_PLACE_UID, {
+        frameId: frame.id,
+        layer: buildCommittedLayer(e, strokeData, {
+          w: tight.box.w,
+          h: tight.box.h,
+          cx: tight.cx,
+          cy: tight.cy,
+        }),
+      });
 
       reset(e);
     },
 
     onCancel: (e) => {
-      discardLayer(e);
+      clearPreview(e);
       reset(e);
     },
   };

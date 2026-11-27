@@ -23,14 +23,13 @@
  * IMPORTANT: this registry only holds UI / interaction
  * METADATA. The translation logic lives alongside it in this plugin:
  * `vectorSource.ts` translates `markerData` into the engine's `renderer:'sdf'`
- * source (final pixels, GPU), and `markerSvg.ts` builds the drag-preview SVG.
- * `MarkerDefinition` intentionally does NOT carry any `paint` / `toSvg`
- * function — it only describes "how the tool looks in the panel and how a
- * drag maps to geometry".
+ * source (final pixels, GPU). `MarkerDefinition` intentionally does NOT carry
+ * any `paint` function — it only describes "how the tool looks in the panel and
+ * how a drag maps to geometry".
  *
  * Adding a new marker requires:
  *   1. core/types: add a literal to `MarkerKind` + an `XxxMarkerData` interface
- *   2. plugin: add a `markerToVectorSource` / `markerToSvg` switch case
+ *   2. plugin: add a `markerToVectorSource` switch case
  *   3. plugin: implement a `MarkerDefinition` here and register it below
  */
 

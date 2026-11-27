@@ -2,6 +2,16 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.2.0
+
+- Brush: strokes now render in real time as you drag, even very long ones — the line stays crisp and responsive from the first pixel to the last, with no end-of-stroke hitch. Brush and marker previews are also drawn beneath your existing layers in the correct stack order.
+- Brush: calligraphic taper feels better — entries are fuller, exits sharper with a fine visible tip, tails can grow longer on the same stroke, and the tail no longer snaps or shortens when you lift the pen. Double-click a taper slider to copy the opposite end's value.
+- Brush: with Smoothing enabled, a dotted guide now shows the lag between your cursor and the actual pen tip, and releasing no longer yanks a straight line to the cursor.
+- Brush: tablet strokes no longer start with a collapsed first segment or pulse when the pressure signal drops out mid-stroke.
+- Interface: the brush panel is regrouped — everyday controls first, with Stroke & Taper and Dynamics in collapsible sections.
+- Brush: the marker tool's on-canvas preview now looks exactly like the finished shape, since both come from the same rendering engine.
+- Engine: the first stroke after opening a document now starts right away instead of pausing briefly.
+
 ## 2.1.6
 
 - Selection: Layer via Copy now honors the same "keep the selection" preference as Layer via Cut.

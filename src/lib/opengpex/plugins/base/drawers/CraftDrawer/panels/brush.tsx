@@ -20,6 +20,7 @@
 "use client";
 
 import React from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import ColorSwatchRow from "@opengpex/editor/widgets/ColorSwatchRow";
 import Switch from "@opengpex/editor/widgets/Switch";
 import { useBrushPanel } from "../hooks";
@@ -59,7 +60,7 @@ export const BrushPanel = React.memo(function BrushPanel() {
     eraserAntiAliased, brushAntiAliased, updateBrushParam, updateBrushColor,
     updateEraserAntiAliased, updateBrushAntiAliased,
     brushStabilizer, brushPressureOpacity, brushTaperStart, brushTaperEnd,
-    brushTaperLink, brushVelocity, brushPresets,
+    brushVelocity, brushPresets,
     updateBrushFlag, saveBrushPreset, applyBrushPreset, deleteBrushPreset,
   } = useBrushPanel();
 
@@ -72,6 +73,12 @@ export const BrushPanel = React.memo(function BrushPanel() {
     if (presetNaming && presetNaming.trim()) saveBrushPreset(presetNaming.trim());
     setPresetNaming(null);
   };
+
+  // Collapse states for the two pro-oriented groups — pure view state
+  // (session-scoped, no persistence): every group starts expanded so nothing
+  // hides from a first-time user.
+  const [openStrokeTaper, setOpenStrokeTaper] = React.useState(true);
+  const [openDynamics, setOpenDynamics] = React.useState(true);
 
   // AA ⇔ hardness two-way binding, IDENTICAL for brush and eraser: a soft tip
   // (hardness < 100) always needs AA, so dragging hardness below 100 forces the
@@ -98,7 +105,7 @@ export const BrushPanel = React.memo(function BrushPanel() {
 
   return (
     <div className="flex flex-col gap-2">
-      {/* Parameters */}
+      {/* Group 1 · Basic — always visible, no collapse (brush & eraser) */}
       <div className="flex flex-col gap-2 p-1">
         {/* Color — mini swatch (marker-panel style): swatch + hex, full picker on demand */}
         {!isEraser && (
@@ -221,119 +228,150 @@ export const BrushPanel = React.memo(function BrushPanel() {
 
       </div>
 
-      {/* Input dynamics (brush only) */}
+      {/* Group 2 · Stroke & Taper (brush only, collapsible) — the calligraphic
+          gesture controls: rope-model smoothing + per-end taper. The link
+          toggle mirrors a taper slider edit onto the other end; unlink for
+          asymmetric tips (sharp exit / round entry). */}
       {!isEraser && (
         <>
           <div className="mx-1 border-t border-[var(--border-subtle)] dark:border-white/10" />
-          <div className="flex flex-col gap-2 p-1">
-          {/* Stabilizer — rope-model smoothing slack */}
-          <div className="flex items-center gap-2 px-1">
-              <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16">
-                Smoothing
-              </span>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                step="1"
-                value={brushStabilizer}
-                onChange={(e) => updateBrushParam('brushStabilizer', Number(e.target.value))}
-                onMouseUp={(e) => e.currentTarget.blur()}
-                onTouchEnd={(e) => e.currentTarget.blur()}
-                className="flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border-t border-[var(--border-subtle)] border-b border-[var(--border-subtle)] shadow-inner"
-              />
-              <div className="w-12 justify-end text-right text-indigo-600 dark:text-indigo-400 font-black text-[10px] tabular-nums">
-                {brushStabilizer}
+          <button
+            type="button"
+            onClick={() => setOpenStrokeTaper((v) => !v)}
+            className="flex items-center justify-between px-2 py-0.5 outline-none"
+          >
+            <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight">
+              Stroke &amp; Taper
+            </span>
+            {openStrokeTaper ? (
+              <ChevronDown size={12} className="text-[var(--text-muted)]" />
+            ) : (
+              <ChevronRight size={12} className="text-[var(--text-muted)]" />
+            )}
+          </button>
+          {openStrokeTaper && (
+            <div className="flex flex-col gap-2 p-1">
+              {/* Smoothing — rope-model stabilizer slack */}
+              <div className="flex items-center gap-2 px-1">
+                <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16">
+                  Smoothing
+                </span>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={brushStabilizer}
+                  onChange={(e) => updateBrushParam('brushStabilizer', Number(e.target.value))}
+                  onMouseUp={(e) => e.currentTarget.blur()}
+                  onTouchEnd={(e) => e.currentTarget.blur()}
+                  className="flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border-t border-[var(--border-subtle)] border-b border-[var(--border-subtle)] shadow-inner"
+                />
+                <div className="w-12 justify-end text-right text-indigo-600 dark:text-indigo-400 font-black text-[10px] tabular-nums">
+                  {brushStabilizer}
+                </div>
               </div>
-            </div>
 
-            {/* Taper — per-end calligraphic entry/exit, % of tip diameter.
-                Start = stroke beginning (尖入笔), End = stroke exit (出锋).
-                The link toggle mirrors a slider edit onto the other end;
-                unlink for asymmetric tips (sharp exit / round entry). */}
-            <div className="flex items-center gap-2 px-1">
-              <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16">
-                Taper Start
-              </span>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                step="1"
-                value={brushTaperStart}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  updateBrushParam('brushTaperStart', v);
-                  if (brushTaperLink) updateBrushParam('brushTaperEnd', v);
-                }}
-                onMouseUp={(e) => e.currentTarget.blur()}
-                onTouchEnd={(e) => e.currentTarget.blur()}
-                className="flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border-t border-[var(--border-subtle)] border-b border-[var(--border-subtle)] shadow-inner"
-              />
-              <div className="w-12 justify-end text-right text-indigo-600 dark:text-indigo-400 font-black text-[10px] tabular-nums">
-                {brushTaperStart}%
+              {/* Taper — per-end calligraphic entry/exit, % of tip diameter.
+                  Start = stroke beginning, End = stroke exit; both ends are
+                  edited independently (no link toggle — asymmetric tips are
+                  the default posture, symmetric tips are just two equal
+                  values). */}
+              <div className="flex items-center gap-2 px-1">
+                <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16 shrink-0">
+                  Taper Start
+                </span>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={brushTaperStart}
+                  onChange={(e) => updateBrushParam('brushTaperStart', Number(e.target.value))}
+                  // Double-click = copy the other end's value (a one-way
+                  // "match the opposite end" shortcut, NOT a link: it writes
+                  // once and the two sliders stay independent afterwards).
+                  onDoubleClick={() => updateBrushParam('brushTaperStart', brushTaperEnd)}
+                  onMouseUp={(e) => e.currentTarget.blur()}
+                  onTouchEnd={(e) => e.currentTarget.blur()}
+                  className="flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border-t border-[var(--border-subtle)] border-b border-[var(--border-subtle)] shadow-inner"
+                />
+                <div className="w-12 justify-end text-right text-indigo-600 dark:text-indigo-400 font-black text-[10px] tabular-nums shrink-0">
+                  {brushTaperStart}%
+                </div>
+              </div>
+              <div className="flex items-center gap-2 px-1">
+                <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16 shrink-0">
+                  Taper End
+                </span>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  step="1"
+                  value={brushTaperEnd}
+                  onChange={(e) => updateBrushParam('brushTaperEnd', Number(e.target.value))}
+                  onDoubleClick={() => updateBrushParam('brushTaperEnd', brushTaperStart)}
+                  onMouseUp={(e) => e.currentTarget.blur()}
+                  onTouchEnd={(e) => e.currentTarget.blur()}
+                  className="flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border-t border-[var(--border-subtle)] border-b border-[var(--border-subtle)] shadow-inner"
+                />
+                <div className="w-12 justify-end text-right text-indigo-600 dark:text-indigo-400 font-black text-[10px] tabular-nums shrink-0">
+                  {brushTaperEnd}%
+                </div>
               </div>
             </div>
-            <div className="flex items-center gap-2 px-1">
-              <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16">
-                Taper End
-              </span>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                step="1"
-                value={brushTaperEnd}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  updateBrushParam('brushTaperEnd', v);
-                  if (brushTaperLink) updateBrushParam('brushTaperStart', v);
-                }}
-                onMouseUp={(e) => e.currentTarget.blur()}
-                onTouchEnd={(e) => e.currentTarget.blur()}
-                className="flex-1 h-1.5 bg-[var(--bg-stage)] rounded-full appearance-none cursor-ew-resize hover:bg-[var(--border-subtle)] transition-all border-t border-[var(--border-subtle)] border-b border-[var(--border-subtle)] shadow-inner"
-              />
-              <div className="w-12 justify-end text-right text-indigo-600 dark:text-indigo-400 font-black text-[10px] tabular-nums">
-                {brushTaperEnd}%
-              </div>
-            </div>
-            <div className="flex items-center justify-between px-1">
-              <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16">
-                Taper Link
-              </span>
-              <Switch
-                checked={brushTaperLink}
-                onChange={(v: boolean) => updateBrushFlag('brushTaperLink', v)}
-                activeColor="bg-indigo-500"
-              />
-            </div>
+          )}
 
-            {/* Pressure → opacity; velocity → width */}
-            <div className="flex items-center justify-between px-1">
-              <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16">
-                Pressure Opacity
-              </span>
-              <Switch
-                checked={brushPressureOpacity}
-                onChange={(v: boolean) => updateBrushFlag('brushPressureOpacity', v)}
-                activeColor="bg-indigo-500"
-              />
+          {/* Group 3 · Dynamics (brush only, collapsible) — input-dynamics
+              toggles: pressure → opacity, velocity → width. */}
+          <div className="mx-1 border-t border-[var(--border-subtle)] dark:border-white/10" />
+          <button
+            type="button"
+            onClick={() => setOpenDynamics((v) => !v)}
+            className="flex items-center justify-between px-2 py-0.5 outline-none"
+          >
+            <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight">
+              Dynamics
+            </span>
+            {openDynamics ? (
+              <ChevronDown size={12} className="text-[var(--text-muted)]" />
+            ) : (
+              <ChevronRight size={12} className="text-[var(--text-muted)]" />
+            )}
+          </button>
+          {openDynamics && (
+            <div className="flex flex-col gap-2 p-1">
+              <div className="flex items-center justify-between px-1">
+                {/* No fixed w-16: "PRESSURE OPACITY" exceeds the 64px label
+                    grid and would wrap — this row's right side is a switch,
+                    not a slider, so the label can take its natural width. */}
+                <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight whitespace-nowrap">
+                  Pressure Opacity
+                </span>
+                <Switch
+                  checked={brushPressureOpacity}
+                  onChange={(v: boolean) => updateBrushFlag('brushPressureOpacity', v)}
+                  activeColor="bg-indigo-500"
+                />
+              </div>
+              <div className="flex items-center justify-between px-1">
+                <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16">
+                  Velocity
+                </span>
+                <Switch
+                  checked={brushVelocity}
+                  onChange={(v: boolean) => updateBrushFlag('brushVelocity', v)}
+                  activeColor="bg-indigo-500"
+                />
+              </div>
             </div>
-            <div className="flex items-center justify-between px-1">
-              <span className="text-[9px] font-black text-[var(--text-muted)] uppercase tracking-tight w-16">
-                Velocity
-              </span>
-              <Switch
-                checked={brushVelocity}
-                onChange={(v: boolean) => updateBrushFlag('brushVelocity', v)}
-                activeColor="bg-indigo-500"
-              />
-            </div>
-          </div>
+          )}
         </>
       )}
 
-      {/* Presets (brush only) */}
+      {/* Group 4 · Presets (brush only) — kept in place; restructuring moves
+          to P2 (preset system overhaul) */}
       {!isEraser && (
         <>
           <div className="mx-1 border-t border-[var(--border-subtle)] dark:border-white/10" />

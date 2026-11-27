@@ -56,9 +56,12 @@ export const _CMD_PLACE_UID = `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${CMD_PLACE}`;
  * Performance guard, not a smoothing filter: `computeCompositeSignature`
  * serializes the whole packed point stream every frame, so an unfiltered
  * pointer feed (which can emit coalesced sub-pixel moves at 240Hz+) makes the
- * signature cost grow without adding a single visible pixel. The final raw
- * sample is always appended on pointerup regardless of this threshold, so the
- * stroke's end point stays exact.
+ * signature cost grow without adding a single visible pixel. On pointerup the
+ * end-point contract depends on the stabilizer: with the stabilizer OFF the
+ * raw release point is appended verbatim so the stroke ends exactly under the
+ * cursor; with the stabilizer ON the stroke instead ends at the rope position
+ * `(ropeX, ropeY)` — the last point the drag preview actually painted — so no
+ * hard straight line snaps to the raw release.
  */
 export const MIN_SAMPLE_DISTANCE_PX = 2;
 
@@ -113,10 +116,14 @@ export const TAPER_LENGTH_PER_SIZE = 5;
 /**
  * Taper zone cap as a fraction of the stroke's total arc length, per end.
  * The arc clamp keeps the diameter multiple from swallowing short strokes:
- * a zone longer than a quarter of the stroke would taper most of the body
- * away and make the slider feel nonlinear.
+ * without it, a slider near 100% would taper most of a short stroke's body
+ * away and make the slider feel nonlinear. 0.4 is the tuned compromise —
+ * long enough that a calligraphic tail does not demand an exaggeratedly long
+ * stroke, while every stroke still keeps over half its body untapered.
+ * Both the preview trajectory and the commit envelope clamp with THIS value,
+ * so the tip never reshapes at pointer-up.
  */
-export const TAPER_ARC_FRACTION = 0.25;
+export const TAPER_ARC_FRACTION = 0.4;
 
 /**
  * EMA factor for the velocity-dynamics signal, 0..1 (higher = less smoothing).
@@ -127,6 +134,37 @@ export const TAPER_ARC_FRACTION = 0.25;
  * fast gesture (the 'string of beads' artifact).
  */
 export const VELOCITY_SMOOTHING = 0.3;
+
+/**
+ * Minimum tip width ratio at taper endpoints so the tip stays visible under
+ * the cursor: without a floor the `sin^p` envelope drives the radius to 0
+ * exactly at `d = 0`, putting an invisible hair of stroke directly beneath
+ * the pointer. 0.06 keeps a thin but findable filament while still reading
+ * as a taper to zero ink.
+ */
+export const TAPER_MIN_TIP_RATIO = 0.06;
+
+/**
+ * Fallback pen pressure on pointerdown when hardware reports 0 at initial
+ * contact: many tablets emit `pressure = 0` for the very first sample before
+ * the digitizer settles, and 0 would collapse the first tip segment to zero
+ * width. Later zero-pressure samples (hover artifacts, grip loss) reuse the
+ * last known good pressure instead of snapping back to a fixed value.
+ */
+export const PEN_INITIAL_FALLBACK_PRESSURE = 0.1;
+
+/**
+ * Transient key carrying live stabilizer pull-string coordinates for the
+ * overlay guide (the rope point chases the pointer while dragging; the guide
+ * shows that lag so the slack radius feels intentional instead of broken).
+ */
+export const BRUSH_STABILIZER_GUIDE_KEY = 'brush:stabilizerGuide';
+
+/** Payload of {@link BRUSH_STABILIZER_GUIDE_KEY} (canvas coordinates). */
+export interface BrushStabilizerGuide {
+  readonly pointerCanvas: { readonly x: number; readonly y: number };
+  readonly ropeCanvas: { readonly x: number; readonly y: number };
+}
 
 // ─── Cross-Plugin Typed Facade ──────────────────────────────────────────────────
 

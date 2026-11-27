@@ -88,6 +88,12 @@ export interface VectorRenderArgs {
    * for an unconstrained stroke (the renderer binds a 1×1 alpha=1 dummy there).
    */
   readonly confinementCoverages?: readonly (GPUTextureView | undefined)[];
+  /** Source layer id for per-layer incremental live caching. */
+  readonly layerId?: string;
+  /** Physical transient extent `[width, height]` in texels. */
+  readonly targetExtent?: readonly [number, number];
+  /** True during offscreen export (bypasses persistent live preview caches). */
+  readonly isExport?: boolean;
 }
 
 export interface VectorRenderer {
@@ -101,6 +107,18 @@ export interface VectorRenderer {
    * (`SdfRenderer`) leaves this unset.
    */
   encodePrepass?(encoder: GPUCommandEncoder, ctx: VectorRenderContext, args: VectorRenderArgs): void;
+
+  /**
+   * OPTIONAL pre-render transient preparation (e.g. updating a persistent live
+   * stroke texture and copying its solidified prefix into `targetTexture`).
+   * Returns `true` when `targetTexture` is already populated and the caller
+   * should open the vector render pass with `loadOp: 'load'` instead of `'clear'`.
+   */
+  prepareTransient?(
+    encoder: GPUCommandEncoder,
+    ctx: VectorRenderContext,
+    args: VectorRenderArgs & { readonly targetTexture: GPUTexture },
+  ): boolean;
 
   /**
    * Draw the vector source into the ACTIVE render pass whose colour attachment is

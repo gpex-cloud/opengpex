@@ -55,6 +55,7 @@ import { translateLayerEffects } from './translators/effects';
 import { translateLayer } from './translators';
 import { WORKING_GAMUT } from '@opengpex/editor/core/engine/color/gamut';
 import { resolveCompositeDensity } from '@opengpex/editor/core/engine/pipeline/runtime/densityComposite';
+import type { VectorPreviewPayload } from '@opengpex/editor/core/state/volatile/vector';
 
 /**
  * UNIFIED raw-upload seam — the single convergence point for every
@@ -276,6 +277,12 @@ export interface SceneViewOptions {
    * stamped live (tests, export, idle frames).
    */
   readonly needIncreComp?: (layerId: string) => boolean;
+  /**
+   * Optional vector preview layer (in-flight tool gesture that creates its
+   * persisted layer on pointer-up). Assembled directly onto `Scene.layers` in
+   * `composeView` without invalidating `SceneContentCache`.
+   */
+  readonly vectorPreview?: VectorPreviewPayload;
 }
 
 // (proxyBitmapGamut moved to `translators/raster.ts` — the raster identity
@@ -952,6 +959,59 @@ export class SceneAssembler {
   }
 
   /**
+   * Assemble a single vector preview layer into a `LayerNode` with
+   * `useIncreComp: true`, bypassing `SceneContentCache` and Redux `frame.layers`.
+   */
+  static assembleVectorPreviewLayer(
+    layer: Layer,
+    frame: Frame,
+    geometry: GeometryService,
+  ): LayerNode | undefined {
+    if (layer.type !== 'vector') return undefined;
+    const layerWidth = layer.bounding.w;
+    const layerHeight = layer.bounding.h;
+    const translated = translateLayer(layer, {
+      workingSpace: WORKING_GAMUT,
+      dims: { width: layerWidth, height: layerHeight },
+      rawStyleOn: frame.rawStyle !== false,
+    });
+    if (translated.source.kind !== 'vector') return undefined;
+
+    const M_layer = geometry.transform.getLayerLocalMatrix(layer, frame);
+    const transform: Mat3 = {
+      a: M_layer.a,
+      b: M_layer.b,
+      c: M_layer.c,
+      d: M_layer.d,
+      tx: M_layer.tx,
+      ty: M_layer.ty,
+    };
+
+    const crop = layer.visibleShape
+      ? {
+          x: layer.visibleShape.rect.x,
+          y: layer.visibleShape.rect.y,
+          w: layer.visibleShape.rect.w,
+          h: layer.visibleShape.rect.h,
+        }
+      : undefined;
+
+    return {
+      id: layer.id,
+      source: translated.source,
+      transform,
+      width: layerWidth,
+      height: layerHeight,
+      dprScale: 1,
+      opacity: typeof layer.opacity === 'number' ? layer.opacity : 1.0,
+      blendMode: layer.blendMode || 'source-over',
+      crop,
+      clipMasked: !!layer.clipMasked,
+      useIncreComp: true,
+    };
+  }
+
+  /**
    * Fold the CAMERA-DEPENDENT view onto a (possibly reused) {@link SceneContent}
    * to produce the final immutable `Scene`. CHEAP and
    * pure: one snap + one matrix multiply + object spread — the only assembly work
@@ -1003,9 +1063,30 @@ export class SceneAssembler {
         }
       }
     }
-    const layers = liveVectorLayerId
+    let layers = liveVectorLayerId
       ? content.layers.map((l) => (l.id === liveVectorLayerId ? { ...l, useIncreComp: true } : l))
       : content.layers;
+
+    if (options.vectorPreview && options.vectorPreview.frameId === f.id) {
+      const previewNode = SceneAssembler.assembleVectorPreviewLayer(
+        options.vectorPreview.layer,
+        f,
+        geometry,
+      );
+      if (previewNode) {
+        const anchorId = options.vectorPreview.insertAfterLayerId;
+        const anchorIdx = anchorId ? layers.findIndex((l) => l.id === anchorId) : -1;
+        if (anchorIdx >= 0 && anchorIdx < layers.length - 1) {
+          layers = [
+            ...layers.slice(0, anchorIdx + 1),
+            previewNode,
+            ...layers.slice(anchorIdx + 1),
+          ];
+        } else {
+          layers = [...layers, previewNode];
+        }
+      }
+    }
 
     return {
       frame: content.frame,

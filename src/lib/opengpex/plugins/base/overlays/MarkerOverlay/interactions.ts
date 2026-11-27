@@ -25,6 +25,7 @@ import {resolveNextMarkerData} from './marker/pending';
 import {squareizeMarker, type CornerHandle} from './marker/squareize';
 
 import {LayerFactory} from '@opengpex/editor/core/layer';
+import {VECTOR_TRANSIENT_KEY} from '@opengpex/editor/core/state/volatile/vector';
 import {InteractionTransaction} from '@opengpex/editor/stage/interaction/Transaction';
 import {createTransformHandler, ResizeHandle} from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
 import {createGizmoRotateHandler} from '@opengpex/editor/stage/interaction/handlers/GizmoRotateHandler';
@@ -46,36 +47,7 @@ const DRAWING_MARKER_KEY = MarkerOverlayAPI.signals.drawingMarker;
  */
 const MIN_DRAG_PX = 3;
 
-// ─── Draw Preview Store (module-level, cross-React-boundary) ─────────────────────
-//
-// Mirrors BrushOverlay's getStrokeBuffer/getStrokeVersion pattern: the draw
-// handler writes the in-progress marker geometry here (canvas-local), and the
-// SVG overlay component polls it via useFastSync + a version counter for a
-// 60fps preview without React re-renders during the drag.
-
-/** Live marker preview during a drag (null = not drawing). */
-export interface MarkerDrawPreview {
-  markerData: MarkerData;
-  bounding: { w: number; h: number };
-  /** Top-left of the bounding box in canvas-local space. */
-  topLeftLocal: { x: number; y: number };
-}
-
-let _preview: MarkerDrawPreview | null = null;
-let _previewVersion = 0;
-
-export function getMarkerPreview(): MarkerDrawPreview | null {
-  return _preview;
-}
-
-export function getMarkerPreviewVersion(): number {
-  return _previewVersion;
-}
-
-function setMarkerPreview(next: MarkerDrawPreview | null): void {
-  _preview = next;
-  _previewVersion++;
-}
+let markerPreviewSeq = 0;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────────
 
@@ -570,7 +542,7 @@ export const createMarkerRotateHandler = (): InteractionHandler =>
  *   test:    craft mode + activeCraft==='marker' + NOT hitting an existing marker
  *   onStart: record drag start (canvas-local), set drawing signal
  *   onMove:  compute geometry via MARKER_REGISTRY[kind].computeFromDrag, write
- *            the live preview (rendered by the SVG overlay via core markerToSvg)
+ *            the live preview into `VECTOR_TRANSIENT_KEY` (rendered by WebGPU)
  *   onEnd:   finalize → LayerFactory.createLayer(type:'vector') → place command;
  *            discard if the drag is below MIN_DRAG_PX (mis-click guard)
  */
@@ -578,11 +550,18 @@ export const createMarkerDrawHandler = (): InteractionHandler => {
   let startCanvas = { x: 0, y: 0 };
   let markerData: MarkerData | null = null;
   let drawing = false;
+  let tx: InteractionTransaction | null = null;
+  let previewLayerId: string | null = null;
+  let insertAfterLayerId: string | undefined;
 
   const clearPreview = (e: InteractionEvent) => {
     drawing = false;
     markerData = null;
-    setMarkerPreview(null);
+    e.actions.fast.setTransient(VECTOR_TRANSIENT_KEY, null);
+    tx?.abort();
+    tx = null;
+    previewLayerId = null;
+    insertAfterLayerId = undefined;
     e.actions.setStateSignal(DRAWING_MARKER_KEY, false);
   };
 
@@ -612,26 +591,53 @@ export const createMarkerDrawHandler = (): InteractionHandler => {
       markerData = resolveMarkerData(e);
       if (!markerData) return;
       startCanvas = { x: e.point.canvas.x, y: e.point.canvas.y };
+      previewLayerId = `__ephemeral_vector__-marker-${++markerPreviewSeq}`;
+      insertAfterLayerId = e.activeFrame.activeLayerId ?? undefined;
       drawing = true;
+      tx = new InteractionTransaction(e, { useIncreComp: true });
+      tx.begin(true);
       e.actions.setStateSignal(DRAWING_MARKER_KEY, true);
     },
 
     onMove: (e) => {
-      if (!drawing || !markerData) return;
+      if (!drawing || !markerData || !previewLayerId) return;
       const def = MARKER_REGISTRY.get(markerData.kind);
       if (!def) return;
 
+      const frame = e.activeFrame;
       const { bounding, centerLocal, patch } = def.computeFromDrag(
         { startX: startCanvas.x, startY: startCanvas.y, endX: e.point.canvas.x, endY: e.point.canvas.y },
         markerData as never,
         { shiftKey: e.keys.shift },
       );
 
+      const { rect: alignedRect, worldCenter } = e.layers.snap.snapLayerPlacement(
+        asLocalRect({
+          x: centerLocal.x - bounding.w / 2,
+          y: centerLocal.y - bounding.h / 2,
+          w: bounding.w,
+          h: bounding.h,
+        }),
+        frame.canvas,
+        { snapDimension: true },
+      );
+
       const previewData = { ...markerData, ...patch } as MarkerData;
-      setMarkerPreview({
-        markerData: previewData,
-        bounding,
-        topLeftLocal: { x: centerLocal.x - bounding.w / 2, y: centerLocal.y - bounding.h / 2 },
+      const previewLayer: Layer = {
+        ...LayerFactory.createLayer('vector', {
+          name: 'Marker Preview',
+          cx: worldCenter.x,
+          cy: worldCenter.y,
+          bounding: { w: alignedRect.w, h: alignedRect.h },
+          visible: true,
+          markerData: previewData,
+        }),
+        id: previewLayerId,
+      };
+      e.actions.fast.setTransient(VECTOR_TRANSIENT_KEY, {
+        frameId: frame.id,
+        layer: previewLayer,
+        insertAfterLayerId,
       });
     },
 

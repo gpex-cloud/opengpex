@@ -186,8 +186,6 @@ export interface CraftDrawerConfig {
   /** Per-end taper overrides (0..100); falling back to brushTaper when omitted. */
   brushTaperStart?: number;
   brushTaperEnd?: number;
-  /** Start/End sliders move together (default true). */
-  brushTaperLink?: boolean;
 
   /**
    * Velocity dynamics (fast-thin / slow-thick): pointer speed above a

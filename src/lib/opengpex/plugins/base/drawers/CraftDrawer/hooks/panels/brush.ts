@@ -88,7 +88,7 @@ export function useBrushPanel() {
   );
 
   const updateBrushFlag = useCallback(
-    (key: 'brushPressureOpacity' | 'brushVelocity' | 'brushTaperLink', value: boolean) => {
+    (key: 'brushPressureOpacity' | 'brushVelocity', value: boolean) => {
       setSelfConfig({ [key]: value });
     },
     [setSelfConfig]
@@ -159,7 +159,6 @@ export function useBrushPanel() {
     brushTaper: selfConfig.brushTaper ?? 0,
     brushTaperStart: selfConfig.brushTaperStart ?? selfConfig.brushTaper ?? 0,
     brushTaperEnd: selfConfig.brushTaperEnd ?? selfConfig.brushTaper ?? 0,
-    brushTaperLink: selfConfig.brushTaperLink !== false,
     brushVelocity: selfConfig.brushVelocity === true,
     brushPresets: selfConfig.brushPresets ?? [],
     updateBrushFlag,

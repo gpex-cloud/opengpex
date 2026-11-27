@@ -339,6 +339,11 @@ export interface StrokeParams {
      */
     readonly feather?: number;
   };
+  /**
+   * Optional monotonic prefix length in `points` whose geometry and taper
+   * envelope are frozen for incremental GPU caching during live previews.
+   */
+  readonly solidifiedCount?: number;
 }
 
 /**
