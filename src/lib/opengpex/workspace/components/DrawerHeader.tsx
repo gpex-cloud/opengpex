@@ -38,10 +38,16 @@ import { motion } from 'framer-motion';
  *   short post-release window. Used to swallow the synthetic click that
  *   browsers fire at pointerup even after a real drag, which would otherwise
  *   toggle dropdowns or buttons as a side effect of reordering.
+ * - isolate: isolates the owning drawer within its side of the workspace —
+ *   every other drawer docked on the same side closes, drawers docked on the
+ *   opposite side keep their current state. Wired to a double click on the
+ *   title zone (a double click never engages the drag, so the two gestures
+ *   coexist on the same element).
  */
 export interface DrawerDragCapabilities {
   startDrag: (e: React.PointerEvent) => void;
   isDragActive: () => boolean;
+  isolate: () => void;
 }
 
 const DrawerDragContext = React.createContext<DrawerDragCapabilities | null>(
@@ -125,6 +131,11 @@ export function DrawerHeader({
               e.preventDefault();
               e.stopPropagation();
             }
+          }}
+          onDoubleClick={(e) => {
+            if (e.button !== 0) return;
+            if (!shouldStartDrag(e.target)) return;
+            drag?.isolate();
           }}
         >
           {/* Per-element cursors: the wrapper box is taller than the title

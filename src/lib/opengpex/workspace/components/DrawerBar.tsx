@@ -288,6 +288,7 @@ export default function DrawerBar({
               actions={actions}
               styles={styles}
               handleCombinedClick={handleCombinedClick}
+              handleIsolate={handleIsolate}
               isDraggingRef={isDraggingRef}
               side={side}
               markUserEngaged={markUserEngaged}
@@ -313,6 +314,7 @@ function SidebarItem({
   actions,
   styles,
   handleCombinedClick,
+  handleIsolate,
   isDraggingRef,
   side,
   markUserEngaged,
@@ -322,6 +324,7 @@ function SidebarItem({
   actions: EditorActions;
   styles: Record<string, WorkspaceStyleItem>;
   handleCombinedClick: (id: string, e: React.MouseEvent) => void;
+  handleIsolate: (id: string) => void;
   isDraggingRef: React.RefObject<boolean>;
   side: "left" | "right";
   markUserEngaged: (uid: string) => void;
@@ -566,6 +569,7 @@ function SidebarItem({
                     capabilities={{
                       startDrag: (e) => dragControls.start(e),
                       isDragActive: () => isDraggingRef.current === true,
+                      isolate: () => handleIsolate(plugin.uid),
                     }}
                   >
                     <PluginSlot

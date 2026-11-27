@@ -115,13 +115,16 @@ export function nextMasksForArm(
     if (shape) mask.shape = shape;
     next = [...masks, mask];
   }
-  // Identity sweep — the generic residue cleanup: ANY mask whose grade has
-  // become entirely identity and which carries no selection snapshot is pure
-  // noise (a slider dragged back to neutral must not leave an empty mask
-  // behind). Selection-scoped identity masks are kept: their frozen shape is
-  // user state even when the grade does nothing. Pure visual no-op — the
-  // renderer's identity fast path already skipped these grades.
-  const pruned = next.filter((m) => !(isIdentityGrade(m.grade) && !m.shape));
+  // Identity sweep — the generic residue cleanup: ANY ENABLED mask whose
+  // grade has become entirely identity and which carries no selection
+  // snapshot is pure noise (a slider dragged back to neutral must not leave
+  // an empty mask behind). Selection-scoped identity masks are kept: their
+  // frozen shape is user state even when the grade does nothing. DISABLED
+  // masks are kept unconditionally: disabling is an explicit user decision,
+  // so a disabled entry is user state too — pruning it would silently undo
+  // that decision (the renderer already skips disabled masks, so keeping
+  // one is a pure visual no-op).
+  const pruned = next.filter((m) => m.enabled === false || !(isIdentityGrade(m.grade) && !m.shape));
   return pruned;
 }
 

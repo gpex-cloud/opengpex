@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.1.3
+
+- Adjustments: tweaking adjustments no longer silently removes a disabled adjustment entry from the layer; explicit resets and deletions still clear every entry as before.
+- Interface: double-click a drawer's title bar to collapse every other drawer docked on the same side (drag still lives on single click).
+- Selection: the AI selection tool now has its own accent color in the clip toolbar.
+
 ## 2.1.2
 
 - Layers: Stroke now offers the same Blend mode picker as Drop Shadow and Outer Glow — an outside or centered stroke can blend directly with the artwork behind the layer (Multiply darkens the stroke into the background, Screen brightens it out of dark scenes), while its inner half stays attached to the content.

@@ -213,6 +213,11 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
       borderOpenClass: "border-cyan-500/50",
       activeBg: "bg-cyan-500/10 text-cyan-600 dark:text-cyan-400",
     },
+    fuchsia: {
+      textClass: "text-fuchsia-500 dark:text-fuchsia-400",
+      borderOpenClass: "border-fuchsia-500/50",
+      activeBg: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400",
+    },
   } as const;
   const toolVisual = ACCENT_CLASSES[activeStrategy.accent];
 
@@ -352,15 +357,17 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                   // Popover-local active palette — works on both light
                   // (`--bg-panel: #ffffff`) and dark (`#2b2b2b`) bubble
                   // backgrounds. Tailwind JIT requires class strings to be
-                  // statically discoverable, so we list the four full
-                  // (purple/amber × light/dark) variants instead of
+                  // statically discoverable, so we list the full
+                  // (accent × light/dark) variants instead of
                   // computing them.
                   const popActiveBg =
-                    s.accent === "purple"
-                      ? "bg-purple-500/15 text-purple-700 dark:bg-purple-400/25 dark:text-purple-200 ring-1 ring-purple-500/30 dark:ring-purple-300/30"
-                      : s.accent === "cyan"
-                        ? "bg-cyan-500/15 text-cyan-700 dark:bg-cyan-400/25 dark:text-cyan-200 ring-1 ring-cyan-500/30 dark:ring-cyan-300/30"
-                        : "bg-amber-500/15 text-amber-700 dark:bg-amber-400/25 dark:text-amber-200 ring-1 ring-amber-500/30 dark:ring-amber-300/30";
+                    s.accent === "fuchsia"
+                      ? "bg-fuchsia-500/15 text-fuchsia-700 dark:bg-fuchsia-400/25 dark:text-fuchsia-200 ring-1 ring-fuchsia-500/30 dark:ring-fuchsia-300/30"
+                      : s.accent === "purple"
+                        ? "bg-purple-500/15 text-purple-700 dark:bg-purple-400/25 dark:text-purple-200 ring-1 ring-purple-500/30 dark:ring-purple-300/30"
+                        : s.accent === "cyan"
+                          ? "bg-cyan-500/15 text-cyan-700 dark:bg-cyan-400/25 dark:text-cyan-200 ring-1 ring-cyan-500/30 dark:ring-cyan-300/30"
+                          : "bg-amber-500/15 text-amber-700 dark:bg-amber-400/25 dark:text-amber-200 ring-1 ring-amber-500/30 dark:ring-amber-300/30";
                   const showDivider =
                     idx > 0 && arr[idx - 1].family !== s.family;
                   return (
@@ -677,11 +684,13 @@ export const ClipOptionsMain = React.memo(function ClipOptionsMain() {
                           setOffsetValue(0);
                         }}
                         className={`h-6 px-3 text-[10px] font-black rounded-full transition-colors
-                          ${activeStrategy.accent === "cyan"
-                            ? "bg-cyan-500 hover:bg-cyan-600 text-white"
-                            : activeStrategy.accent === "purple"
-                              ? "bg-purple-500 hover:bg-purple-600 text-white"
-                              : "bg-amber-500 hover:bg-amber-600 text-white"
+                          ${activeStrategy.accent === "fuchsia"
+                            ? "bg-fuchsia-500 hover:bg-fuchsia-600 text-white"
+                            : activeStrategy.accent === "cyan"
+                              ? "bg-cyan-500 hover:bg-cyan-600 text-white"
+                              : activeStrategy.accent === "purple"
+                                ? "bg-purple-500 hover:bg-purple-600 text-white"
+                                : "bg-amber-500 hover:bg-amber-600 text-white"
                           }`}
                       >
                         APPLY

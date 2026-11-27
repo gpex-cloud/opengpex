@@ -170,7 +170,8 @@ export const SIGNAL_CLIP_TOOL_AA = 'signal.clip_tool_aa.map';
  * ClipTool: Active crop / selection tool.
  *
  * - 'rect' / 'pathellipse' → regular shapes (amber UI accent).
- * - 'lasso' / 'wand'    → irregular polygon selections (purple UI accent).
+ * - 'lasso' / 'wand'    → irregular polygon selections (cyan UI accent).
+ * - 'sam'               → AI-assisted selection (fuchsia UI accent).
  *
  * All tools write to the frame-level selection entity via
  * `actions.updateFrame(frameId, { confinement: data })`.
@@ -210,7 +211,7 @@ export interface ClipToolStrategy {
   readonly id: ClipTool;
   readonly label: string;
   readonly icon: LucideIcon;
-  readonly accent: 'amber' | 'purple' | 'cyan';
+  readonly accent: 'amber' | 'purple' | 'cyan' | 'fuchsia';
 
   /**
    * Semantic category — purely describes the geometry kind this tool produces:
@@ -265,9 +266,9 @@ export interface ClipToolStrategy {
 export const CLIP_TOOL_STRATEGIES: Record<ClipTool, ClipToolStrategy> = {
   'rect':        { id: 'rect',        label: 'Rect',           icon: Square, accent: 'amber',  family: 'regular',   handlerKind: 'clipbox',     forbiddenInReCanvas: false, supportsAntiAlias: false, cursor: CLIP_RECT_CURSOR     },
   'pathellipse': { id: 'pathellipse', label: 'Ellipse (Path)', icon: Circle, accent: 'amber',  family: 'regular',   handlerKind: 'pathellipse', forbiddenInReCanvas: false, supportsAntiAlias: true,  cursor: CLIP_ELLIPSE_AA_CURSOR  },
-  'lasso':       { id: 'lasso',       label: 'Lasso',          icon: Lasso,  accent: 'purple', family: 'irregular', handlerKind: 'lasso',       forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_LASSO_CURSOR    },
-  'wand':        { id: 'wand',        label: 'Wand',           icon: Wand2,  accent: 'purple', family: 'irregular', handlerKind: 'wand',        forbiddenInReCanvas: true,  supportsAntiAlias: false,  cursor: CLIP_WAND_CURSOR     },
-  'sam':         { id: 'sam',         label: 'SAM',            icon: Shapes, accent: 'cyan',   family: 'irregular', handlerKind: 'sam',         forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_SAM_CURSOR      },
+  'lasso':       { id: 'lasso',       label: 'Lasso',          icon: Lasso,  accent: 'cyan',   family: 'irregular', handlerKind: 'lasso',       forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_LASSO_CURSOR    },
+  'wand':        { id: 'wand',        label: 'Wand',           icon: Wand2,  accent: 'cyan',   family: 'irregular', handlerKind: 'wand',        forbiddenInReCanvas: true,  supportsAntiAlias: false,  cursor: CLIP_WAND_CURSOR     },
+  'sam':         { id: 'sam',         label: 'SAM',            icon: Shapes, accent: 'fuchsia', family: 'irregular', handlerKind: 'sam',         forbiddenInReCanvas: true,  supportsAntiAlias: true,  cursor: CLIP_SAM_CURSOR      },
 };
 
 // ─── Derived Helpers ────────────────────────────────────────────────────────────
