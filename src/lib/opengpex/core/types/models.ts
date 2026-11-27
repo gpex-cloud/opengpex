@@ -257,6 +257,19 @@ export interface StrokeParams {
   widthPx: number;
   /** Placement relative to the contour (`'outside'` default). */
   position?: StrokePosition;
+  /**
+   * How the stroke ring combines with its compositing target. Reuses
+   * {@link LayerBlendMode} — no new enum members. Absent =
+   * `'source-over'` (the historical flat behaviour — old documents keep
+   * rendering identically).
+   *
+   * Semantics follow the stroke position: an `outside` ring (and the outer
+   * half of a `center` ring) blends against the canvas BACKDROP beneath the
+   * layer; an `inside` ring stays a layer-internal surface mix. Any non-
+   * Normal `outside` / `center` ring promotes the layer's external effects
+   * to standalone composite steps (see SceneCompiler).
+   */
+  blendMode?: LayerBlendMode;
 }
 
 /**
@@ -870,10 +883,10 @@ export interface Layer {
   interactive?: boolean; // Whether involved in collision detection (Hit-Testing)
   /**
    * Clip to the layer below (Photoshop-style clipping mask). Consumed by the v2
-   * render pipeline (`Scene.LayerNode.clip` → `blend.wgsl` clip flag). Optional;
+   * render pipeline (`Scene.LayerNode.clipMasked` → `blend.wgsl` clip flag). Optional;
    * absent/false means the layer composites normally.
    */
-  clip?: boolean;
+  clipMasked?: boolean;
 
   birthCenter?: { cx: number; cy: number }; // Initial birth center (world coordinates)
 

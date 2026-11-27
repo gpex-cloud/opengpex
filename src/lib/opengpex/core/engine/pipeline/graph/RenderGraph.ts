@@ -43,7 +43,7 @@ import { isOversizedTransient } from '@opengpex/editor/core/engine/gpu/resources
 import { LayerTexture } from '@opengpex/editor/core/engine/gpu/resources/LayerTexture';
 import { GPUTextureUsage } from '@opengpex/editor/core/engine/gpu/constants';
 import type { ResidentTransientDesc } from '@opengpex/editor/core/engine/gpu/resources/ResidentTransientCache';
-import type { Scene } from '../scene/Scene';
+import type { Scene, LayerNode } from '../scene/Scene';
 import type { CompiledScene } from './SceneCompiler';
 import { CompositePass, type CompositePassContext } from './composite/CompositePass';
 import { BlendPass, type BlendPassContext } from './composite/BlendPass';
@@ -60,7 +60,86 @@ import { prepareAdjustCoverage } from './build/prepareAdjustCoverage';
 import type { AdjustCoverageBinding } from './support/adjustBindGroup';
 import { prepareBmaskCombineSources } from './build/prepareBmaskCombine';
 import type { BuildContext, PreparedSource } from './build/types';
-import { resolveDrawSourceParams } from './build/support/resolveDrawSource';
+import { resolveDrawSourceParams, resolveLayerDrawGeometry } from './build/support/resolveDrawSource';
+import {
+  computeClipBaseSampling,
+  resolveClipBaseLayer,
+  type ClipBaseSampling,
+  type DocToFrameMapping,
+} from './support/clipMasking';
+
+/**
+ * Per-draw clip-base resolution result (Photoshop-style clipping mask).
+ *  • `skip` — the clipped node has NO drawable base (no base at all, or the
+ *    base has no resident source this frame): a clip member without its base
+ *    draws nothing (Photoshop semantics), so the caller must not draw it.
+ *  • `unclipped` — the node does not clip (the common case): draw as usual.
+ *  • `clipped` — draw with the sampling params bound; the shader multiplies
+ *    the foreground alpha by the base's coverage.
+ */
+type ClipDrawResolution =
+  | { readonly action: 'skip' }
+  | { readonly action: 'unclipped' }
+  | {
+    readonly action: 'clipped';
+    readonly clipBase: ClipBaseSampling;
+    readonly clipBaseTexture: LayerTexture;
+  };
+
+/**
+ * Resolve ONE node's clip base into per-draw sampling params. The base's
+ * geometry comes from the SAME `resolveLayerDrawGeometry` call the base's own
+ * draw makes, and the doc→frame mapping from the SAME viewport fields the
+ * draw passes fold into their foreground inverse — the gate and the base's
+ * own rasterization cannot disagree about where "frame pixel" is.
+ */
+function resolveClipDraw(
+  scene: Scene,
+  node: LayerNode,
+  sources: ReadonlyMap<string, PreparedSource>,
+  bmaskSources: ReadonlyMap<string, LayerTexture>,
+  vmaskSources: ReadonlyMap<string, VmaskBake>,
+  adjustCoverageSources: ReadonlyMap<string, AdjustCoverageBinding>,
+  docToFrame: DocToFrameMapping,
+): ClipDrawResolution {
+  if (!node.clipMasked) return { action: 'unclipped' };
+  const base = resolveClipBaseLayer(scene.layers, node);
+  if (!base) return { action: 'skip' };
+  const baseDraw = resolveDrawSourceParams(
+    sources.get(base.id),
+    base,
+    { bmaskSources, vmaskSources },
+    adjustCoverageSources.get(base.id),
+  );
+  if (!baseDraw) return { action: 'skip' };
+  const baseGeometry = resolveLayerDrawGeometry(base, baseDraw.texture, baseDraw);
+  return {
+    action: 'clipped',
+    clipBase: computeClipBaseSampling(baseGeometry, base.transform, docToFrame),
+    clipBaseTexture: baseDraw.texture,
+  };
+}
+
+/** Doc→frame mapping induced by an export/interaction viewport (or identity). */
+function docToFrameFromViewport(
+  viewport: ExportViewport | undefined,
+  frameWidth: number,
+  frameHeight: number,
+): DocToFrameMapping {
+  if (!viewport) return { srcX: 0, srcY: 0, sx: 1, sy: 1 };
+  const srcX = viewport.sourceRect ? viewport.sourceRect[0] : 0;
+  const srcY = viewport.sourceRect ? viewport.sourceRect[1] : 0;
+  const srcW = viewport.sourceRect ? viewport.sourceRect[2] : frameWidth;
+  const srcH = viewport.sourceRect ? viewport.sourceRect[3] : frameHeight;
+  const targetW = viewport.targetWidth ?? frameWidth;
+  const targetH = viewport.targetHeight ?? frameHeight;
+  return {
+    srcX,
+    srcY,
+    sx: srcW / Math.max(1, targetW),
+    sy: srcH / Math.max(1, targetH),
+  };
+}
 
 /** Context for the compositing half (camera-independent, document space). */
 export interface CompositeContext {
@@ -404,6 +483,7 @@ export class RenderGraph {
         exportViewport: passViewport,
       };
 
+      const clipDocToFrame = docToFrameFromViewport(passViewport, baseDims.frameWidth, baseDims.frameHeight);
       for (let s = 0; s < compiled.steps.length; s++) {
         const step = compiled.steps[s];
         if (step.kind !== 'separable') continue;
@@ -416,10 +496,16 @@ export class RenderGraph {
           const src = sources.get(layer.id);
           const draw = resolveDrawSourceParams(src, layer, { bmaskSources, vmaskSources }, adjustCoverageSources.get(layer.id));
           if (!draw) continue;
+          // A clipped member without a drawable base draws nothing.
+          const clipRes = resolveClipDraw(compiled.scene, layer, sources, bmaskSources, vmaskSources, adjustCoverageSources, clipDocToFrame);
+          if (clipRes.action === 'skip') continue;
           CompositePass.drawLayer(renderPass, passCtx, {
             layer,
             ...draw,
             isBottomOpaque: false,
+            ...(clipRes.action === 'clipped'
+              ? { clipBase: clipRes.clipBase, clipBaseTexture: clipRes.clipBaseTexture }
+              : {}),
           });
         }
       }
@@ -532,6 +618,7 @@ export class RenderGraph {
     }
 
     let isFirstStep = true;
+    const clipDocToFrame = docToFrameFromViewport(exportViewport, frameWidth, frameHeight);
 
     for (let s = 0; s < compiled.steps.length; s++) {
       const step = compiled.steps[s];
@@ -562,15 +649,21 @@ export class RenderGraph {
         for (let l = 0; l < step.layers.length; l++) {
           const layer = step.layers[l];
           // The chain map IS the draw-source authority (filtered transients,
-          // vector transients, resident assets, the solid white formality);
+          // vector transients, resident assets and the solid white formality);
           // absent = nothing to draw this frame.
           const src = sources.get(layer.id);
           const draw = resolveDrawSourceParams(src, layer, { bmaskSources, vmaskSources }, adjustCoverageSources.get(layer.id));
           if (!draw) continue;
+          // A clipped member without a drawable base draws nothing.
+          const clipRes = resolveClipDraw(compiled.scene, layer, sources, bmaskSources, vmaskSources, adjustCoverageSources, clipDocToFrame);
+          if (clipRes.action === 'skip') continue;
           CompositePass.drawLayer(renderPass, passCtx, {
             layer,
             ...draw,
             isBottomOpaque: false,
+            ...(clipRes.action === 'clipped'
+              ? { clipBase: clipRes.clipBase, clipBaseTexture: clipRes.clipBaseTexture }
+              : {}),
           });
         }
 
@@ -584,6 +677,10 @@ export class RenderGraph {
         const src = sources.get(layer.id);
         const fgDraw = resolveDrawSourceParams(src, layer, { bmaskSources, vmaskSources }, adjustCoverageSources.get(layer.id));
         if (!fgDraw) continue;
+        // A clipped node (body OR split effect step — both carry `clip`)
+        // without a drawable base draws nothing.
+        const clipRes = resolveClipDraw(compiled.scene, layer, sources, bmaskSources, vmaskSources, adjustCoverageSources, clipDocToFrame);
+        if (clipRes.action === 'skip') continue;
         const fgTexture = fgDraw.texture;
 
         if (isFirstStep) {
@@ -632,6 +729,9 @@ export class RenderGraph {
           fgTexture,
           bgTexture: currentAccumulator,
           ...fgDraw,
+          ...(clipRes.action === 'clipped'
+            ? { clipBase: clipRes.clipBase, clipBaseTexture: clipRes.clipBaseTexture }
+            : {}),
         });
         blendPass.end();
 

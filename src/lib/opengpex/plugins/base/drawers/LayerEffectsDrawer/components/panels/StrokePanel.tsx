@@ -38,7 +38,9 @@ import React, { useState } from 'react';
 import ColorSwatchRow from '@opengpex/editor/widgets/ColorSwatchRow';
 import FancySvgSlider from '@opengpex/editor/widgets/FancySvgSlider';
 import FunctionTabs from '@opengpex/editor/widgets/FunctionTabs';
-import type { EffectInstance, Layer, StrokeParams, StrokePosition } from '@opengpex/editor/core/types/models';
+import ActionDropdown from '@opengpex/editor/widgets/ActionDropdown';
+import { BLEND_MODE_DROPDOWN_OPTIONS, BLEND_MODE_LABEL_MAP } from '@opengpex/editor/widgets/blendModes';
+import type { EffectInstance, Layer, StrokeParams, StrokePosition, LayerBlendMode } from '@opengpex/editor/core/types/models';
 import { updateEffectParams } from '@opengpex/editor/core/layer/effects';
 import { usePluginCommands } from '@opengpex/editor/core/context';
 import { useFilterGesture } from '@opengpex/editor/plugins/base/drawers/AdjustmentDrawer/hooks';
@@ -154,11 +156,49 @@ export function StrokePanel({
     gesture.end();
   };
 
+  // Blend pick = a one-shot mini gesture (a discrete action, not a drag) —
+  // NEVER the fastWrite volatile channel (a dangling fast buffer with no
+  // commit would strand the pick on unmount). An `outside` / `center` ring
+  // with a non-Normal blend blends against the canvas BACKDROP beneath the
+  // layer; an `inside` ring stays layer-internal.
+  const blendMode: LayerBlendMode = params.blendMode ?? 'source-over';
+  const handleBlendSelect = (value: string) => {
+    gesture.begin();
+    const patch = updateEffectParams(layer, instance.id, { ...params, blendMode: value as LayerBlendMode });
+    if (patch) applyEffectPatchCmd?.execute({ patch });
+    gesture.end();
+  };
+
   const activePosition: StrokePosition = params.position ?? 'outside';
 
+  const blendTrigger = (
+    <div className="flex-1 flex items-center justify-between gap-1 px-2 py-0.5 rounded border border-[var(--border-subtle)] bg-[var(--bg-panel)] hover:bg-[var(--border-subtle)] transition-colors text-left cursor-pointer">
+      <span className="text-[9px] font-bold text-[var(--text-main)] truncate">
+        {BLEND_MODE_LABEL_MAP.get(blendMode) || 'Normal'}
+      </span>
+      <svg width="8" height="8" viewBox="0 0 8 8" className="shrink-0 text-[var(--text-muted)]">
+        <path d="M2 3L4 5L6 3" stroke="currentColor" strokeWidth="1.2" fill="none" strokeLinecap="round" />
+      </svg>
+    </div>
+  );
 
   return (
     <div className="flex flex-col gap-3 px-3 pt-2 pb-3">
+      {/* Blend mode rides on TOP of the panel (house standard): inline
+          label, 16-mode shared seat, popup opens DOWNWARD. */}
+      <div className="flex items-center gap-2">
+        <span className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-tight w-14 shrink-0">
+          Blend
+        </span>
+        <ActionDropdown
+          trigger={blendTrigger}
+          options={BLEND_MODE_DROPDOWN_OPTIONS}
+          onSelect={handleBlendSelect}
+          cols={3}
+          align="right"
+          className="flex-1"
+        />
+      </div>
       {/* Single-row layout: the row label sits inline LEFT of the swatch
           control (ColorSwatchRow's built-in label, house pattern) — the
           header-above variant wraps the swatch to its own line. The trailing

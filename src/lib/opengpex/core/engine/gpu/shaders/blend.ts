@@ -92,6 +92,9 @@ struct BlendUniforms {
   vmask_rect   : vec4<f32>,   // Offset 80 (16B) — (cx, cy, halfW, halfH) in layer-local pixel space (analytic only)
   vmask_feather: vec4<f32>,   // Offset 96 (16B) — (featherPx, maskPxW, maskPxH, _reserved)
   tail         : vec4<f32>,   // Offset 112 (16B) — mirrors LayerUniforms.tail: .x is the per-file filmic knee domain (consumed only when render_intent ≠ 0); the WHOLE vec4 is the declarative solid colour (working-LINEAR straight alpha) when flags bit 3 (SOURCE_SOLID) is set
+  clip_row0    : vec4<f32>,   // Offset 128 (16B) — CLIP-gate affine row 0 (ia, ib, itx, 0): frame px → base-local unit (mirrors LayerUniforms.clip_row0). Unread when flags bit 1 (CLIP) is clear.
+  clip_row1    : vec4<f32>,   // Offset 144 (16B) — CLIP-gate affine row 1 (ic, id, ity, 0).
+  clip_uv      : vec4<f32>,   // Offset 160 (16B) — the base's physical UV rect (u0, v0, du, dv).
 };
 
 @group(0) @binding(0) var<uniform> blend_u : BlendUniforms;
@@ -100,6 +103,10 @@ struct BlendUniforms {
 @group(0) @binding(3) var bg_tex          : texture_2d<f32>;
 @group(0) @binding(4) var mask_tex        : texture_2d<f32>;
 @group(0) @binding(5) var vmask_tex       : texture_2d<f32>;
+// The clip base's coverage texture (binding 6): bound ONLY for a clipped
+// layer's draw; the 1×1 default white view otherwise (unread unless flags
+// bit 1 — CLIP — is set). Symmetric to the layer shader's binding 5.
+@group(0) @binding(6) var clip_tex        : texture_2d<f32>;
 // The grade chain (uniform, LUT atlas, coverage array, 3D LUT) is group 1 —
 // see adjust.ts. The bmask stack slots (retired bindings 6..8) are gone: the bmask combine
 // pass bakes ALL enabled records (each record's hard bit + erase/restore
@@ -238,6 +245,31 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
     if ((blend_u.vmask_flags & 8u) != 0u) { vmask_alpha = step(0.5, vmask_alpha); }
     fg_sample.a *= vmask_alpha;
   }
+  // ── Clip-to-base gate (Photoshop-style clipping mask) ──
+  // flags bit 1 (CLIP): the foreground clips to the nearest unclipped layer
+  // below — the same gate layer.wgsl applies on the class-A path, so a
+  // member and its split effect steps share ONE base silhouette. The CPU
+  // packs the inverse of the BASE's placement (frame px → base-local unit
+  // quad, already folded with the export-viewport scale exactly like the
+  // fg_frame_to_local rows above); coverage = inside-gate × base texture
+  // alpha (a declarative-solid base binds the 1×1 white formality, so the
+  // gate alone forms the rect coverage).
+  if ((blend_u.flags & 2u) != 0u) {
+    let cl = vec2<f32>(
+      blend_u.clip_row0.x * frame_px.x + blend_u.clip_row1.x * frame_px.y + blend_u.clip_row0.z,
+      blend_u.clip_row0.y * frame_px.x + blend_u.clip_row1.y * frame_px.y + blend_u.clip_row1.z,
+    );
+    var cov = select(0.0, 1.0, cl.x >= 0.0 && cl.x <= 1.0 && cl.y >= 0.0 && cl.y <= 1.0);
+    let cuv = blend_u.clip_uv.xy + cl * blend_u.clip_uv.zw;
+    // Bitmap-extent gate (symmetric to the fg sample): outside the base's
+    // content rect the clamp-to-edge sampler would smear edge texels —
+    // transparency is the truth there.
+    if (cuv.x < 0.0 || cuv.y < 0.0 || cuv.x > 1.0 || cuv.y > 1.0) {
+      cov = 0.0;
+    }
+    cov *= textureSample(clip_tex, samp, cuv).a;
+    fg_sample.a *= cov;
+  }
   fg_sample.a *= blend_u.opacity;
 
   // Un-premultiply foreground RGB if source was premultiplied. UNBOUNDED
@@ -311,5 +343,5 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
 }
 `;
 
-/** Size of BlendUniforms in bytes (128 bytes = 32 float/u32 slots, including vmask fields + filmic_white). */
-export const BLEND_UNIFORM_BUFFER_SIZE = 128;
+/** Size of BlendUniforms in bytes (176 bytes = 44 float/u32 slots, including vmask fields, filmic_white and the clip-base affine rows + UV rect). */
+export const BLEND_UNIFORM_BUFFER_SIZE = 176;

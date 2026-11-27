@@ -70,6 +70,7 @@
 
 import type { CompiledScene } from '../SceneCompiler';
 import { splitExternalEffectLayer } from '../SceneCompiler';
+import type { EffectStageDesc } from '@opengpex/editor/core/engine/pipeline/scene/Scene';
 import { snapToPowerOfTwo } from '@opengpex/editor/core/engine/gpu/resources/TexturePool';
 import { LayerTexture } from '@opengpex/editor/core/engine/gpu/resources/LayerTexture';
 import { GPUTextureUsage } from '@opengpex/editor/core/engine/gpu/constants';
@@ -164,14 +165,17 @@ export function prepareEffectSources(
     // The standalone transients register under `${layer.id}::eff:<index>`;
     // the body keeps its own registration under `layer.id`.
     const splitNodes = splitExternalEffectLayer(layer);
-    // Global stage index of every shadow / outer-glow instance within
-    // `layer.effects` (the translator's render order) — the effect-draw-key
-    // namespace. Array order matches the filtered family lists below.
+    // Global stage index of every shadow / outer-glow / stroke instance
+    // within `layer.effects` (the translator's render order) — the
+    // effect-draw-key namespace. Array order matches the filtered family
+    // lists below.
     const shadowStageIndices: number[] = [];
     const glowStageIndices: number[] = [];
+    const strokeStageIndices: number[] = [];
     (layer.effects ?? []).forEach((stage, index) => {
       if (stage.kind === 'shadow') shadowStageIndices.push(index);
       else if (stage.kind === 'outer-glow') glowStageIndices.push(index);
+      else if (stage.kind === 'stroke') strokeStageIndices.push(index);
     });
 
     const solidColor = layer.source.kind === 'solid' ? layer.source.color : undefined;
@@ -474,6 +478,39 @@ export function prepareEffectSources(
     let currentGamutId = gamutId;
     const baseAlphaKey = `${content.width}x${content.height}|b:${bmaskTex ? 1 : 0}|v:${vmaskBake ? 1 : 0}|a:${layer.adjustStages?.length ?? 0}|f:${prepared.contentWindow ? 1 : 0}`;
 
+    // ── 2a. Standalone external-effect registration (Class-B split) ──────
+    // When the layer is in split mode, every backdrop-blending external
+    // effect (shadow / outer glow / outside-or-center stroke) runs
+    // STANDALONE (its own transient, no body folding) and registers under
+    // its effect-draw key; the compositor blends each transient against the
+    // canvas backdrop with the stage's blend mode. The window and reporting
+    // basis are the SAME as the body's flat declaration (one shared window —
+    // the unified-window contract keeps the body wide-windowed).
+    // ⚠️ Defined right after the window exists and BEFORE every consuming
+    // chain (the stroke chain runs first, ahead of glow and shadow).
+    const isLogicalReport = solidColor || layer.source.kind === 'vector';
+    const div = isLogicalReport ? density : 1;
+    const windowBasis: 'content-local' | 'asset' = isLogicalReport ? 'content-local' : 'asset';
+    const registerStandaloneEffectSource = (stageIndex: number, tex: LayerTexture) => {
+      sources.set(`${layer.id}::eff:${stageIndex}`, {
+        texture: tex,
+        suppressAdjust: true,
+        vectorTransient: false,
+        sourceIsLinear: true,
+        sourceIsWorkingGamut: true,
+        sourceIntentApplied: prepared.sourceIntentApplied,
+        contentWindow: {
+          x: (contentToWindow.x + windowTexel.x) / div,
+          y: (contentToWindow.y + windowTexel.y) / div,
+          w: windowTexel.w / div,
+          h: windowTexel.h / div,
+          basis: windowBasis,
+        },
+        expandQuadToWindow: true,
+        maskFree: true,
+      });
+    };
+
     // ── 1c. Overlay chain (surface effects, BEFORE the stroke) ─────────
     // EXECUTION ORDER vs VISUAL ORDER: this deliberately runs BEFORE the
     // stroke chain even though the overlay stacks ABOVE the stroke visually.
@@ -553,23 +590,58 @@ export function prepareEffectSources(
       currentIsLinear = true;
       currentGamutId = 0;
     }
+    // ── 2b. Stroke chain (with the Class-B backdrop-blend split) ────────
+    // Which stroke instances FOLD into the body vs split out as standalone
+    // backdrop steps — mirrors splitExternalEffectLayer's stroke trigger: a
+    // non-Normal blend on an `outside` / `center` ring splits (the ring
+    // blends against the canvas BACKDROP); an `inside` stroke is a
+    // layer-internal surface mix (its blend mode is deliberately NOT applied
+    // here — that extension stays out of scope), and a Normal ring stays
+    // flattened either way.
+    const strokeFolds = (stage: Extract<EffectStageDesc, { kind: 'stroke' }>): boolean =>
+      stage.position === 'inside' || (stage.blendMode ?? 'source-over') === 'source-over';
+
+    // FACE TRACKING: `strokeFaceAligned` is true while `current` is a
+    // WINDOW-ALIGNED chain output (a surface overlay/gradient ran, or a
+    // stroke already folded into the body); raw content is not aligned.
+    // Split-out standalone strokes do NOT touch `current`, so they leave the
+    // flag untouched — a later folding stroke then still faces the raw
+    // content at the window offset. `strokeChainConsumed` marks that a
+    // folding stroke has consumed the surface-aligned output at least once,
+    // after which the chain faces stroke OUTPUTS whose rings legitimately
+    // extend past the visible base (the visible-rect guard lifts).
+    const surfaceRan = overlays.length > 0 || gradients.length > 0;
+    let strokeFaceAligned = surfaceRan;
+    let strokeChainConsumed = false;
+    // True once a split `center` stroke ran its BODY pass (bodyInnerOnly):
+    // that pass composed the inner half-ring into `current`, so `current` is a
+    // window-aligned stroke output that MUST be registered (the raw prepared
+    // source would drop the inner band entirely). Consumed by the
+    // `currentAligned` computation below — a split-center layer with no other
+    // aligning chain must NOT fall through to the "nothing baked, nothing
+    // aligned" branch.
+    let bodyStrokeInnerRan = false;
     for (let i = 0; i < stages.length; i++) {
       const stage = stages[i];
       if (stage.kind !== 'stroke') continue;
       const cacheId = `${layer.id}#${i}`;
       activeEdtKeys.add(cacheId);
-      // Only the FIRST instance faces the original content (window offset
-      // inside it); later instances consume the previous window-aligned
-      // output, whose origin IS the window origin. When a SURFACE stage ran
-      // (color overlay or gradient), the "original content" IS already
-      // window-aligned (the surface output), so the first stroke stage
-      // reads it at zero offset too — and its visible sub-rect re-bases
-      // into window coordinates.
-      const surfaceRan = overlays.length > 0 || gradients.length > 0;
-      const windowInContent: TexelRect = i === 0 && !surfaceRan
-        ? windowTexel
-        : { x: 0, y: 0, w: windowTexel.w, h: windowTexel.h };
-      current = EffectStrokePass.run(encoder, ctx, {
+      const stageIndex = strokeStageIndices[i];
+      // Face geometry: the first folding instance faces the original content
+      // (window offset inside it); once the chain is aligned, every consumer
+      // reads at zero offset. The visible sub-rect confines reads to the
+      // visible base on the first raw-content face, re-bases it into window
+      // coordinates on the first face of a surface-aligned output, and lifts
+      // entirely once the chain consumes stroke outputs.
+      const windowInContent: TexelRect = strokeFaceAligned
+        ? { x: 0, y: 0, w: windowTexel.w, h: windowTexel.h }
+        : windowTexel;
+      const contentVisibleTexel: TexelRect | undefined = !strokeFaceAligned
+        ? base
+        : (surfaceRan && !strokeChainConsumed
+          ? { x: base.x - windowTexel.x, y: base.y - windowTexel.y, w: base.w, h: base.h }
+          : undefined);
+      const strokeInputs = {
         layerId: layer.id,
         instanceIndex: i,
         content: current,
@@ -579,49 +651,51 @@ export function prepareEffectSources(
         strokeColor: stage.color,
         widthTexels: stage.widthPx * density,
         position: stage.position,
-        contentVisibleTexel: i === 0
-          ? (surfaceRan
-            ? { x: base.x - windowTexel.x, y: base.y - windowTexel.y, w: base.w, h: base.h }
-            : base)
-          : undefined,
+        contentVisibleTexel,
         edtAlphaKey: i === 0 ? baseAlphaKey : undefined,
-      });
+      } as const;
+
+      if (splitNodes && !strokeFolds(stage)) {
+        // STANDALONE (backdrop blend): the ring (the whole band for
+        // `outside`, the outer half for `center`) emits straight alpha into
+        // its OWN transient under the effect-draw key. `current` is
+        // untouched. The `center` body pass below re-runs the SAME inputs
+        // with the outer ring suppressed — the EDT cache slot
+        // (`layerId#instanceIndex`) is already warm from this pass, so the
+        // two half-rings share ONE dual-field EDT with zero duplicate JFA.
+        const ringTex = EffectStrokePass.run(encoder, ctx, {
+          ...strokeInputs,
+          standalone: true,
+          outputSlotKey: `eff:${stageIndex}`,
+        });
+        registerStandaloneEffectSource(stageIndex, ringTex);
+        if (stage.position === 'center') {
+          // The inner half-ring folds into the body with the historical
+          // source-over content mix (the layer-internal blend-mode extension
+          // is deliberately out of scope for this phase).
+          current = EffectStrokePass.run(encoder, ctx, {
+            ...strokeInputs,
+            bodyInnerOnly: true,
+          });
+          bodyStrokeInnerRan = true;
+          // The body pass output is working-LINEAR in the working gamut,
+          // window-aligned — the chain now faces a stroke output.
+          currentIsLinear = true;
+          currentGamutId = 0;
+          strokeFaceAligned = true;
+          strokeChainConsumed = true;
+        }
+        continue;
+      }
+
+      current = EffectStrokePass.run(encoder, ctx, strokeInputs);
       // Subsequent instances compose over the previous output: already
       // working-LINEAR in the working gamut.
       currentIsLinear = true;
       currentGamutId = 0;
+      strokeFaceAligned = true;
+      strokeChainConsumed = true;
     }
-
-    // ── 2a. Standalone external-effect registration (Class-B split) ──────
-    // When the layer is in split mode, every shadow / outer-glow instance
-    // runs STANDALONE (its own transient, no current sampling) and registers
-    // under its effect-draw key; the compositor blends each transient
-    // against the canvas backdrop with the stage's blend mode. The window
-    // and reporting basis are the SAME as the body's flat declaration (one
-    // shared window — the Phase-1 contract keeps the body wide-windowed).
-    // ⚠️ Defined AFTER the window exists but BEFORE the glow/shadow chains.
-    const isLogicalReport = solidColor || layer.source.kind === 'vector';
-    const div = isLogicalReport ? density : 1;
-    const windowBasis: 'content-local' | 'asset' = isLogicalReport ? 'content-local' : 'asset';
-    const registerStandaloneEffectSource = (stageIndex: number, tex: LayerTexture) => {
-      sources.set(`${layer.id}::eff:${stageIndex}`, {
-        texture: tex,
-        suppressAdjust: true,
-        vectorTransient: false,
-        sourceIsLinear: true,
-        sourceIsWorkingGamut: true,
-        sourceIntentApplied: prepared.sourceIntentApplied,
-        contentWindow: {
-          x: (contentToWindow.x + windowTexel.x) / div,
-          y: (contentToWindow.y + windowTexel.y) / div,
-          w: windowTexel.w / div,
-          h: windowTexel.h / div,
-          basis: windowBasis,
-        },
-        expandQuadToWindow: true,
-        maskFree: true,
-      });
-    };
 
     // The shadow and glow spread EDTs live in their own cache slots per
     // instance — register them in the sweep guard or the sweep destroys the
@@ -630,9 +704,12 @@ export function prepareEffectSources(
     glows.forEach((_, i) => activeEdtKeys.add(`${layer.id}:outer-glow#${i}`));
 
     // Window-alignment tracking for the FOREGROUND side of the beneath-
-    // compose passes (glow and shadow): a stroke or overlay output is already
-    // window-aligned, raw content is not. Updated by each chain below.
-    let currentAligned = stages.length > 0 || overlays.length > 0 || gradients.length > 0;
+    // compose passes (glow and shadow): a FOLDING stroke or overlay output
+    // is window-aligned, raw content is not (a fully split-out stroke leaves
+    // the body unaligned). Updated by each chain below.
+    let currentAligned = surfaceRan
+      || stages.some((s) => s.kind === 'stroke' && strokeFolds(s))
+      || bodyStrokeInnerRan;
 
     // ── 2c. Outer-glow chain (halo beneath the stroked content) ─────────
     // EXECUTION ORDER: AFTER the stroke chain, BEFORE the shadow chain. The

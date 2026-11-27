@@ -892,7 +892,7 @@ export class SceneAssembler {
         // the un-effect geometry (content dims == extent), so this is purely
         // the effect prepass's entry ticket.
         crop: effectResult.effects ? (crop ?? { x: 0, y: 0, w: layerWidth, h: layerHeight }) : crop,
-        clip: !!layer.clip,
+        clipMasked: !!layer.clipMasked,
       });
 
       // Collect the LUT upload plan (dedup by lutId across layers happens in the

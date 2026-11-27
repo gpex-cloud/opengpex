@@ -113,6 +113,9 @@ export function translateLayerEffects(
         color: toWorkingLinearRgba(params.color as ColorValue, workingSpace),
         widthPx: clampStrokeWidth(params.widthPx),
         position: params.position ?? 'outside',
+        // Optional-tolerant: documents written before the field existed keep
+        // the historical flat ring-in-source compose (Normal).
+        blendMode: sanitizeBlendMode(params.blendMode, 'source-over'),
       });
     } else if (instance.category === 'shadow') {
       const params = instance.params as ShadowParams;

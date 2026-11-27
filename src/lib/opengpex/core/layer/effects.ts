@@ -80,7 +80,16 @@ export const EFFECT_CATEGORY_LABELS: Readonly<Record<string, string>> = {
 
 /** First-release stroke defaults: black, 3px outside — usable result on open (the "one-shot success" contract). */
 export function defaultStrokeParams(): StrokeParams {
-  return { color: fromHex('#000000'), widthPx: 3, position: 'outside' };
+  return {
+    color: fromHex('#000000'),
+    widthPx: 3,
+    position: 'outside',
+    // Factory blend = Normal ('source-over') — the reference product's Stroke
+    // dialog factory state (the ring flattens into the layer source).
+    // Documents written before the field existed read the same value through
+    // the scene translator's fallback, so old and new documents agree.
+    blendMode: 'source-over',
+  };
 }
 
 /**

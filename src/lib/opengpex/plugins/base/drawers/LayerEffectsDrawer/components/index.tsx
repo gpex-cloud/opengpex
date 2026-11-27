@@ -53,7 +53,7 @@
 
 import React, { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Eye, EyeOff, Plus, Trash2 } from "lucide-react";
+import { Eye, EyeOff, Plus, RotateCcw as ResetIcon, Trash2 } from "lucide-react";
 import { EfxIcon } from "../icon";
 import { useEditorState, useEditorServices, usePluginCommands, usePluginSignals } from "@opengpex/editor/core/context";
 import { DrawerHeader } from "@opengpex/editor/workspace/components/DrawerHeader";
@@ -452,8 +452,8 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
                 selectTab(id);
               }}
               dropdownOptions={[
-                { label: "Disable all effects", value: 'disable-all' },
-                { label: "Reset to defaults", value: 'reset-defaults' },
+                { label: "Disable all effects", value: 'disable-all', icon: <EyeOff size={10} />, variant: 'danger' },
+                { label: "Reset to defaults", value: 'reset-defaults', icon: <ResetIcon size={10} /> },
               ]}
               onDropdownSelect={(value) => {
                 if (!activeLayer || !applyEffectPatchCmd) return;

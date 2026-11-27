@@ -35,7 +35,7 @@
  *   • document dimensions (frame.width/height) — texture size + NDC mapping;
  *   • working format — the composite texture's pixel format;
  *   • per layer, in order: id, transform, width/height, crop, opacity, blendMode,
- *     clip, mask (all fields), source (kind + assetId), adjustments, filters;
+ *     clipMasked, mask (all fields), source (kind + assetId), adjustments, filters;
  *   • per raster layer: the asset EPOCH — bumps whenever the resident texture is
  *     actually re-transferred (erase/filter/redecode). This is the defence
  *     against "same assetId, new pixels".
@@ -212,7 +212,7 @@ function layerSig(layer: LayerNode, opts: CompositeSignatureOptions): string {
     `dpr:${dpr}`,
     `op:${layer.opacity}`,
     `bm:${layer.blendMode}`,
-    `clip:${layer.clip ? 1 : 0}`,
+    `cm:${layer.clipMasked ? 1 : 0}`,
     `bmask:${bmaskSig(layer.bmask, opts)}`,
     `vmask:${vmaskSig(layer.vmask)}`,
     `src:${srcSig}`,

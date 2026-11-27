@@ -48,6 +48,7 @@ import { resolveSourceGamutId } from '../support/sourceGamut';
 import { resolveSourceRawIntentNibble, resolveSourceRawWhiteDomain } from '../support/sourceIntent';
 import { FILMIC_WHITE_DOMAIN } from '@opengpex/editor/core/engine/color/filmic';
 import type { ExportViewport } from '../RenderGraph';
+import type { ClipBaseSampling } from '../support/clipMasking';
 
 export interface BlendPassContext {
   readonly device: GPUDevice;
@@ -153,6 +154,19 @@ export interface DrawBlendParams {
    * (unset when a filtered transient already materialized the pixels).
    */
   readonly solidUniform?: boolean;
+  /**
+   * CLIP-BASE sampling for a Photoshop-style clipped layer (`layer.clipMasked`):
+   * the inverse placement of the resolved clip base (frame px → base-local
+   * unit quad) plus the base's physical UV rect, from
+   * `computeClipBaseSampling`. When present the CLIP flag packs and the
+   * blend shader multiplies the foreground alpha by the base's coverage
+   * (texture bound at binding 6). Absent → the layer draws unclipped. This
+   * is how every split external-effect step (which inherits `clipMasked` through
+   * `splitExternalEffectLayer`) gets the SAME base silhouette as the body.
+   */
+  readonly clipBase?: ClipBaseSampling;
+  /** The clip base's coverage texture (slot 6); the 1×1 white formality for a declarative-solid base. */
+  readonly clipBaseTexture?: LayerTexture;
 }
 
 /**
@@ -176,7 +190,10 @@ export class BlendPass {
 
     let flags = 0;
     if (maskTexture) flags |= LAYER_FLAG_HAS_MASK;
-    if (layer.clip) flags |= LAYER_FLAG_CLIP;
+    // CLIP flag means "a clip base was RESOLVED and bound" (same shared
+    // decision as CompositePass — a clipped node with no resolvable base never
+    // half-applies an unbacked gate).
+    if (params.clipBase) flags |= LAYER_FLAG_CLIP;
     // The retired bmask hard/invert/stack flag bits (3/10/11..17) are gone:
     // the combine pass bakes every record's semantics into the combined mask
     // texture, which the shader plain-multiplies (same shared decision as
@@ -238,6 +255,8 @@ export class BlendPass {
       vmaskU.feather,
       rawWhiteDomain ?? FILMIC_WHITE_DOMAIN,
       solidColor,
+      params.clipBase?.frameToLocal,
+      params.clipBase?.uvRect,
     );
 
     // ── Overwrite slots 0..11 with fg_frame_to_local = inverse of the forward
@@ -355,6 +374,16 @@ export class BlendPass {
           binding: 5,
           resource: vmaskTexture
             ? vmaskTexture.texture.createView()
+            : ctx.pipelineCache.getDefaultMaskView(),
+        },
+        {
+          // Clip base coverage (binding 6). Clipped draws bind the resolved
+          // base's texture (a declarative-solid base binds its white
+          // formality); unclipped draws bind the 1×1 default white view
+          // (unread unless flags bit 1 — CLIP — is set).
+          binding: 6,
+          resource: params.clipBaseTexture
+            ? params.clipBaseTexture.texture.createView()
             : ctx.pipelineCache.getDefaultMaskView(),
         },
       ],

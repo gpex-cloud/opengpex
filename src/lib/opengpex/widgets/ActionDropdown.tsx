@@ -229,7 +229,11 @@ export default function ActionDropdown({
               <div
                 className={`${cols > 1 ? 'grid gap-0.5' : 'flex flex-col gap-0.5'}${maxVisibleItems ? ' custom-scrollbar' : ''}`}
                 style={{
-                  ...(cols > 1 ? { gridTemplateColumns: `repeat(${cols}, 1fr)` } : {}),
+                  // `auto` sizes each column to its own longest label instead
+                  // of stretching every column to the grid-wide maximum —
+                  // short columns (e.g. Normal, Hue) otherwise carry dead
+                  // space borrowed from the longest label in the menu.
+                  ...(cols > 1 ? { gridTemplateColumns: `repeat(${cols}, auto)` } : {}),
                   ...(maxVisibleItems
                     ? { maxHeight: `${maxVisibleItems * 32}px`, overflowY: 'auto' }
                     : {}),

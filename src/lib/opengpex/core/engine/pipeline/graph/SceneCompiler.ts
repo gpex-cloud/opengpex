@@ -59,17 +59,35 @@ export interface CompiledScene {
 }
 
 /**
- * External-effect kinds whose pixels blend against the canvas BACKDROP
- * (beneath the layer content). Phase 1 covers Drop Shadow and Outer Glow;
- * Stroke (outside/center) joins in a later phase.
+ * External-effect kinds whose pixels can blend against the canvas BACKDROP
+ * (beneath the layer content): Drop Shadow, Outer Glow, and the `outside` /
+ * `center` halves of a Stroke. A Stroke's `inside` band (and the inner half
+ * of a `center` band) blends INSIDE the layer content instead — it is a
+ * surface mix and never splits out.
  */
-/** The shadow / outer-glow union members (the Phase-1 external kinds). */
+/** The shadow / outer-glow / backdrop-strokes union members. */
 type ExternalEffectStage =
   | Extract<EffectStageDesc, { kind: 'shadow' }>
-  | Extract<EffectStageDesc, { kind: 'outer-glow' }>;
+  | Extract<EffectStageDesc, { kind: 'outer-glow' }>
+  | Extract<EffectStageDesc, { kind: 'stroke' }>;
 
 function isExternalEffectStage(stage: EffectStageDesc): stage is ExternalEffectStage {
-  return stage.kind === 'shadow' || stage.kind === 'outer-glow';
+  return stage.kind === 'shadow' || stage.kind === 'outer-glow' || stage.kind === 'stroke';
+}
+
+/**
+ * Does THIS stage blend against the backdrop (and therefore splits out)?
+ * Shadows and glows: any non-Normal mode. Strokes: a non-Normal mode AND an
+ * `outside` / `center` position — an `inside` stroke keeps its mode unused
+ * (it lives inside the content, a layer-internal surface mix), and a
+ * `source-over` stroke stays flattened into the body either way (its pixels
+ * riding the body step already stack ABOVE every split effect step, which is
+ * exactly the stroke-above-effects z-order).
+ */
+function stageBlendsAgainstBackdrop(stage: ExternalEffectStage): boolean {
+  if ((stage.blendMode ?? 'source-over') === 'source-over') return false;
+  if (stage.kind === 'stroke') return stage.position !== 'inside';
+  return true;
 }
 
 /**
@@ -79,12 +97,13 @@ function isExternalEffectStage(stage: EffectStageDesc): stage is ExternalEffectS
  * path stays).
  *
  * Z-ORDER CONTRACT: `layer.effects` is already in render-evaluation order
- * (the translator sorts by category rank: shadows first, then outer glows).
- * Within one category, instance [0] stacks ON TOP of instance [1] (each
- * later flat compose lands BENEATH the accumulated foreground), so the
- * bottom-to-top emission order is each category slice REVERSED: shadows
- * reversed, then outer glows reversed — identical stacking to the Class-A
- * flattening.
+ * (the translator sorts by category rank: shadows first, then outer glows,
+ * then strokes). Within one category, instance [0] stacks ON TOP of instance
+ * [1] (each later flat compose lands BENEATH the accumulated foreground), so
+ * the bottom-to-top emission order is each category slice REVERSED: shadows
+ * reversed, then outer glows reversed, then the backdrop-blending strokes
+ * reversed — identical stacking to the Class-A flattening
+ * (shadow < glow < stroke < content).
  *
  * Each split node is a lightweight synthetic layer: geometry fields are
  * shallow-copied from the owner (the actual draw rect comes from the
@@ -99,7 +118,7 @@ export function splitExternalEffectLayer(layer: LayerNode): readonly LayerNode[]
   if (!effects || effects.length === 0) return null;
   let backdropBlends = false;
   for (const stage of effects) {
-    if (isExternalEffectStage(stage) && (stage.blendMode ?? 'source-over') !== 'source-over') {
+    if (isExternalEffectStage(stage) && stageBlendsAgainstBackdrop(stage)) {
       backdropBlends = true;
       break;
     }
@@ -108,15 +127,22 @@ export function splitExternalEffectLayer(layer: LayerNode): readonly LayerNode[]
 
   const shadowIndices: number[] = [];
   const glowIndices: number[] = [];
+  const strokeIndices: number[] = [];
   effects.forEach((stage, index) => {
     if (stage.kind === 'shadow') shadowIndices.push(index);
     else if (stage.kind === 'outer-glow') glowIndices.push(index);
+    else if (stage.kind === 'stroke' && stageBlendsAgainstBackdrop(stage)) strokeIndices.push(index);
   });
   // Bottom-to-top: each category slice reversed (instance [0] ends up drawn
-  // last among its family), shadows beneath glows (the category ranks).
-  const orderedIndices = [...shadowIndices.reverse(), ...glowIndices.reverse()];
+  // last among its family), shadows beneath glows beneath backdrop strokes
+  // (the category ranks — the Class-A flatten order).
+  const orderedIndices = [
+    ...shadowIndices.reverse(),
+    ...glowIndices.reverse(),
+    ...strokeIndices.reverse(),
+  ];
   return orderedIndices.map((stageIndex) => {
-    // Only shadow / outer-glow indices enter `orderedIndices` above.
+    // Only shadow / outer-glow / backdrop-stroke indices enter the list above.
     const stage = effects[stageIndex] as ExternalEffectStage;
     return {
       id: `${layer.id}::eff:${stageIndex}`,
@@ -126,10 +152,10 @@ export function splitExternalEffectLayer(layer: LayerNode): readonly LayerNode[]
       height: layer.height,
       crop: layer.crop,
       dprScale: layer.dprScale,
-      clip: layer.clip,
+      clipMasked: layer.clipMasked,
       opacity: layer.opacity,
       // The stage's OWN backdrop blend — the owner layer's blendMode must
-      // not leak onto an effect step (PS semantics: independent).
+      // not leak onto an effect step (independent, the reference semantics).
       blendMode: stage.blendMode ?? 'source-over',
     };
   });

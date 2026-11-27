@@ -2,6 +2,10 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.1.2
+
+- Layers: Stroke now offers the same Blend mode picker as Drop Shadow and Outer Glow — an outside or centered stroke can blend directly with the artwork behind the layer (Multiply darkens the stroke into the background, Screen brightens it out of dark scenes), while its inner half stays attached to the content.
+
 ## 2.1.1
 
 - Layers: Drop Shadow and Outer Glow now offer a Blend mode picker that mixes the shadow or glow directly with the artwork behind the layer — Multiply deepens a shadow into the background color, Screen brightens a glow out of dark scenes, and all 16 modes are available. New effects default to Multiply (shadow) / Screen (glow); existing effects keep their current look.

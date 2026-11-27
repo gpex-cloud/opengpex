@@ -273,6 +273,29 @@ export class EffectStrokePass {
       readonly contentVisibleTexel?: TexelRect;
       /** Alpha-only cache key for cross-frame EDT reuse. */
       readonly edtAlphaKey?: string;
+      /**
+       * STANDALONE output: emit ONLY the outer ring as straight alpha into
+       * the output transient (no content colour mix). The backdrop-blend
+       * split runs this pass for an `outside` / `center` stroke with a
+       * non-Normal blend mode; the composite blends the transient against
+       * the canvas backdrop with the stroke's blend mode.
+       */
+      readonly standalone?: boolean;
+      /**
+       * BODY-INNER-ONLY output: suppress the outer ring (the split `center`
+       * stroke's body pass). Pass it together with the SAME inputs as the
+       * standalone companion — the EDT cache slot is keyed by
+       * `layerId#instanceIndex`, so the second call reuses the first call's
+       * dual-field seed map with zero duplicate JFA dispatches.
+       */
+      readonly bodyInnerOnly?: boolean;
+      /**
+       * Output transient slot key (the pool namespaces per key). Standalone
+       * ring passes MUST use their own slot (`eff:<stageIndex>`) — the
+       * default `stroke` slot is the body chain's per-frame output, and a
+       * shared slot would let the ring overwrite the body pixels.
+       */
+      readonly outputSlotKey?: string;
     },
   ): LayerTexture {
     const width = Math.max(1, p.windowTexel.w);
@@ -286,7 +309,7 @@ export class EffectStrokePass {
       edtAlphaKey: p.edtAlphaKey,
     });
 
-    const out = acquireEffectOutputTransient(ctx, p.layerId, 'stroke', width, height);
+    const out = acquireEffectOutputTransient(ctx, p.layerId, p.outputSlotKey ?? 'stroke', width, height);
     const uniform = packStrokeComposeUniform(width, height, {
       contentIsLinear: p.contentIsLinear,
       gamutId: p.gamutId,
@@ -300,6 +323,8 @@ export class EffectStrokePass {
       strokeWidthTexels: p.widthTexels,
       strokePosition: p.position,
       contentVisible: p.contentVisibleTexel,
+      standalone: p.standalone === true,
+      bodyInnerOnly: p.bodyInnerOnly === true,
     });
     const slot = ctx.bufferRing.writeSlot(uniform);
     const bindGroup = ctx.device.createBindGroup({

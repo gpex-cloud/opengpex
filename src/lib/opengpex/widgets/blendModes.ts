@@ -82,14 +82,38 @@ export const BLEND_MODE_LABEL_MAP: ReadonlyMap<string, string> = (() => {
   return map;
 })();
 
-/** ActionDropdown options with a divider between every group. */
+/**
+ * ActionDropdown options with a divider between groups. One display-order
+ * deviation from BLEND_MODE_GROUPS: the HSL band renders before the
+ * Difference band with no divider at their shared boundary. The multi-
+ * column option grid is rectangular; with the canonical order the 2-mode
+ * Difference group leaves a permanent hole in one row and the HSL group's
+ * 4th member sits alone on the last row. Rendering HSL (4 modes) followed
+ * directly by Difference (2 modes) fills exactly two rows — Luminosity
+ * stays adjacent to its own family and the 2-mode group closes the panel.
+ * Enum membership and BLEND_MODE_GROUPS (the family truth) are untouched —
+ * this is display packing only.
+ */
 export const BLEND_MODE_DROPDOWN_OPTIONS: ActionOption[] = (() => {
+  // Display order swaps the last two bands: HSL renders before Difference
+  // (see the comment above the export).
+  const difference = BLEND_MODE_GROUPS.find((g) => g.modes.some((m) => m.value === 'difference'));
+  const hsl = BLEND_MODE_GROUPS.find((g) => g.modes.some((m) => m.value === 'hue'));
+  const rest = BLEND_MODE_GROUPS.filter((g) => g !== difference && g !== hsl);
+  const displayOrder = [...rest, hsl, difference];
   const options: ActionOption[] = [];
-  for (let gi = 0; gi < BLEND_MODE_GROUPS.length; gi++) {
-    if (gi > 0) {
+  for (let gi = 0; gi < displayOrder.length; gi++) {
+    const group = displayOrder[gi];
+    if (!group) continue;
+    // The joined HSL→Difference boundary carries no divider: a divider
+    // would land mid-row (the option grid cannot express a divider between
+    // two cells of a row), and the seamless join is what packs the two
+    // groups into two full rows.
+    const joinedWithPrevious = group === difference;
+    if (gi > 0 && !joinedWithPrevious) {
       options.push({ divider: true });
     }
-    for (const mode of BLEND_MODE_GROUPS[gi].modes) {
+    for (const mode of group.modes) {
       options.push({ label: mode.label, value: mode.value });
     }
   }

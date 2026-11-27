@@ -46,6 +46,31 @@ export const STROKE_COMPOSE_WORKGROUP = 8;
 /** `flags` bit: the CONTENT texture already holds linear light (skip decode). */
 export const STROKE_COMPOSE_FLAG_CONTENT_LINEAR = 1 << 0;
 
+/**
+ * `flags` bit: STANDALONE output — emit ONLY the stroke ring as straight
+ * alpha `(stroke_color.rgb, ring_a)` without folding the content colour in.
+ * The backdrop-blend split (an `outside` / `center` stroke with a non-Normal
+ * blend mode) runs the compose once per ring half into its OWN transient; the
+ * composite then blends that transient against the canvas backdrop with the
+ * stroke's blend mode, so the pass must not mix the content pixels in.
+ * The ring alpha still subtracts the content coverage (`max(cov − a_c, 0)`):
+ * an opaque content texel must never grow ring pixels, exactly like the flat
+ * compose.
+ */
+export const STROKE_COMPOSE_FLAG_STANDALONE = 1 << 1;
+
+/**
+ * `flags` bit: BODY-INNER-ONLY output — suppress the OUTER ring entirely and
+ * keep only the inner-band mix folding into the content. The split `center`
+ * stroke runs TWO composes off one shared EDT: this body pass writes the
+ * inner half-ring into the layer's own foreground (the historical
+ * source-over content mix), while the standalone pass above writes the outer
+ * half-ring for the backdrop blend. Without this bit the body pass would
+ * duplicate the outer ring as a flat source-over band beneath the standalone
+ * ring's blend result.
+ */
+export const STROKE_COMPOSE_FLAG_BODY_INNER_ONLY = 1 << 2;
+
 /** Numeric encoding of `StrokePosition` in `StrokeComposeUniforms.stroke_position`. */
 export const STROKE_POSITION_OUTSIDE = 0;
 export const STROKE_POSITION_CENTER = 1;
@@ -107,6 +132,10 @@ export function packStrokeComposeUniform(
     readonly strokePosition: StrokePosition;
     /** Visible sub-rect in content texels (defaults to full content texture). */
     readonly contentVisible?: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+    /** Emit ONLY the outer ring as straight alpha (no content colour mix). */
+    readonly standalone?: boolean;
+    /** Suppress the outer ring (the split `center` stroke's body pass). */
+    readonly bodyInnerOnly?: boolean;
   },
 ): Float32Array {
   const out = new Float32Array(STROKE_COMPOSE_UNIFORM_FLOATS);
@@ -120,7 +149,9 @@ export function packStrokeComposeUniform(
   const vh = vis ? Math.max(0, Math.ceil(vis.y + vis.h) - vy0) : contentH;
   uints[0] = Math.max(1, width) >>> 0;
   uints[1] = Math.max(1, height) >>> 0;
-  uints[2] = opts.contentIsLinear ? STROKE_COMPOSE_FLAG_CONTENT_LINEAR : 0;
+  uints[2] = (opts.contentIsLinear ? STROKE_COMPOSE_FLAG_CONTENT_LINEAR : 0)
+    | (opts.standalone ? STROKE_COMPOSE_FLAG_STANDALONE : 0)
+    | (opts.bodyInnerOnly ? STROKE_COMPOSE_FLAG_BODY_INNER_ONLY : 0);
   uints[3] = opts.gamutId >>> 0;
   uints[4] = contentW >>> 0;
   uints[5] = contentH >>> 0;
@@ -243,10 +274,31 @@ fn cs_stroke_compose(@builtin(global_invocation_id) gid : vec3<u32>) {
     }
   }
 
+  // BODY-INNER-ONLY (the split center stroke's body pass): drop the outer
+  // half-ring so the inner band folds into the content alone — the outer
+  // half comes from the STANDALONE companion pass, which shares this same
+  // EDT result (zero duplicate JFA work).
+  if ((u.flags & ${STROKE_COMPOSE_FLAG_BODY_INNER_ONLY}u) != 0u) {
+    outer_cov = 0.0;
+  }
+
   let inside_mix = clamp(inner_cov, 0.0, 1.0) * u.stroke_color.a;
   let fg_rgb = mix(c_rgb, u.stroke_color.rgb, inside_mix);
   let fg_a = c.a;
   let outer_ring_a = max(outer_cov - fg_a, 0.0) * u.stroke_color.a;
+
+  // STANDALONE output (backdrop-blend split): emit ONLY the outer ring as
+  // straight alpha, skipping the content colour entirely. The zero-alpha
+  // guard keeps fully transparent ring texels from leaking the tint colour
+  // through unpremultiplied RGB. The composite downstream blends this
+  // transient against the canvas backdrop with the stroke's blend mode.
+  if ((u.flags & ${STROKE_COMPOSE_FLAG_STANDALONE}u) != 0u) {
+    let alone_a = outer_ring_a;
+    let alone_rgb = select(vec3<f32>(0.0), u.stroke_color.rgb, alone_a > 0.0001);
+    textureStore(dst_tex, xy, vec4<f32>(alone_rgb, alone_a));
+    return;
+  }
+
   let out_a = fg_a + outer_ring_a * (1.0 - fg_a);
   var out_rgb = (fg_rgb * fg_a + u.stroke_color.rgb * outer_ring_a * (1.0 - fg_a)) / max(out_a, 0.0001);
   if (out_a <= 0.0001) {

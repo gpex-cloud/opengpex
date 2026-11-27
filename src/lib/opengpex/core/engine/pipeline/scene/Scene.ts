@@ -682,6 +682,15 @@ export type EffectStageDesc =
     readonly widthPx: number;
     /** Placement relative to the alpha contour. */
     readonly position: 'outside' | 'center' | 'inside';
+    /**
+     * How the ring combines with its compositing target (16-mode set).
+     * `'source-over'` keeps the historical flat ring-in-source compose. Any
+     * other mode on an `outside` / `center` ring blends the ring against the
+     * canvas BACKDROP and promotes the WHOLE layer's external effects to
+     * standalone composite steps (see SceneCompiler); an `inside` ring stays
+     * layer-internal regardless of the mode.
+     */
+    readonly blendMode: LayerBlendMode;
   }
   /**
    * DROP SHADOW (P5): the content silhouette offset by `(offsetX, offsetY)`,
@@ -919,7 +928,7 @@ export interface LayerNode {
    * no-effects token.
    */
   readonly effects?: readonly EffectStageDesc[];  /** Clip to the layer below (Photoshop-style clipping mask). */
-  readonly clip?: boolean;
+  readonly clipMasked?: boolean;
   /**
    * Present-time scheduling hint: this vector source is being LIVE-EDITED
    * (mid-gesture — the stage's fast-track draft is streaming source-defining

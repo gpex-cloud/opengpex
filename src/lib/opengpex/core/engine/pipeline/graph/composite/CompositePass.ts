@@ -48,6 +48,7 @@ import { resolveSourceGamutId } from '../support/sourceGamut';
 import { resolveSourceRawIntentNibble, resolveSourceRawWhiteDomain } from '../support/sourceIntent';
 import { FILMIC_WHITE_DOMAIN } from '@opengpex/editor/core/engine/color/filmic';
 import type { ExportViewport } from '../RenderGraph';
+import type { ClipBaseSampling } from '../support/clipMasking';
 
 export interface CompositePassContext {
   readonly device: GPUDevice;
@@ -153,6 +154,23 @@ export interface DrawLayerParams {
    * must stay off.
    */
   readonly solidUniform?: boolean;
+  /**
+   * CLIP-BASE sampling for a Photoshop-style clipped layer (`layer.clipMasked`):
+   * the inverse placement of the resolved clip base (frame px → base-local
+   * unit quad) plus the base's physical UV rect, from
+   * `computeClipBaseSampling`. When present the CLIP flag packs and the
+   * fragment shader multiplies the layer's alpha by the base's coverage
+   * (texture bound at binding 5 — a solid base binds the 1×1 white formality).
+   * Absent → the layer draws unclipped.
+   */
+  readonly clipBase?: ClipBaseSampling;
+  /**
+   * The clip base's coverage texture, bound at slot 5 when `clipBase` is
+   * present (a declarative-solid base passes the 1×1 white formality — its
+   * texel alpha is 1, so the inside-gate alone forms the coverage). Ignored
+   * when `clipBase` is absent.
+   */
+  readonly clipBaseTexture?: LayerTexture;
 }
 
 /**
@@ -197,10 +215,23 @@ export function packLayerUniforms(
   /**
    * DECLARATIVE SOLID colour (working-LINEAR straight-alpha RGBA) — when
    * present the tail vec4 (floats 28..31) carries it and the fragment shader
-   * replaces the texture sample with it (flag bit 3). A solid layer never has
-   * a render intent, so the filmic_white reading of float 28 cannot collide.
+   * replaces the texture sample with it (flag bit 3). A solid layer never has a
+   * render intent, so the filmic_white reading of float 28 cannot collide.
    */
   solidColor?: readonly [number, number, number, number],
+  /**
+   * CLIP-BASE sampling (Photoshop-style clipping mask): two affine rows
+   * (ia, ib, itx / ic, id, ity) mapping the framebuffer pixel into the clip
+   * base's local unit quad, packed as the two vec4s at floats 32..39 (offsets
+   * 128..159, each row's 4th component unused), plus the base's physical UV
+   * rect at floats 40..43 (offset 160..175). Only packed when the draw carries
+   * a clip base; the shader reads them behind flag bit 1 (CLIP).
+   */
+  clipFrameToLocal?: readonly [
+    number, number, number,
+    number, number, number,
+  ],
+  clipUvRect?: readonly [number, number, number, number],
 ): void {
   const srcX = exportViewport?.sourceRect ? exportViewport.sourceRect[0] : 0;
   const srcY = exportViewport?.sourceRect ? exportViewport.sourceRect[1] : 0;
@@ -287,6 +318,25 @@ export function packLayerUniforms(
     target[30] = 0.0;
     target[31] = 0.0;
   }
+
+  // Clip-base sampling: floats 32..39 = the two affine rows (as vec4s, 4th
+  // component unused), floats 40..43 = the base's physical UV rect. Zero-filled
+  // when absent (the shader gates on flag bit 1, so the values are unread).
+  if (clipFrameToLocal) {
+    const [ia, ib, itx, ic, id, ity] = clipFrameToLocal;
+    target[32] = ia; target[33] = ib; target[34] = itx; target[35] = 0.0;
+    target[36] = ic; target[37] = id; target[38] = ity; target[39] = 0.0;
+  } else {
+    for (let i = 32; i <= 39; i++) target[i] = 0.0;
+  }
+  if (clipUvRect) {
+    target[40] = clipUvRect[0];
+    target[41] = clipUvRect[1];
+    target[42] = clipUvRect[2];
+    target[43] = clipUvRect[3];
+  } else {
+    for (let i = 40; i <= 43; i++) target[i] = 0.0;
+  }
 }
 
 /**
@@ -312,7 +362,11 @@ export class CompositePass {
 
     let flags = 0;
     if (maskTexture) flags |= LAYER_FLAG_HAS_MASK;
-    if (layer.clip) flags |= LAYER_FLAG_CLIP;
+    // CLIP flag now means "a clip base was RESOLVED and bound" — not merely
+    // `layer.clipMasked`: a clipped node with no resolvable base (e.g. the clip
+    // group's base has no resident source this frame) must not half-apply a
+    // gate whose sampling data was never packed.
+    if (params.clipBase) flags |= LAYER_FLAG_CLIP;
     // The retired bmask hard/invert/stack flag bits (3/10/11..17) are gone:
     // the combine pass bakes every record's semantics into the combined mask
     // texture, which the shader plain-multiplies.
@@ -371,6 +425,8 @@ export class CompositePass {
       vmaskU.feather,
       rawWhiteDomain ?? FILMIC_WHITE_DOMAIN,
       solidColor,
+      params.clipBase?.frameToLocal,
+      params.clipBase?.uvRect,
     );
 
     // 2. Write to BufferRing with dynamic offset
@@ -418,6 +474,16 @@ export class CompositePass {
           // vmask_flags has no HAS_VMASK_TEX bit).
           binding: 4,
           resource: vmaskTexture ? vmaskTexture.view : ctx.pipelineCache.getDefaultMaskView(),
+        },
+        {
+          // Clip base coverage. Clipped draws bind the resolved base's
+          // texture (a declarative-solid base binds its white formality);
+          // unclipped draws bind the 1×1 default white view (unread unless
+          // flags bit 1 — CLIP — is set).
+          binding: 5,
+          resource: params.clipBaseTexture
+            ? params.clipBaseTexture.view
+            : ctx.pipelineCache.getDefaultMaskView(),
         },
       ],
       label: `Layer BindGroup (${layer.id})`,

@@ -45,6 +45,9 @@ struct LayerUniforms {
   vmask_rect   : vec4<f32>,     // Offset 80 (16B) — (cx, cy, halfW, halfH) in layer-local pixel space (analytic only)
   vmask_feather: vec4<f32>,     // Offset 96 (16B) — (featherPx, maskPxW, maskPxH, _reserved)
   tail         : vec4<f32>,     // Offset 112 (16B) — dual-purpose tail: .x is the layer's per-file filmic knee domain (ColorIdentity.rawWhiteDomain; consumed only when render_intent ≠ 0); the WHOLE vec4 is the declarative solid colour (working-LINEAR straight-alpha RGBA) when flags bit 3 (SOURCE_SOLID) is set — a solid layer never carries a render intent, so the two readings cannot collide
+  clip_row0    : vec4<f32>,     // Offset 128 (16B) — CLIP-gate affine row 0 (ia, ib, itx, 0): frame px → base-local unit, lx = ia·fx + ib·fy + itx. Unread when flags bit 1 (CLIP) is clear.
+  clip_row1    : vec4<f32>,     // Offset 144 (16B) — CLIP-gate affine row 1 (ic, id, ity, 0): ly = ic·fx + id·fy + ity.
+  clip_uv      : vec4<f32>,     // Offset 160 (16B) — the base's physical UV rect (u0, v0, du, dv); the clip texture samples at clip_uv.xy + local · clip_uv.zw.
 };
 
 @group(0) @binding(0) var<uniform> layer : LayerUniforms;
@@ -52,6 +55,10 @@ struct LayerUniforms {
 @group(0) @binding(2) var layer_tex     : texture_2d<f32>;
 @group(0) @binding(3) var mask_tex      : texture_2d<f32>;
 @group(0) @binding(4) var vmask_tex     : texture_2d<f32>;
+// The clip base's coverage texture (binding 5): bound ONLY for a clipped
+// layer's draw; the 1×1 default white view otherwise (unread unless flags
+// bit 1 — CLIP — is set). See the fs_main clip block.
+@group(0) @binding(5) var clip_tex      : texture_2d<f32>;
 // The grade chain (uniform, LUT atlas, coverage array, 3D LUT) is group 1 —
 // see adjust.ts.
 // The bmask stack slots (retired bindings 5..7) are gone: the bmask combine
@@ -183,6 +190,34 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
     color.a *= vmask_alpha;
   }
 
+  // ── Clip-to-base gate (Photoshop-style clipping mask) ──
+  // flags bit 1 (CLIP): the layer clips to the nearest unclipped layer below.
+  // The CPU packs the inverse of the BASE's placement as two affine rows
+  // mapping the framebuffer pixel (clip_pos = target px) into the base's
+  // LOCAL unit quad; coverage = inside-gate × base texture alpha. A
+  // declarative-solid base binds the 1×1 white formality (alpha 1), so the
+  // inside-gate alone forms the rect coverage. The gate multiplies BEFORE
+  // opacity (pure alpha scale, commutative with the premultiply below), so
+  // the clipped rgb premultiplies down with the alpha and the member — and
+  // every split effect step that inherits the clip — fades out exactly on the
+  // base's silhouette (one shared base ⇒ no member/shadow seam).
+  if ((layer.flags & 2u) != 0u) {
+    let cl = vec2<f32>(
+      layer.clip_row0.x * in.clip_pos.x + layer.clip_row1.x * in.clip_pos.y + layer.clip_row0.z,
+      layer.clip_row0.y * in.clip_pos.x + layer.clip_row1.y * in.clip_pos.y + layer.clip_row1.z,
+    );
+    var cov = select(0.0, 1.0, cl.x >= 0.0 && cl.x <= 1.0 && cl.y >= 0.0 && cl.y <= 1.0);
+    let cuv = layer.clip_uv.xy + cl * layer.clip_uv.zw;
+    // Bitmap-extent gate (symmetric to the fg sample): outside the base's
+    // content rect the clamp-to-edge sampler would smear edge texels —
+    // transparency is the truth there.
+    if (cuv.x < 0.0 || cuv.y < 0.0 || cuv.x > 1.0 || cuv.y > 1.0) {
+      cov = 0.0;
+    }
+    cov *= textureSample(clip_tex, samp, cuv).a;
+    color.a *= cov;
+  }
+
   color.a *= layer.opacity;
 
   // Handle source premultiplication: if source was already premultiplied, don't double-multiply RGB
@@ -203,8 +238,8 @@ fn fs_main(in : VSOut) -> @location(0) vec4<f32> {
 }
 `;
 
-/** Size of LayerUniforms in bytes (128 bytes = 32 float/u32 slots, including vmask fields + the tail vec4). */
-export const LAYER_UNIFORM_BUFFER_SIZE = 128;
+/** Size of LayerUniforms in bytes (176 bytes = 44 float/u32 slots, including vmask fields, the tail vec4 and the clip-base affine rows + UV rect). */
+export const LAYER_UNIFORM_BUFFER_SIZE = 176;
 
 /**
  * `vmask_flags` bit layout. Mirrors the WGSL branch in LAYER_WGSL /

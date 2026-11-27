@@ -517,6 +517,14 @@ export class PipelineCache {
           visibility: GPUShaderStage.FRAGMENT,
           texture: { sampleType: 'float' },
         },
+        {
+          // Clip base coverage (Photoshop-style clipping mask). Unclipped
+          // layers bind the 1×1 default white view; the shader reads it only
+          // behind flags bit 1 (CLIP).
+          binding: 5,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: { sampleType: 'float' },
+        },
         // The bmask stack slots (retired bindings 5..7) are gone: the bmask
         // combine pass bakes ALL enabled records into ONE texture bound at
         // slot 3, so the layer pipeline needs no per-record slots. The grade
@@ -1539,6 +1547,14 @@ export class PipelineCache {
           // Vmask texture (polygon-baked coverage), symmetric to the
           // layer layout's binding(4). Default white view when absent/analytic.
           binding: 5,
+          visibility: GPUShaderStage.FRAGMENT,
+          texture: { sampleType: 'float' },
+        },
+        {
+          // Clip base coverage (Photoshop-style clipping mask), symmetric to
+          // the layer layout's binding(5). Unclipped layers bind the 1×1
+          // default white view; read only behind flags bit 1 (CLIP).
+          binding: 6,
           visibility: GPUShaderStage.FRAGMENT,
           texture: { sampleType: 'float' },
         },
