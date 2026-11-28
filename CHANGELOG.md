@@ -2,15 +2,22 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.2.1
+
+- Workspace: the re-canvas Fit In / Fit Out presets now size and place the crop box correctly on rotated photos, including ones rotated a quarter turn.
+- Workspace: the selection mode now survives a page reload, the same way your other tools do.
+- Effects: the effects drawer remembers which effect tab you had selected.
+
 ## 2.2.0
 
-- Brush: strokes now render in real time as you drag, even very long ones — the line stays crisp and responsive from the first pixel to the last, with no end-of-stroke hitch. Brush and marker previews are also drawn beneath your existing layers in the correct stack order.
-- Brush: calligraphic taper feels better — entries are fuller, exits sharper with a fine visible tip, tails can grow longer on the same stroke, and the tail no longer snaps or shortens when you lift the pen. Double-click a taper slider to copy the opposite end's value.
-- Brush: with Smoothing enabled, a dotted guide now shows the lag between your cursor and the actual pen tip, and releasing no longer yanks a straight line to the cursor.
-- Brush: tablet strokes no longer start with a collapsed first segment or pulse when the pressure signal drops out mid-stroke.
-- Interface: the brush panel is regrouped — everyday controls first, with Stroke & Taper and Dynamics in collapsible sections.
-- Brush: the marker tool's on-canvas preview now looks exactly like the finished shape, since both come from the same rendering engine.
-- Engine: the first stroke after opening a document now starts right away instead of pausing briefly.
+- Brush: strokes render in real time while you drag and stay fast on long strokes; brush and marker previews appear in the correct layer order.
+- Brush: calligraphic taper feels better — fuller entry, sharper exit, longer tails — and the tip no longer changes when you lift the pen. Double-click a taper slider to match the other end.
+- Brush: with Smoothing on, a dotted guide shows the cursor-to-pen lag, and lifting the pen no longer snaps a straight line.
+- Brush: tablet strokes no longer start collapsed or pulse when the pressure signal drops.
+- Interface: the brush panel is regrouped, with collapsible Stroke & Taper and Dynamics sections.
+- Workspace: your active tool survives a page reload.
+- Brush: the marker preview now looks exactly like the finished shape.
+- Engine: the first stroke after opening a document starts right away.
 
 ## 2.1.6
 

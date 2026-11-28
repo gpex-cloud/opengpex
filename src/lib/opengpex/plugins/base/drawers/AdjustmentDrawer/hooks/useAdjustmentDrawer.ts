@@ -75,16 +75,9 @@ export function useHotTailGrade(category: GradeCategory): {
  * which sub-panel to render and whether to show "no active layer" placeholders.
  *
  * The opening panel is resolved as follows:
- *   1. The live `activeGradingToolSignal` value once the user has explicitly
- *      picked a panel this session (the signal is seeded null at registration,
- *      so null/undefined = "no pick yet").
- *   2. Otherwise the `openWithBasic` preference (`pluginConfig`, editable from
- *      the drawer's settings): true lands on the Basic panel, false on the
- *      Presets (filter) wall — `DEFAULT_GRADING_TOOL`.
- *
- * Every reload reseeds the signal to null, so the preference governs the
- * fresh-session opening panel while explicit picks win for the rest of the
- * session (across drawer open/close).
+ *   1. The live `activeGradingToolSignal` value once picked this session.
+ *   2. Otherwise the persisted `lastGradingTool` in `pluginConfig`.
+ *   3. Otherwise `DEFAULT_GRADING_TOOL` (`'presets'`).
  */
 export function useAdjustmentDrawer() {
   const { activeGradingToolSignal } = usePluginSignals<AdjustmentDrawerSignalsMap>();

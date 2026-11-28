@@ -546,25 +546,37 @@ export function circumscribedRectSize(
 export function inscribedRectSize(
   w: number, h: number, thetaDeg: number,
 ): { w: number; h: number } {
-  // Fold into [0, 90) — the inscribed problem is symmetric under the
-  // complementary angle with the dims swapped.
-  const t = ((thetaDeg % 90) + 90) % 90;
+  // Normalize the angle into [0, 90). A rotation past 90 degrees presents the
+  // SAME containment geometry as the complementary angle with the rect dims
+  // swapped (rotating W×H by 90°+ε covers exactly what H×W rotated by ε
+  // covers), so fold the quadrant into the dims instead of the angle — the
+  // constraint system below must always describe a rect tilted by t ∈ [0, 90)
+  // from the upright orientation of the dims it is given.
+  let W = w;
+  let H = h;
+  let t = ((thetaDeg % 180) + 180) % 180;
+  if (t >= 90) {
+    t -= 90;
+    const sw = W;
+    W = H;
+    H = sw;
+  }
   const r = (t * Math.PI) / 180;
   const c = Math.cos(r), s = Math.sin(r);
-  if (t < 1e-9) return { w, h };
+  if (t < 1e-9) return { w: W, h: H };
 
   const fits = (x: number, y: number): boolean =>
     x > 0 && y > 0 && isFinite(x) && isFinite(y)
-    && x * c + y * s <= w / 2 + 1e-7
-    && x * s + y * c <= h / 2 + 1e-7;
+    && x * c + y * s <= W / 2 + 1e-7
+    && x * s + y * c <= H / 2 + 1e-7;
 
   const candidates: Array<{ x: number; y: number }> = [];
   const d = Math.cos(2 * r);
   if (Math.abs(d) > 1e-9) {
-    candidates.push({ x: (w * c - h * s) / (2 * d), y: (h * c - w * s) / (2 * d) });
+    candidates.push({ x: (W * c - H * s) / (2 * d), y: (H * c - W * s) / (2 * d) });
   }
-  candidates.push({ x: h / (4 * s), y: h / (4 * c) });
-  candidates.push({ x: w / (4 * c), y: w / (4 * s) });
+  candidates.push({ x: H / (4 * s), y: H / (4 * c) });
+  candidates.push({ x: W / (4 * c), y: W / (4 * s) });
 
   let best = { x: 0, y: 0 };
   for (const cand of candidates) {

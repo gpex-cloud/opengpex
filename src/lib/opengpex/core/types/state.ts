@@ -58,6 +58,15 @@ export interface InteractionState {
     duration?: number;
   } | null;
   signals: Record<string, InteractionSignalValue>;
+  /**
+   * Persistable snapshot of the currently armed tool, written by whichever
+   * plugin owns the tool selection (core never knows which signal identifies
+   * "the tool" — the plugin supplies its own signal key as DATA). The storage
+   * layer mirrors this into `ui.activeTool` at save time and HYDRATE seeds it
+   * back, so the armed tool survives a page reload while the rest of
+   * `interaction` stays session runtime state.
+   */
+  activeTool?: { mode: InteractionMode; signalKey?: string; signalValue?: string } | null;
 }
 
 export interface UIConfig {
@@ -76,6 +85,12 @@ export interface UIConfig {
    */
   drawerWidthMode?: 'normal' | 'compact';
 
+  /**
+   * Persisted tool selection (mirrored from `interaction.activeTool` at save
+   * time) so the armed tool survives a page reload. HYDRATE seeds it back
+   * generically: mode + signals[signalKey] = signalValue.
+   */
+  activeTool?: { mode: InteractionMode; signalKey?: string; signalValue?: string };
 }
 
 export type SupportedImageFormat = 'jpeg' | 'png' | 'gif' | 'webp' | 'heic' | 'avif' | 'svg' | 'eps' | 'bmp' | 'raw' | 'unknown';

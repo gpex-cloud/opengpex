@@ -26,7 +26,6 @@ import {
 } from "@opengpex/editor/core/context";
 import ComboInput from "@opengpex/editor/widgets/ComboInput";
 import { Check } from "lucide-react";
-import { getStraightenPivot } from "@opengpex/editor/core/state/volatile/straighten";
 import { ClipOptionsAPI } from "../../../options/ClipOptions/protocols";
 import { asLocalRect } from "@opengpex/editor/core/types";
 
@@ -126,36 +125,46 @@ export function ReCanvasBar() {
     Math.round(clipBox.w) === activeFrame.canvas.w
     && Math.round(clipBox.h) === activeFrame.canvas.h;
 
-  // ─── Straighten fit presets ("Fit In" / "Fit Out") ───────────────────────
-  // Offered only when a content transform is actually in effect (the frame's
-  // straighten history accumulator is non-zero): at zero angle inscribed ==
-  // circumscribed == the canvas itself, so both presets would be no-ops.
-  // "Fit In" sizes the crop box to the largest upright rect the rotated
-  // original still covers (the output loses NO visible content and carries
-  // no transparent corners); "Fit Out" sizes it to the rotated original's
-  // upright bounding box (nothing is lost, transparent corners ship). The
-  // box is centered on the ROTATED original's center — the canvas center
-  // carried through the pivot map — not on the pivot itself (the two differ
-  // whenever an effective crop box puts the pivot off the canvas center).
-  // Either preset only SETS the draggable box — APPLY stays the authority
-  // (the crop-box model of §2.4 in the A3 plan: the box is always the
-  // user's to adjust).
-  const straightenDeg = Number(activeFrame.extra?.straightenTotalDeg ?? 0);
-  const canOfferFitPresets = Math.abs(straightenDeg) >= 0.5;
+  // ─── Fit presets ("Fit In" / "Fit Out") ──────────────────────────────────
+  // The presets are computed from the BASE LAYER POSE — the geometric ground
+  // truth of where the original content sits on the canvas — never from the
+  // display-only straighten accumulator or the canvas dims. The layer's
+  // `rotation` folds in EVERY orientation source (±90 canvas transforms via
+  // the D4 composition, free-angle straighten, user gizmo turns), and its
+  // `bounding` is the content-local size, so the rotated original on canvas
+  // is exactly: center (cx, cy) in POSE space, size bounding, angle
+  // rotation. Pose space shares the canvas axes but its ORIGIN is the
+  // CANVAS CENTER, while the clip box rect lives in top-left canvas
+  // space — the center must be re-based (+canvas/2) before use. Sizing the
+  // presets off the canvas dims instead goes wrong the moment the canvas no
+  // longer coincides with the content (any prior re-canvas apply, crop, or a
+  // ±90 canvas transform mixing with straighten — the box then comes out
+  // transposed, a full 90 degrees off).
+  // "Fit In" sizes the box to the largest upright rect the rotated original
+  // still covers (the output loses NO visible content and carries no
+  // transparent corners); "Fit Out" sizes it to the rotated original's
+  // upright bounding box (nothing is lost, transparent corners ship).
+  // Mirroring (flip) never changes a rect's coverage geometry, so the flip
+  // flags need no handling here. Either preset only SETS the draggable box —
+  // APPLY stays the authority (the box is always the user's to adjust).
+  const baseLayer = activeFrame.layers.byId[activeFrame.layers.order[0]];
+  const fitAngleDeg = baseLayer
+    ? baseLayer.rotation
+    : Number(activeFrame.extra?.straightenTotalDeg ?? 0);
+  const fitDims = baseLayer ? baseLayer.bounding : activeFrame.canvas;
+  const fitCenter = baseLayer
+    ? { x: activeFrame.canvas.w / 2 + baseLayer.cx, y: activeFrame.canvas.h / 2 + baseLayer.cy }
+    : { x: activeFrame.canvas.w / 2, y: activeFrame.canvas.h / 2 };
+  const foldedFitDeg = ((fitAngleDeg % 180) + 180) % 180;
+  const canOfferFitPresets = Math.min(foldedFitDeg, 180 - foldedFitDeg) >= 0.5;
   const applyFitPreset = (kind: 'inside' | 'all') => {
-    const pivot = getStraightenPivot(activeFrame);
-    const r = (straightenDeg * Math.PI) / 180;
-    const dcx = activeFrame.canvas.w / 2 - pivot.x;
-    const dcy = activeFrame.canvas.h / 2 - pivot.y;
-    const centerX = pivot.x + dcx * Math.cos(r) - dcy * Math.sin(r);
-    const centerY = pivot.y + dcx * Math.sin(r) + dcy * Math.cos(r);
     const size = kind === 'inside'
-      ? geometry.transform.inscribedRectSize(activeFrame.canvas.w, activeFrame.canvas.h, straightenDeg)
-      : geometry.transform.circumscribedRectSize(activeFrame.canvas.w, activeFrame.canvas.h, straightenDeg);
+      ? geometry.transform.inscribedRectSize(fitDims.w, fitDims.h, fitAngleDeg)
+      : geometry.transform.circumscribedRectSize(fitDims.w, fitDims.h, fitAngleDeg);
     actions.updateFrame(activeFrame.id, {
       canvasClipBox: {
         ...activeFrame.canvasClipBox,
-        rect: asLocalRect({ x: centerX - size.w / 2, y: centerY - size.h / 2, w: size.w, h: size.h }),
+        rect: asLocalRect({ x: fitCenter.x - size.w / 2, y: fitCenter.y - size.h / 2, w: size.w, h: size.h }),
       },
     });
   };

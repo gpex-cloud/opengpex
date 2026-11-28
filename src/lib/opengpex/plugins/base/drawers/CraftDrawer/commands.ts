@@ -41,13 +41,21 @@ function activateCraft(ctx: EditorContextValue, craft: CraftType) {
   // restore is a sub-mode of eraser, so clicking eraser while in restore also deactivates
   if (current === craft || (craft === 'eraser' && current === 'restore')) {
     ctx.scoped!.setSignal(P.SIGNAL_ACTIVE_CRAFT, null);
-    ctx.actions.setInteraction({ interactionMode: 'pan' });
+    // Clear the persistable tool snapshot too — pan must not survive a
+    // reload as the previously armed tool.
+    ctx.actions.setInteraction({ interactionMode: 'pan', activeTool: null });
     return;
   }
 
   // Activate target tool
   ctx.scoped!.setSignal(P.SIGNAL_ACTIVE_CRAFT, craft);
-  ctx.actions.setInteraction({ interactionMode: 'craft' });
+  // The persistable snapshot carries this plugin's OWN signal key as DATA
+  // (see InteractionState.activeTool) — the storage layer and the hydrate
+  // replay never name this plugin, they just echo the triple back.
+  ctx.actions.setInteraction({
+    interactionMode: 'craft',
+    activeTool: { mode: 'craft', signalKey: P.CraftDrawerAPI.signals.activeCraft, signalValue: craft },
+  });
 
   // NOTE: activating the marker tool does NOT re-arm `activeMarkerKind` from
   // the selected layer. The armed kind is the user's latest intent (panel click
@@ -62,7 +70,7 @@ function activateCraft(ctx: EditorContextValue, craft: CraftType) {
 
 function deactivate(ctx: EditorContextValue) {
   ctx.scoped!.setSignal(P.SIGNAL_ACTIVE_CRAFT, null);
-  ctx.actions.setInteraction({ interactionMode: 'pan' });
+  ctx.actions.setInteraction({ interactionMode: 'pan', activeTool: null });
 }
 
 /**

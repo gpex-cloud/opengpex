@@ -52,7 +52,7 @@
  * tab resolution, header, panel routing).
  */
 
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "framer-motion";
 import { Eye, EyeOff, Plus, RotateCcw as ResetIcon, Trash2 } from "lucide-react";
 import { EfxIcon } from "../icon";
@@ -88,6 +88,7 @@ import {
   isVirtualTabId,
   virtualTabCategory,
   virtualTabId,
+  EffectsDrawerAPI,
   type EffectTabDef,
   type EffectTabId,
 } from "../protocols";
@@ -162,7 +163,7 @@ function buildRail(chain: readonly EffectInstance[]): RailTab[] {
 // ─── LayerEffectsDrawerComponent ─────────────────────────────────────────────
 
 export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawerComponent() {
-  const { activeLayer } = useEditorState();
+  const { activeLayer, state } = useEditorState();
   const { actions } = useEditorServices();
   const {
     applyEffectPatchCmd,
@@ -196,6 +197,37 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
     category: string;
     nonce: number;
   } | null>(null);
+  // Session-start restore (AdjustmentDrawer `lastGradingTool` precedent): the
+  // last tab the user picked is persisted in pluginConfig, and ONCE per
+  // session — when the first active layer becomes available — it seeds the
+  // override so a reload lands back on the previously selected effect.
+  // In-session behavior is untouched afterwards (the ref makes this a
+  // one-shot; per-layer scope is enforced by the layerId match in the
+  // resolver below, and a persisted id whose instance/layer disappeared is
+  // already handled by the exact-then-category fallback of `overrideTab`).
+  // The seed stamps nonce 0 — at boot the jump signal is null, so jumpNonce
+  // is 0 and the override resolves; a later fresh jump still supersedes it.
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (seededRef.current || !activeLayer) return;
+    seededRef.current = true;
+    const persisted = (
+      state.pluginConfig[EffectsDrawerAPI.uid] as
+        | { lastSelectedEffect?: { layerId?: string; id?: string; category?: string } }
+        | undefined
+    )?.lastSelectedEffect;
+    if (
+      persisted &&
+      persisted.layerId === activeLayer.id &&
+      typeof persisted.id === 'string' && persisted.id &&
+      typeof persisted.category === 'string' && persisted.category
+    ) {
+      setOverride({ layerId: persisted.layerId, id: persisted.id, category: persisted.category, nonce: 0 });
+    }
+    // Runs once per session — the seed is boot-time state restoration, not a
+    // reaction to layer switching.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeLayer?.id]);
   const selectTab = (id: string, category?: string) => {
     if (!activeLayer) return;
     const resolvedCategory =
@@ -204,6 +236,12 @@ export const LayerEffectsDrawerComponent = React.memo(function LayerEffectsDrawe
         ? virtualTabCategory(id)
         : rail.find((t) => t.id === id)?.category ?? activeCategory);
     setOverride({ layerId: activeLayer.id, id, category: resolvedCategory, nonce: jumpNonce });
+    // Persist the pick (AdjustmentDrawer precedent): signal-free UI memory in
+    // pluginConfig — the prune pass keeps it as a genuine override, undo is
+    // unaffected, and the next session restores it (see the seed above).
+    actions.updatePluginConfig(EffectsDrawerAPI.uid, {
+      lastSelectedEffect: { layerId: activeLayer.id, id, category: resolvedCategory },
+    });
   };
   // Resolve the user's manual override when it belongs to the active layer and
   // hasn't been superseded by a newer jump signal:

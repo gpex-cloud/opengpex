@@ -367,10 +367,8 @@ export type ActiveGradingTool = GradingTool;
  * `'presets'` (the one-click filter wall) is the entry surface: amateur users
  * open the drawer to make a photo look better with ONE click, so the preset
  * grid fronts the drawer. Manual panels (basic/curves/levels/...) remain one
- * header-icon away for pixel-precise tonal control. Previously `'basic'`
- * (Photoshop / Lightroom onboarding convention). Users who prefer landing on
- * the manual Basic panel can flip the `openWithBasic` preference in the
- * drawer's settings (gear button in the header).
+ * header-icon away for pixel-precise tonal control. Once the user picks any
+ * other sub-panel, `lastGradingTool` remembers it across reloads.
  */
 export const DEFAULT_GRADING_TOOL: GradingTool = 'presets';
 
@@ -384,11 +382,11 @@ export const DEFAULT_GRADING_TOOL: GradingTool = 'presets';
  */
 export interface AdjustmentDrawerConfig {
   /**
-   * When true, the drawer opens on the manual Basic panel instead of the
-   * Presets (filter) wall. Default false — the one-click filter wall stays
-   * the entry surface. Editable from the drawer's settings panel.
+   * Last sub-panel explicitly selected by the user. Persists via `pluginConfig`
+   * so reloads land back on whichever panel the user was last using (first
+   * open defaults to `DEFAULT_GRADING_TOOL`).
    */
-  openWithBasic?: boolean;
+  lastGradingTool?: ActiveGradingTool;
   /**
    * User-saved filter presets ("save current look"). Persists via
    * `pluginConfig` so saved looks survive editor reloads. Capped at
@@ -400,16 +398,15 @@ export interface AdjustmentDrawerConfig {
 /**
  * Single source of truth for resolving the currently visible grading panel.
  *
- * When the session signal is `null`/`undefined` (user has not explicitly
- * picked a panel since reload), the `openWithBasic` preference governs the
- * opening panel; otherwise the explicit signal pick wins. Shared by both the
- * UI hook (`useAdjustmentDrawer`) and commands (`resetActivePanel`).
+ * Explicit session signal wins first, then the persisted `lastGradingTool`
+ * from `pluginConfig`, and finally `DEFAULT_GRADING_TOOL` (`'presets'`) on a
+ * fresh session. Shared by both `useAdjustmentDrawer` and `resetActivePanel`.
  */
 export function resolveActiveGradingTool(
   signalTool: ActiveGradingTool | null | undefined,
   config: AdjustmentDrawerConfig | undefined,
 ): ActiveGradingTool {
-  return signalTool ?? (config?.openWithBasic ? 'basic' : DEFAULT_GRADING_TOOL);
+  return signalTool ?? config?.lastGradingTool ?? DEFAULT_GRADING_TOOL;
 }
 
 

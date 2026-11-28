@@ -55,16 +55,13 @@ import type {
 } from './protocols';
 
 /**
- * Sets the active grading tool on the shared signal (so other plugins can
- * observe it via `usePluginSignals`).
- *
- * Kept as a signal (not pluginConfig) because switching panels must trigger
- * UI re-renders synchronously — pluginConfig by itself doesn't force an
- * immediate re-render of subscribers. The opening panel is governed by the
- * `openWithBasic` preference instead of a remembered last tool.
+ * Sets the active grading tool on the shared signal (for synchronous UI
+ * updates) and persists `lastGradingTool` in `pluginConfig` so reloads land
+ * back on the last-selected sub-panel.
  */
 function setActiveTool(ctx: EditorContextValue, tool: GradingTool) {
   ctx.scoped!.setSignal(P.SIGNAL_ACTIVE_GRADING_TOOL, tool);
+  ctx.actions.updatePluginConfig(`${P.PLUGIN_AUTHOR}.${P.PLUGIN_ID}`, { lastGradingTool: tool });
 }
 
 /**

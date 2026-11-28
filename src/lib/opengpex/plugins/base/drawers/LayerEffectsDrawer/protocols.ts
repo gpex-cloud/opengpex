@@ -66,8 +66,17 @@ export const SIGNAL_ACTIVE_EFFECT_INSTANCE = 'signal.active_effect_instance';
  * resolution tell a fresh jump apart from a stale one without effects.
  */
 export const EffectsDrawerAPI = {
-  /** Runtime plugin uid (`<author>.<id>`) — the activeSidebarIds entry. */
+  /** Runtime plugin uid (`<author>.<id>`) — the activeSidebarIds entry AND
+   * the pluginConfig storage key for the drawer's persisted UI preferences. */
   uid: `${PLUGIN_AUTHOR}.${PLUGIN_ID}`,
+  /**
+   * pluginConfig under {@link EffectsDrawerAPI.uid} carries:
+   * `lastSelectedEffect?: { layerId, id, category }` — the last tab the user
+   * picked, persisted so a reload re-opens the drawer on the same effect
+   * (AdjustmentDrawer `lastGradingTool` precedent: signal-free UI memory in
+   * pluginConfig; validated against the active layer's chain at read time,
+   * exact-then-category fallback when the instance disappeared).
+   */
   signals: {
     jump: `${PLUGIN_AUTHOR}.${PLUGIN_ID}.${SIGNAL_ACTIVE_EFFECT_INSTANCE}`,
   },

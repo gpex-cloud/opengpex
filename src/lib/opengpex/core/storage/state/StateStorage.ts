@@ -204,7 +204,22 @@ export class StateStorage {
         pluginConfig: initialConfigs
           ? prunePluginConfig(state.pluginConfig, initialConfigs)
           : state.pluginConfig,
-        ui: state.ui,
+        // Persist the armed-tool snapshot only when the live mode still
+        // agrees with it: other code paths switch mode directly (clip, pan
+        // escapes) without clearing the plugin-written snapshot, and a stale
+        // snapshot must not re-arm a tool over what the user was last in.
+        // Pure equality — no mode literal in this layer. The presence check
+        // guards synthetic/partial state fixtures that omit `interaction`
+        // entirely (undefined === undefined would otherwise pass and the
+        // inner read would throw, aborting the whole save).
+        ui: {
+          ...state.ui,
+          activeTool:
+            state.interaction?.activeTool &&
+            state.interaction.activeTool.mode === state.interaction.interactionMode
+              ? state.interaction.activeTool
+              : undefined,
+        },
         isLoaded: true
       };
 

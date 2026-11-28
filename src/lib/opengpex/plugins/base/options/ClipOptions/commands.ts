@@ -46,7 +46,7 @@ import type { ClipTool } from './protocols';
  * record, and with no undecided session it is a zero-cost no-op.)
  */
 export function exitClipMode(ctx: EditorContextValue): void {
-  ctx.actions.setInteraction({ interactionMode: 'pan' });
+  ctx.actions.setInteraction({ interactionMode: 'pan', activeTool: null });
 }
 
 /**
@@ -141,7 +141,7 @@ function activateClipTool(
   const current = (ctx.activeFrame?.latestClipTool as ClipTool | undefined) ?? 'rect';
   const tool = resolveTool(current, wasInClip);
   if (!wasInClip) {
-    ctx.actions.setInteraction({ interactionMode: 'clip' });
+    ctx.actions.setInteraction({ interactionMode: 'clip', activeTool: { mode: 'clip' } });
   }
   ctx.actions.executeCommand(
     `${P.PLUGIN_AUTHOR}.${P.PLUGIN_ID}.${P.CMD_SET_CLIP_TOOL}`,
@@ -180,7 +180,11 @@ export const CLIP_OPTIONS_COMMANDS = {
       if (ctx.scoped?.getSignal(P.SIGNAL_RE_CANVAS)) return;
 
       const inClip = ctx.state.interaction.interactionMode === 'clip';
-      ctx.actions.setInteraction({ interactionMode: inClip ? 'pan' : 'clip' });
+      ctx.actions.setInteraction(
+        inClip
+          ? { interactionMode: 'pan', activeTool: null }
+          : { interactionMode: 'clip', activeTool: { mode: 'clip' } },
+      );
     },
     // Space re-rebound (2026-10-26 ruling): Space toggles selection mode and
     // enters with the frame's last-used tool (latestClipTool is unchanged by

@@ -17,7 +17,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { EditorData, EditorAction, Frame, Layer, FrameHistoryState, GlobalHistoryState, HistoryStep } from '@opengpex/editor/core/types';
+import { EditorData, EditorAction, Frame, Layer, FrameHistoryState, GlobalHistoryState, HistoryStep, InteractionState, UIConfig } from '@opengpex/editor/core/types';
 import { produceWithPatches, enablePatches, applyPatches, Patch } from 'immer';
 import { reconcileFrameState, mergeLiveCameraForFrame } from './reducer-utils';
 
@@ -67,6 +67,31 @@ export const initialState: EditorData = {
   },
 };
 
+/**
+ * Re-seed the armed tool from its persisted mirror (`ui.activeTool`) during
+ * hydration. Generic by design: the tool-owning plugin supplies its signal
+ * key/value as DATA (or omits both for a pure mode switch), so this reducer
+ * never names plugin vocabulary. Structural guards only — a half-armed
+ * snapshot (signalKey without signalValue or vice versa) is dropped entirely.
+ */
+function seedPersistedTool(
+  interaction: InteractionState,
+  activeTool: UIConfig['activeTool'],
+): InteractionState {
+  if (!activeTool) return interaction;
+  const hasKey = typeof activeTool.signalKey === 'string' && activeTool.signalKey.length > 0;
+  const hasVal = typeof activeTool.signalValue === 'string' && activeTool.signalValue.length > 0;
+  if (hasKey !== hasVal) return interaction;
+
+  return {
+    ...interaction,
+    interactionMode: activeTool.mode,
+    activeTool,
+    ...(hasKey && hasVal
+      ? { signals: { ...interaction.signals, [activeTool.signalKey!]: activeTool.signalValue! } }
+      : {}),
+  };
+}
 
 export function editorReducer(state: EditorData, action: EditorAction): EditorData {
   switch (action.type) {
@@ -842,6 +867,7 @@ export function editorReducer(state: EditorData, action: EditorAction): EditorDa
         history: finalHistory,
         isLoaded: true,
         confirm: null,
+        interaction: seedPersistedTool(state.interaction, payload.ui?.activeTool),
       };
     }
 
