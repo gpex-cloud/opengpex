@@ -20,10 +20,10 @@
 'use client';
 
 import { EditorContextValue, EditorCommand, Layer, asLocalShape, VolatileState } from '@opengpex/editor/core/types';
-import { LayerFactory } from '@opengpex/editor/core/layer';
 import { LayerUtils } from '@opengpex/editor/core/layer/utils';
 import type { TextLayerData } from '@opengpex/editor/core/types/models';
 import { normalizeBoxMode } from '@opengpex/editor/core/types/models';
+import { resolveAutoGroupPlacement } from '../../drawers/CraftDrawer/protocols';
 import { measureTextBounding, measuredBoxesDiffer } from './hooks/measuring';
 import { affectsTextStyleLayout, type TextStyleField } from './hooks/styling';
 import { compensateCenterX, compensateCenterY } from './geometry';
@@ -45,12 +45,18 @@ const placeCommand: EditorCommand<{ frameId: string; layer: Layer }, void> = {
     const frame = ctx.state.frames.byId[payload.frameId];
     if (!frame) return;
 
-    // Plain layer, inserted directly above the active layer
-    // (getInsertIndexAbove handles group / hostId targets). Falls back to
-    // append-on-top (undefined index → reducer push) when there is no active layer.
-    const below = LayerFactory.resolveActiveHostLayer(frame);
-    const insertAt = LayerFactory.getInsertIndexAbove(frame, below?.id);
-    ctx.layers.factory.addLayer(payload.frameId, payload.layer, insertAt);
+    // Craft auto grouping (may also create the group container for a second
+    // consecutive member). All indices come precomputed from the same frame
+    // snapshot — do NOT recompute against the frame after the first addLayer.
+    const placement = resolveAutoGroupPlacement(frame);
+    if (placement.group) {
+      ctx.layers.factory.addLayer(payload.frameId, placement.group.layer, placement.group.insertAt);
+    }
+    if (placement.hostPatch) {
+      ctx.actions.updateLayer(payload.frameId, placement.hostPatch.layerId, { groupId: placement.hostPatch.groupId });
+    }
+    if (placement.groupId) payload.layer.groupId = placement.groupId;
+    ctx.layers.factory.addLayer(payload.frameId, payload.layer, placement.insertAt);
     // Establish the history checkpoint at the PLACED state, recording the
     // creation as its own undo step. Everything the session does on top of it
     // (typing, panel styling) then baselines against a valid checkpoint — the

@@ -753,6 +753,7 @@ export interface CubicSegment {
 export type LayerSourceTool =
   | 'image'    // Plain imported bitmap
   | 'marker'   // Marker tool (rect/ellipse/arrow annotation)
+  | 'basic-text' // Basic text-box tool (its only text producer today; family naming reserves 'text-path', 'text-vertical', ...)
   | 'brush'    // Vector brush stroke
   | 'eraser'   // Legacy eraser bake
   | 'restore'  // Legacy restore bake
@@ -826,6 +827,8 @@ export interface Layer {
     sourceLayerId?: string;
     /** The hole mask id on the source layer that corresponds to this cut fragment (only cut fragments have this). */
     assocMaskId?: string;
+    /** Marks a `type:'group'` layer as a craft-family auto group ('craft' = created by the CraftDrawer auto-grouping facility). */
+    autoGroup?: 'craft';
     [key: string]: unknown;
   };
 

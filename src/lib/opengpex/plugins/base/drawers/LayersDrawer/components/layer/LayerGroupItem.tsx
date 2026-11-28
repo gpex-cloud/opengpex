@@ -26,7 +26,9 @@ import {
   Eye, EyeOff,
   Lock, Unlock, Folder,
   Trash2, Ungroup, MoreVertical,
+  ImageIcon,
 } from "lucide-react";
+import { useEditorServices } from "@opengpex/editor/core/context";
 import { DragControls } from "framer-motion";
 import { usePluginCommands } from "@opengpex/editor/core/context";
 import ActionButton from "@opengpex/editor/widgets/ActionButton";
@@ -74,16 +76,23 @@ function useGroupControls({ group, childCount, activeFrameId, onCollapseAnimatio
   const rename = (name: string) =>
     renameCmd?.execute({ frameId: activeFrameId, layerId: group.id, name });
 
+  const { actions } = useEditorServices();
+
   // Ungroup only makes sense with members — an empty group is removed via
-  // Delete Group.
+  // Delete Group. Rasterize flattens every visible member into one bitmap
+  // layer named after the group (hidden members are discarded).
   const menuOptions: ActionOption[] = [
     ...(childCount > 0
-      ? [{ label: "Ungroup", value: "ungroup", icon: <Ungroup size={12} /> }]
+      ? [
+          { label: "Ungroup", value: "ungroup", icon: <Ungroup size={12} /> },
+          { label: "Rasterize", value: "rasterize", icon: <ImageIcon size={12} /> },
+        ]
       : []),
     { label: "Delete Group", value: "delete", icon: <Trash2 size={12} />, variant: "danger" },
   ];
   const handleMenuSelect = (val: string) => {
     if (val === "ungroup") ungroupLayersCmd?.execute({ groupId: group.id });
+    else if (val === "rasterize") actions.adv.layer.merge.rasterizeGroup.execute({ groupId: group.id });
     else if (val === "delete") removeCmd?.execute({ frameId: activeFrameId, layerId: group.id });
   };
   return {
@@ -116,10 +125,10 @@ function GroupMenu({
   onMenuSelect: (val: string) => void;
 }) {
   return (
-    <div className="relative ml-0.5">
+    <div className="relative">
       <ActionDropdown
         trigger={(isOpen) => (
-          <button className={`w-6 h-6 flex items-center justify-center rounded transition-colors outline-none cursor-pointer focus:outline-none border border-transparent ${isOpen ? "bg-[var(--bg-stage)] border-[var(--border-subtle)]" : "hover:bg-[var(--bg-stage)] hover:border-[var(--border-subtle)]"}`}>
+          <button className={`w-5 h-6 flex items-center justify-center rounded-md transition-colors outline-none cursor-pointer focus:outline-none border border-transparent ${isOpen ? "bg-[var(--bg-stage)] border-[var(--border-subtle)]" : "hover:bg-[var(--bg-stage)] hover:border-[var(--border-subtle)]"}`}>
             <MoreVertical size={12} className={`transition-colors ${isOpen ? "text-[var(--text-main)]" : "text-[var(--text-muted)] hover:text-[var(--text-main)]"}`} />
           </button>
         )}
@@ -178,19 +187,21 @@ export const GroupCollapsedRow = React.memo(
         />
         {/* Blank stretch between the name and the row actions — click to
             expand. Hit area covers the leftover horizontal space so the
-            gesture is easy to land. A hairline mirrors the cap line's rule
-            so both group states share the same visual language. */}
+            gesture is easy to land. A DOUBLE hairline mirrors the cap line's
+            rule so both group states share the same visual language (the
+            twin rule reads as a distinct affordance, not a stray divider). */}
         <div
           onClick={toggleCollapse}
           title="Expand group"
-          className="flex-1 min-w-0 self-stretch cursor-pointer flex items-center"
+          className="flex-1 min-w-0 self-stretch cursor-pointer flex flex-col justify-center gap-[2px]"
         >
+          <div className="w-full h-px bg-amber-500/20" />
           <div className="w-full h-px bg-amber-500/20" />
         </div>
         <span className="text-[10px] font-bold text-[var(--text-muted)] tabular-nums shrink-0 leading-none">{`×${childCount}`}</span>
         <div className="flex items-center gap-0 opacity-60 group-hover:opacity-100 transition-opacity shrink-0">
-          <ActionButton onClick={toggleVisibility} icon={group.visible ? <Eye size={12} /> : <EyeOff size={12} className="text-rose-500" />} variant="glass" size="sm" className={`w-6 h-6 ${group.visible ? "" : "text-[var(--text-muted)]"}`} />
-          <ActionButton onClick={toggleLock} icon={group.locked ? <Lock size={12} className="text-amber-500" /> : <Unlock size={12} />} variant="glass" size="sm" className={`w-6 h-6 ${group.locked ? "" : "text-[var(--text-muted)]"}`} />
+          <ActionButton plain onClick={toggleVisibility} icon={group.visible ? <Eye size={12} /> : <EyeOff size={12} className="text-rose-500" />} size="sm" className={`w-5 h-6 ${group.visible ? "" : "text-[var(--text-muted)]"}`} />
+          <ActionButton plain onClick={toggleLock} icon={group.locked ? <Lock size={12} className="text-amber-500" /> : <Unlock size={12} />} size="sm" className={`w-5 h-6 ${group.locked ? "" : "text-[var(--text-muted)]"}`} />
           <GroupMenu menuOptions={menuOptions} onMenuSelect={handleMenuSelect} />
         </div>
       </div>
@@ -263,8 +274,9 @@ export const GroupCapLine = React.memo(
         <div
           onClick={toggleCollapse}
           title="Collapse group"
-          className="flex-1 self-stretch cursor-pointer flex items-center"
+          className="flex-1 self-stretch cursor-pointer flex flex-col justify-center gap-[2px]"
         >
+          <div className="w-full h-px bg-amber-500/20" />
           <div className="w-full h-px bg-amber-500/20" />
         </div>
         <div
@@ -276,8 +288,8 @@ export const GroupCapLine = React.memo(
           // read darker.
           className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0 px-0.5 rounded bg-[color-mix(in_srgb,var(--bg-panel)_95%,black)] dark:bg-[color-mix(in_srgb,var(--bg-panel)_95%,white)] opacity-0 group-hover/cap:opacity-100 transition-opacity"
         >
-          <ActionButton onClick={toggleVisibility} icon={group.visible ? <Eye size={12} /> : <EyeOff size={12} className="text-rose-500" />} variant="glass" size="sm" className={`w-6 h-6 ${group.visible ? "" : "text-[var(--text-muted)]"}`} />
-          <ActionButton onClick={toggleLock} icon={group.locked ? <Lock size={12} className="text-amber-500" /> : <Unlock size={12} />} variant="glass" size="sm" className={`w-6 h-6 ${group.locked ? "" : "text-[var(--text-muted)]"}`} />
+          <ActionButton plain onClick={toggleVisibility} icon={group.visible ? <Eye size={12} /> : <EyeOff size={12} className="text-rose-500" />} size="sm" className={`w-5 h-6 ${group.visible ? "" : "text-[var(--text-muted)]"}`} />
+          <ActionButton plain onClick={toggleLock} icon={group.locked ? <Lock size={12} className="text-amber-500" /> : <Unlock size={12} />} size="sm" className={`w-5 h-6 ${group.locked ? "" : "text-[var(--text-muted)]"}`} />
           <GroupMenu menuOptions={menuOptions} onMenuSelect={handleMenuSelect} />
         </div>
       </div>

@@ -24,7 +24,7 @@ import type { Frame, CameraState, ScreenRotationBox } from '@opengpex/editor/cor
 import { getRegularClipShape } from '@opengpex/editor/core/helpers/selection';
 import { readPeelSession, fragmentTrueRotationDeg } from './peel/session';
 import { hitTestSelectionInterior } from './interactions/hitTest';
-import * as P from './protocols';
+import { PeelAPI } from './protocols';
 import {
   ClipOptionsAPI,
   CLIP_TOOL_STRATEGIES,
@@ -126,7 +126,7 @@ export function useClipOverlayCommands() {
         // lifetime CREATED; an inherited session stays persisted and either
         // outlives the unmount or is settled by its owner.
         if (sessionIsInherited) return;
-        void actions.executeCommand(P.CMD_PEEL_SETTLE, { mode: 'discard' });
+        void actions.executeCommand(PeelAPI.commands.settleExchange.uid, { mode: 'discard' });
       });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

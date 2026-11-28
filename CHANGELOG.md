@@ -2,6 +2,12 @@
 
 All notable changes to OpenGPEX are documented in this file.
 
+## 2.2.2
+
+- Layers: consecutive brush strokes, text boxes, markers and pen shapes now fold into one collapsed "Drawing Group" — a long drawing session takes a single panel row. Expand it to edit any mark on its own; one Undo removes the newest mark together with the group it created.
+- Layers: any layer group can now be flattened from its menu into a single image layer named after the group; hidden layers inside are left out.
+- Brush: the on-canvas brush cursor now shows the brush glyph badge in its bottom-right corner, matching the eraser cursor.
+
 ## 2.2.1
 
 - Workspace: the re-canvas Fit In / Fit Out presets now size and place the crop box correctly on rotated photos, including ones rotated a quarter turn.

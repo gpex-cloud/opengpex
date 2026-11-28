@@ -398,3 +398,12 @@ export const ABSOLUTE_MARKER_STROKE_MAX = 400;
 
 /** Minimum font size constant */
 export const TEXT_SIZE_MIN = 6;
+
+// ─── Auto-Grouping Facility (craft-family hub service) ────────────────────────
+
+export {
+  resolveAutoGroupPlacement,
+  isAutoGroupMember,
+  type AutoGroupPlacement,
+  type AutoGroupKind,
+} from './autoGroup';

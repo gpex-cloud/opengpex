@@ -57,7 +57,6 @@ import {
   type LayerService,
 } from '@opengpex/editor/core/types';
 import { cloneFrameDraft, readFrameDraft } from '@opengpex/editor/core/state/drafts';
-import { ADV_FRAME_SET_DRAFT } from '@opengpex/editor/core/advanced/protocols';
 import { CraftDrawerAPI } from '../../../drawers/CraftDrawer/protocols';
 import * as P from '../protocols';
 import type { PenDraft, PenDraftSelection, PenPhase, PenSelection } from '../pen/penState';
@@ -209,7 +208,7 @@ export function penDraftEquals(a: PenDraft | null, b: PenDraft | null): boolean 
  */
 export function persistPenDraft(actions: EditorActions, frameId: string, draft: PenDraft | null): void {
   _lastWrite = draft ? { frameId, payload: draft } : null;
-  actions.executeCommand(ADV_FRAME_SET_DRAFT, { frameId, toolId: PEN_TOOL_ID, payload: draft });
+  actions.adv.frame.setDraft.execute({ frameId, toolId: PEN_TOOL_ID, payload: draft });
 }
 
 /** Overlay dirty-check input: gestures mutate the module copy, not the frame. */

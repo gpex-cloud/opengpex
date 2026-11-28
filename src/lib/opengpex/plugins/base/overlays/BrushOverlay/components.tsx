@@ -30,6 +30,7 @@ import {
   useBrushColor,
 } from './hooks';
 import { useBrushStabilizerGuideFastSync } from './useFastSync';
+import { PaintbrushIcon } from '../../drawers/CraftDrawer/icon';
 
 // ─── BrushOverlayMain ─────────────────────────────────────────────────────────
 
@@ -195,6 +196,24 @@ const BrushCursor = React.memo(function BrushCursor() {
           boxShadow: '0 0 1px rgba(0, 0, 0, 0.8)',
         }}
       />
+
+      {/* Tool identity badge (bottom-right): the Paintbrush glyph from the
+          CraftDrawer icon vocabulary — the same glyph the toolbar shows, the
+          same slot the eraser cursor uses for its eraser badge. Appended
+          AFTER the fast-sync contract children ([0][1][2] + data-cross
+          bars), which index by position and never reach this node. */}
+      <div
+        data-badge="tool-id"
+        className="absolute pointer-events-none"
+        style={{
+          left: `${Math.max(screenDiameter - 1, halfSize + 2)}px`,
+          top: `${Math.max(screenDiameter - 1, halfSize + 2)}px`,
+          color: 'white',
+          filter: 'drop-shadow(0 0.5px 1px rgba(0,0,0,0.9))',
+        }}
+      >
+        <PaintbrushIcon size={14} />
+      </div>
     </div>
   );
 });

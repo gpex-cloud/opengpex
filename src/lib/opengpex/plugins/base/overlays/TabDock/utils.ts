@@ -35,19 +35,22 @@ interface DockPosition {
  * Calculates the dock position based on snap settings or manual position.
  */
 export const calculateDockPosition = (config: TabDockConfig) => {
-  const MARGIN = 24;
+  // Bottom-snapped docks align with DrawerBar, whose container sits 16px
+  // (bottom-4) above the workspace edge; side margins stay wider.
+  const MARGIN_X = 24;
+  const MARGIN_B = 16;
   if (config.position) {
     return { left: 0, top: 0, right: 'auto', bottom: 'auto', x: config.position.x, y: config.position.y };
   }
   const snap = config.snap || 'BC';
-  
+
   const OFF_L = 'var(--v-offset-fixed-left)';
   const OFF_R = 'var(--v-offset-fixed-right)';
   const OFF_B = 'var(--v-offset-bottom)';
 
-  const LEFT = `calc(${OFF_L} + ${MARGIN}px)`;
-  const RIGHT = `calc(${OFF_R} + ${MARGIN}px)`;
-  const BOTTOM = `calc(${OFF_B} + ${MARGIN}px)`;
+  const LEFT = `calc(${OFF_L} + ${MARGIN_X}px)`;
+  const RIGHT = `calc(${OFF_R} + ${MARGIN_X}px)`;
+  const BOTTOM = `calc(${OFF_B} + ${MARGIN_B}px)`;
   const CENTER_X = `calc(${OFF_L} + (100% - ${OFF_L} - ${OFF_R}) / 2)`;
   
   const points: Record<string, DockPosition> = {

@@ -27,7 +27,7 @@ import {
 import { getClipBox } from '@opengpex/editor/core/helpers/selection';
 import { readPeelSession } from '../peel/session';
 import { consumeSelectionConvergence } from '../peel/controller';
-import * as P from '../protocols';
+import { PeelAPI } from '../protocols';
 import { createTransformHandler, TransformIntent } from '@opengpex/editor/stage/interaction/handlers/TransformHandler';
 import {
   ClipOptionsAPI,
@@ -253,7 +253,7 @@ export const createSelectionMoveHandler = (): InteractionHandler => {
             // (and its pending DOM/store writes) settles first — peelToExchange
             // replaces the active layer and focus, which must not race the
             // gesture handler still consuming this same event.
-            setTimeout(() => e.actions.executeCommand(P.CMD_PEEL_EXCHANGE, {
+            setTimeout(() => e.actions.executeCommand(PeelAPI.commands.peelToExchange.uid, {
               isCopy: (e.nativeEvent as MouseEvent).altKey
             }), 0);
           }

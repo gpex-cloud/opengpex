@@ -49,19 +49,10 @@ export const ADV_FRAME_TRUNK = 'adv.frame.trunk';
 export const ADV_FRAME_SET_DRAFT = 'adv.frame.set_draft';
 export const ADV_GPEX_PACK = 'adv.gpex.pack';
 export const ADV_GPEX_UNPACK = 'adv.gpex.unpack';
-/** @deprecated Alias for ADV_GPEX_PACK */
-export const ADV_FRAME_PACKING = ADV_GPEX_PACK;
-/** @deprecated Alias for ADV_GPEX_UNPACK */
-export const ADV_FRAME_UNPACKING = ADV_GPEX_UNPACK;
-/** @deprecated Alias for ADV_GPEX_PACK */
-export const ADV_FRAME_EXPORT = ADV_GPEX_PACK;
-/** @deprecated Alias for ADV_GPEX_UNPACK */
-export const ADV_FRAME_IMPORT = ADV_GPEX_UNPACK;
 /** Export-to-file logic (egest decision + GPU render + files.encode → Blob). */
 export const ADV_FRAME_EXPORT_ENCODE = 'adv.frame.export.encode';
 
 // 3. Asset Management
-export const ADV_ASSET_REGISTER = 'adv.system.asset.register';
 export const ADV_ASSET_SYNC = 'adv.system.asset.sync';
 
 // 3. Layer Management
@@ -70,6 +61,7 @@ export const ADV_LAYER_TOGGLE_OTHERS = 'adv.layer.toggle_others';
 export const ADV_LAYER_MERGE_DOWN = 'adv.layer.merge.down';
 export const ADV_LAYER_MERGE_VISIBLE = 'adv.layer.merge.visible';
 export const ADV_LAYER_MERGE_RASTERIZE = 'adv.layer.merge.rasterize';
+export const ADV_LAYER_MERGE_RASTERIZE_GROUP = 'adv.layer.merge.rasterize_group';
 export const ADV_LAYER_MERGE_BACK = 'adv.layer.merge.back';
 export const ADV_LAYER_MERGE_SELECTED = 'adv.layer.merge.selected';
 
@@ -120,5 +112,3 @@ export const ADV_LAYER_CLIP_TO_MASK = 'adv.layer.clip.toMask';
 
 // 7. System Signals
 // Used to synchronize temporary flags across plug-ins in the global state
-export const SIGNAL_SYS_ASSET_CONVERTING = 'sys.asset.converting';
-export const SIGNAL_SYS_CANVAS_DIRTY = 'sys.canvas.dirty';

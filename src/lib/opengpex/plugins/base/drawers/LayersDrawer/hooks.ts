@@ -22,7 +22,6 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { useEditorState, useEditorServices, usePluginCommands } from '@opengpex/editor/core/context';
 import { Layer, Frame } from '@opengpex/editor/core/types';
-import { ADV_LAYER_MERGE_SELECTED } from '@opengpex/editor/core/advanced/protocols';
 import type { LayersDrawerCommandsMap } from './commands.d';
 import { calcFullLayerStack, computeMergeStatus, type MergeStatus } from './utils';
 import { MASK_EDITING_KEY, type MaskEditingSignal } from './protocols';
@@ -274,7 +273,7 @@ export function useMergeSelected(activeFrame: Frame) {
         // The dispatcher forwards the command's return value, so the async
         // bake route can be awaited here to drive the loading state.
         void Promise.resolve(
-            actions.executeCommand(ADV_LAYER_MERGE_SELECTED, { layerIds: mergeSelection })
+            actions.adv.layer.merge.selected.execute({ layerIds: mergeSelection })
         ).finally(() => setMerging(false));
     }, [mergeSelection, canMergeSelected, merging, actions]);
 

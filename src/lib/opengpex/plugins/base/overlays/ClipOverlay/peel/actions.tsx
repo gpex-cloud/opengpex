@@ -21,7 +21,7 @@
 
 import { CornerDownLeft, Loader2, Scaling } from 'lucide-react';
 import { useEditorServices } from '@opengpex/editor/core/context';
-import * as P from '../protocols';
+import { PeelAPI } from '../protocols';
 import { ClipOptionsAPI } from '../../../options/ClipOptions/protocols';
 
 /**
@@ -75,7 +75,7 @@ export function PeelActionButtons({ canResetSize = false, committing = false }: 
           aria-label="Reset fragment size"
           className="flex items-center outline-none rounded px-1 text-sky-400 hover:bg-white/10"
           style={{ height: '16px' }}
-          onClick={() => actions.executeCommand(P.CMD_PEEL_RESET_TRANSFORM)}
+          onClick={() => actions.executeCommand(PeelAPI.commands.resetTransform.uid)}
         >
           <Scaling size={12} strokeWidth={2.5} />
         </button>

@@ -212,6 +212,7 @@ export interface EditorActions {
       };
       revert: AdvCommandRef;
       remove: AdvCommandRef<string | undefined>;
+      setDraft: AdvCommandRef<{ frameId: string; toolId: string; payload: unknown }>;
       gpex: {
         pack: AdvCommandRef<Frame, Promise<FrameExportResult>>;
         unpack: AdvCommandRef<FrameUnpackPayload, Promise<Frame>>;
@@ -277,6 +278,9 @@ export interface EditorActions {
         down: AdvCommandRef;
         visible: AdvCommandRef;
         rasterize: AdvCommandRef<{ layerId?: string }>;
+        rasterizeGroup: AdvCommandRef<{ groupId?: string }, Promise<void>>;
+        back: AdvCommandRef<{ layerId?: string }>;
+        selected: AdvCommandRef<{ layerIds: string[] }, Promise<void>>;
       };
     };
     system: {

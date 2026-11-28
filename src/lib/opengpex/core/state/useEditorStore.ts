@@ -574,6 +574,7 @@ export function useEditorStore() {
           },
           revert: advRef(P.ADV_FRAME_REVERT, () => executeCommand(P.ADV_FRAME_REVERT)),
           remove: advRef(P.ADV_FRAME_REMOVE, (id?: string) => executeCommand(P.ADV_FRAME_REMOVE, id)),
+          setDraft: advRef(P.ADV_FRAME_SET_DRAFT, (payload: { frameId: string; toolId: string; payload: unknown }) => executeCommand(P.ADV_FRAME_SET_DRAFT, payload)),
           gpex: {
             pack: advRef(P.ADV_GPEX_PACK, (frame: Frame) => executeCommand<Frame, Promise<FrameExportResult>>(P.ADV_GPEX_PACK, frame)),
             unpack: advRef(P.ADV_GPEX_UNPACK, (payload: FrameUnpackPayload) => executeCommand<unknown, Promise<Frame>>(P.ADV_GPEX_UNPACK, payload)),
@@ -635,6 +636,9 @@ export function useEditorStore() {
             down: advRef(P.ADV_LAYER_MERGE_DOWN, () => executeCommand(P.ADV_LAYER_MERGE_DOWN)),
             visible: advRef(P.ADV_LAYER_MERGE_VISIBLE, () => executeCommand(P.ADV_LAYER_MERGE_VISIBLE)),
             rasterize: advRef(P.ADV_LAYER_MERGE_RASTERIZE, (payload: { layerId?: string }) => executeCommand(P.ADV_LAYER_MERGE_RASTERIZE, payload)),
+            rasterizeGroup: advRef(P.ADV_LAYER_MERGE_RASTERIZE_GROUP, (payload: { groupId?: string }) => executeCommand(P.ADV_LAYER_MERGE_RASTERIZE_GROUP, payload)),
+            back: advRef(P.ADV_LAYER_MERGE_BACK, (payload: { layerId?: string }) => executeCommand(P.ADV_LAYER_MERGE_BACK, payload)),
+            selected: advRef(P.ADV_LAYER_MERGE_SELECTED, (payload: { layerIds: string[] }) => executeCommand(P.ADV_LAYER_MERGE_SELECTED, payload)),
           },
         },
         system: {

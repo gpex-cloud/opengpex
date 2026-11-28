@@ -25,7 +25,7 @@ import {LayerFactory} from '@opengpex/editor/core/layer/factory';
 import {asLocalRect, asLocalPolygon, type LocalPolygon} from '@opengpex/editor/core/types';
 import {getClipBox} from '@opengpex/editor/core/helpers/selection';
 import {penBoundsPad, rebasePenDataToBounds} from './pen/transform';
-import {CraftDrawerAPI} from '../../drawers/CraftDrawer/protocols';
+import {CraftDrawerAPI, resolveAutoGroupPlacement} from '../../drawers/CraftDrawer/protocols';
 import type { ColorValue } from '@opengpex/editor/core/engine/color';
 import * as P from './protocols';
 import {committableSubpaths, draftToPenPathData} from './pen/penState';
@@ -404,9 +404,18 @@ const createShapeCommand: EditorCommand<PenShapeStylePayload | undefined, void> 
       metadata: { sourceTool: 'pen' },
     });
 
-    const below = LayerFactory.resolveActiveHostLayer(frame);
-    const insertAt = LayerFactory.getInsertIndexAbove(frame, below?.id);
-    ctx.layers.factory.addLayer(frame.id, layer, insertAt);
+    // Craft auto grouping (may also create the group container for a second
+    // consecutive member). All indices come precomputed from the same frame
+    // snapshot — do NOT recompute against the frame after the first addLayer.
+    const placement = resolveAutoGroupPlacement(frame);
+    if (placement.group) {
+      ctx.layers.factory.addLayer(frame.id, placement.group.layer, placement.group.insertAt);
+    }
+    if (placement.hostPatch) {
+      ctx.actions.updateLayer(frame.id, placement.hostPatch.layerId, { groupId: placement.hostPatch.groupId });
+    }
+    if (placement.groupId) layer.groupId = placement.groupId;
+    ctx.layers.factory.addLayer(frame.id, layer, placement.insertAt);
     ctx.layers.factory.activate(frame.id, layer.id);
 
     // Same-step draft clear: undo restores the shape layer AND the path.

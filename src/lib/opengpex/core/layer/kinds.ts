@@ -340,7 +340,7 @@ export const LAYER_KINDS: Readonly<Record<Layer['type'], LayerKind>> = {
       name: patch.name ?? 'Group',
       interactive: false,
       role: undefined,
-      collapsed: false,
+      collapsed: patch.collapsed ?? false,
     }),
   },
 };

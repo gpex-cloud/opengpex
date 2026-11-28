@@ -64,7 +64,7 @@ import {
   clearInflightFragmentTransform,
   isInflightFragmentTransformConsumed,
 } from '../../peel/controller';
-import * as P from '../../protocols';
+import { PeelAPI } from '../../protocols';
 import type { FragmentPose, FragmentScaleHandle, LocalPolygon, InteractionEvent as GestureEvent } from '@opengpex/editor/core/types';
 import { ClipOptionsAPI } from '../../../../options/ClipOptions/protocols';
 
@@ -439,7 +439,7 @@ export const createSessionTransformHandler = (): InteractionHandler => {
       // run — the finally owns that guarantee.
       try {
         if (!wasConsumed && moved && id) {
-          await e.actions.executeCommand(P.CMD_PEEL_APPLY_TRANSFORM, { pose: finalPose });
+          await e.actions.executeCommand(PeelAPI.commands.applyTransform.uid, { pose: finalPose });
         }
       } finally {
         e.actions.fast.setTransient('fragmentTransform', null);

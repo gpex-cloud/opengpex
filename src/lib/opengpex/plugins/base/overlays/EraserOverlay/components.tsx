@@ -25,6 +25,7 @@ import { EDITOR_Z_INDEX } from '@opengpex/editor/core/helpers/config';
 import { useEraserOverlayState, useBrushCursorTracking, useBrushParams } from './hooks';
 import { useStrokePreviewFastSync, useMaskFocusOverlayFastSync } from './useFastSync';
 import { MASK_EDITING_KEY, MASK_FOCUS_KEY, type MaskEditingSignal } from '../../drawers/LayersDrawer/protocols';
+import { EraserIcon } from '../../drawers/CraftDrawer/icon';
 
 // ─── EraserOverlayMain ─────────────────────────────────────────────────────────
 
@@ -145,24 +146,20 @@ const BrushCursor = React.memo(function BrushCursor({ activeCraft }: BrushCursor
         }}
       />
 
-      {/* Tool identity badge (bottom-right): eraser icon (used for both eraser and restore) */}
-      <svg
+      {/* Tool identity badge (bottom-right): the Eraser glyph from the
+          CraftDrawer icon vocabulary (used for both eraser and restore) */}
+      <div
         data-badge="tool-id"
         className="absolute pointer-events-none"
-        width="14"
-        height="14"
-        viewBox="0 0 24 24"
-        fill="none"
         style={{
           left: `${Math.max(screenDiameter - 1, halfSize + 2)}px`,
           top: `${Math.max(screenDiameter - 1, halfSize + 2)}px`,
+          color: 'white',
           filter: 'drop-shadow(0 0.5px 1px rgba(0,0,0,0.9))',
         }}
       >
-        {/* Eraser icon (matches lucide Eraser) */}
-        <path d="m7 21-4.3-4.3c-1-1-1-2.5 0-3.4l9.6-9.6c1-1 2.5-1 3.4 0l5.6 5.6c1 1 1 2.5 0 3.4L13 21" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M22 21H7" stroke="white" strokeWidth="3" strokeLinecap="round" />
-      </svg>
+        <EraserIcon size={14} />
+      </div>
 
       {/* Mode indicator badge: "+" (eraser + Alt, controlled imperatively by hooks.ts) / undo-2 (restore, always visible) */}
       <div

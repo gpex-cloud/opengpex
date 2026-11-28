@@ -24,15 +24,16 @@ import {
   EditorCommand,
   Layer,
 } from '@opengpex/editor/core/types';
-import { LayerFactory } from '@opengpex/editor/core/layer';
+import { resolveAutoGroupPlacement } from '../../drawers/CraftDrawer/protocols';
 import * as P from './protocols';
 
 // ─── Commands ──────────────────────────────────────────────────────────────────
 
 /**
  * cmd.place: places ONE stroke's own layer above the active layer and
- * activates it (ONE STROKE = ONE LAYER; multi-stroke grouping is manual, via
- * layer groups in the layers panel).
+ * activates it (ONE STROKE = ONE LAYER; consecutive craft acts fold into a
+ * collapsed auto group through the CraftDrawer placement facility — see
+ * `resolveAutoGroupPlacement`).
  *
  * undoable: true → this is the gesture's ONLY undo checkpoint, taken at the
  * FIRST drawable sample — the layer created here is already the real,
@@ -40,7 +41,8 @@ import * as P from './protocols';
  * created or renamed at pointerup). The in-progress trajectory afterwards
  * rides the silent volatile track (`InteractionTransaction.begin(silent)`,
  * which takes no checkpoint) onto this same layer, and the pointerup tighten
- * commits through that same track. One undo step removes the stroke layer.
+ * commits through that same track. One undo step removes the stroke layer —
+ * and any auto group formed alongside it (same undoable step).
  */
 const placeCommand: EditorCommand<{ frameId: string; layer: Layer }, void> = {
   id: P.CMD_PLACE,
@@ -50,9 +52,18 @@ const placeCommand: EditorCommand<{ frameId: string; layer: Layer }, void> = {
     const frame = ctx.state.frames.byId[payload.frameId];
     if (!frame) return;
 
-    const below = LayerFactory.resolveActiveHostLayer(frame);
-    const insertAt = LayerFactory.getInsertIndexAbove(frame, below?.id);
-    ctx.layers.factory.addLayer(payload.frameId, payload.layer, insertAt);
+    // Craft auto grouping (may also create the group container for a second
+    // consecutive member). All indices come precomputed from the same frame
+    // snapshot — do NOT recompute against the frame after the first addLayer.
+    const placement = resolveAutoGroupPlacement(frame);
+    if (placement.group) {
+      ctx.layers.factory.addLayer(payload.frameId, placement.group.layer, placement.group.insertAt);
+    }
+    if (placement.hostPatch) {
+      ctx.actions.updateLayer(payload.frameId, placement.hostPatch.layerId, { groupId: placement.hostPatch.groupId });
+    }
+    if (placement.groupId) payload.layer.groupId = placement.groupId;
+    ctx.layers.factory.addLayer(payload.frameId, payload.layer, placement.insertAt);
     ctx.layers.factory.activate(payload.frameId, payload.layer.id);
   },
 };

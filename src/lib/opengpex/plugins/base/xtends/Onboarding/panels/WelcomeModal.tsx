@@ -20,7 +20,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { X, Zap, ArrowUpRight, Layers, Cpu, Sparkles } from "lucide-react";
+import { X, Zap, ArrowUpRight, Brush, Layers, Sparkles } from "lucide-react";
 
 // ─── WelcomeModal ─────────────────────────────────────────────────────────────
 
@@ -93,7 +93,7 @@ export function WelcomeModal({
                     What&apos;s New in OpenGPEX
                   </h2>
                   <span className="px-1.5 py-0.5 text-[10px] font-semibold rounded bg-indigo-500/15 text-indigo-300 border border-indigo-500/25">
-                    v2.1
+                    v2.2
                   </span>
                 </div>
                 <p className="text-[11.5px] text-indigo-400 font-medium">
@@ -113,26 +113,26 @@ export function WelcomeModal({
           {/* Body */}
           <div className="space-y-3 text-[12.5px] text-[var(--text-main)]/85 leading-[1.55]">
             <div className="flex items-start gap-2.5">
-              <Layers size={14} className="text-indigo-400 shrink-0 mt-0.5" />
+              <Brush size={14} className="text-indigo-400 shrink-0 mt-0.5" />
               <div>
                 <span className="font-semibold text-[var(--text-main)]">
-                  Layer Effects Suite
+                  A Faster, Softer Brush
                 </span>
                 {" — "}
-                Stroke, Shadow, Inner Shadow, Outer Glow, Inner Glow, Color
-                Overlay, and Gradient Overlay are all live with 16 blend modes.
+                strokes redraw incrementally so long strokes stay smooth in
+                real time, with refined taper entry, exit and pen lift.
               </div>
             </div>
 
             <div className="flex items-start gap-2.5">
-              <Cpu size={14} className="text-indigo-400 shrink-0 mt-0.5" />
+              <Layers size={14} className="text-indigo-400 shrink-0 mt-0.5" />
               <div>
                 <span className="font-semibold text-[var(--text-main)]">
-                  High-Depth &amp; Large-Canvas WebGPU Engine
+                  Drawing Groups
                 </span>
                 {" — "}
-                16/32-bit working precision with responsive viewport compositing
-                on large documents.
+                consecutive strokes, text, markers and pen shapes fold into one
+                collapsed group, keeping the layers panel to a single row.
               </div>
             </div>
 
@@ -140,11 +140,11 @@ export function WelcomeModal({
               <Sparkles size={14} className="text-indigo-400 shrink-0 mt-0.5" />
               <div>
                 <span className="font-semibold text-[var(--text-main)]">
-                  In Progress
+                  Layer Effects Suite
                 </span>
                 {" — "}
-                Real-time incremental vector brush performance and more pro
-                editing tools are actively underway.
+                Stroke, Shadow, Glow and Overlay effects remain available with
+                16 blend modes, stackable per layer.
               </div>
             </div>
 

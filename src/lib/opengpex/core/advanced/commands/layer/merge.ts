@@ -19,11 +19,11 @@
 
 'use client';
 
-import { EditorContextValue, EditorCommand, Layer } from '@opengpex/editor/core/types';
+import { EditorContextValue, EditorCommand, Frame, Layer } from '@opengpex/editor/core/types';
 import * as P from '@opengpex/editor/core/advanced/protocols';
 import { EditorActions } from '@opengpex/editor/core/types';
 import { LayerUtils } from '@opengpex/editor/core/layer/utils';
-import { craftPayloadStrip } from '@opengpex/editor/core/layer/services/merging';
+import { craftPayloadStrip, collectGroupRasterizeMembers } from '@opengpex/editor/core/layer/services/merging';
 
 /**
  * removeSourceHoles — remove the given hole masks from one source layer in a
@@ -71,6 +71,50 @@ export function resetMergeLockForTests(): void {
 
 interface MergeSelectedPayload {
   layerIds: string[];
+}
+
+/**
+ * rasterizeSingleLayer — the shared single-layer rasterize core: bake the
+ * layer as seen into a plain bitmap asset, sever its cut relationships
+ * (the source's hole masks stay as content; downstream fragments degrade),
+ * and rewrite the record into a pure `type:'image'` layer with every
+ * non-destructive payload cleared (effects/masks are baked into the pixels
+ * now — keeping them would double-apply at render).
+ */
+async function rasterizeSingleLayer(
+  frameId: string,
+  frame: Frame,
+  layer: Layer,
+  layers: EditorContextValue['layers'],
+  actions: EditorActions,
+): Promise<void> {
+  // Shared bake primitive (services/baking.ts): composite → register → warm.
+  const bake = await layers.bake.bakeToAsset(frame, [layer]);
+
+  // Sever every cut relationship touching the rasterized layer BEFORE
+  // its own record is rewritten (see the rasterize command for the full
+  // contract).
+  const { targetPatch, otherPatches } = LayerUtils.breakCutLinks(frame, layer.id);
+  for (const { layerId, patch } of otherPatches) {
+    actions.updateLayer(frameId, layerId, patch);
+  }
+
+  layers.factory.updateLayer(frameId, (tx) => {
+    tx.edit(layer.id)
+      .setAsset({ assetId: bake.assetId, url: bake.url })
+      .resetWithBounds(bake.bounds.w, bake.bounds.h, bake.bounds.x + bake.bounds.w / 2, bake.bounds.y + bake.bounds.h / 2);
+  });
+
+  actions.updateLayer(frameId, layer.id, {
+    type: 'image',
+    ...craftPayloadStrip(),
+    ...targetPatch,
+    contour: undefined,
+    textData: undefined,
+    bitmapMasks: [],
+    vectorMasks: [],
+    adjustMasks: undefined,
+  });
 }
 
 /**
@@ -212,49 +256,87 @@ export const LayerMergeCommands = {
       if (!layer) return;
 
       try {
-        // Shared bake primitive (services/baking.ts): composite → register → warm.
-        const bake = await layers.bake.bakeToAsset(activeFrame, [layer]);
-
-        // Sever every cut relationship touching the rasterized layer BEFORE
-        // its own record is rewritten: the source's hole masks stay as
-        // content (deletion never heals, neither does rasterization) and
-        // downstream fragments degrade to plain layers. Craft payloads are
-        // stripped for the same reason the merge bake strips them — stale
-        // craft metadata would misroute the craft panels on the new image
-        // layer.
-        const { targetPatch, otherPatches } = LayerUtils.breakCutLinks(activeFrame, layer.id);
-        for (const { layerId, patch } of otherPatches) {
-          actions.updateLayer(activeFrame.id, layerId, patch);
-        }
-
-        layers.factory.updateLayer(activeFrame.id, (tx) => {
-          tx.edit(layer.id)
-            .setAsset({ assetId: bake.assetId, url: bake.url })
-            .resetWithBounds(bake.bounds.w, bake.bounds.h, bake.bounds.x + bake.bounds.w / 2, bake.bounds.y + bake.bounds.h / 2);
-        });
-
-        // After rasterization, the layer becomes a pure bitmap — all non-destructive
-        // effects (masks, adjustments) are now baked into the pixel data and must be
-        // cleared to prevent double-application during rendering. The recorded cut
-        // contour is cleared too: resetWithBounds moved the layer's local origin,
-        // so the old rings now live in a stale plane (Refocus falls back to the rect).
-        actions.updateLayer(activeFrame.id, layer.id, {
-          type: 'image',
-          ...craftPayloadStrip(),
-          ...targetPatch,
-          contour: undefined,
-          textData: undefined,
-          bitmapMasks: [],
-          vectorMasks: [],
-          adjustMasks: undefined,
-        });
-
+        await rasterizeSingleLayer(activeFrame.id, activeFrame, layer, layers, actions);
       } catch (err) {
         console.error('[LayerPanel] Rasterize failed:', err);
         actions.setInteraction({ hud: { message: 'Rasterize failed.', type: 'error' } });
       }
     }
   } as EditorCommand<{ layerId?: string }, Promise<void>>,
+
+  /**
+   * rasterizeGroup: flattens a whole group into ONE plain bitmap layer.
+   *
+   * Semantics (Photoshop Merge Group): every VISIBLE host member composites
+   * as seen (per-member opacity/blend/masks/effects) into a single image
+   * that takes the GROUP's name; hidden members are discarded, the group
+   * header is removed, and the product becomes a top-level layer at the
+   * group's block. Member cut relationships follow the merge semantics
+   * (whole set dissolves, physicalMerge's lineage handling), while the
+   * degenerate single-visible-member group takes the plain layer rasterize
+   * path (breakCutLinks) — the member IS the whole picture there.
+   *
+   * undoable: true → one undo step restores the members and the group.
+   */
+  rasterizeGroup: {
+    id: P.ADV_LAYER_MERGE_RASTERIZE_GROUP,
+    name: 'Rasterize Group',
+    undoable: true,
+    execute: async (ctx: EditorContextValue, payload?: { groupId?: string }): Promise<void> => {
+      const { activeFrame, layers, actions } = ctx;
+      if (!activeFrame) return;
+
+      const groupId = payload?.groupId || ctx.activeLayer?.id;
+      if (!groupId) return;
+
+      const group = activeFrame.layers.byId[groupId];
+      if (!group || group.type !== 'group') return;
+
+      // Host members bottom-to-top (order order). Hosted triplet sub-layers
+      // stay out — the compositor pulls them in with their hosts.
+      const { visible: visibleMembers, hidden: hiddenMembers } = collectGroupRasterizeMembers(activeFrame, groupId);
+      if (visibleMembers.length + hiddenMembers.length === 0) return;
+      const hiddenIds = hiddenMembers.map(l => l.id);
+      if (visibleMembers.length === 0) {
+        actions.setInteraction({ hud: { message: 'No visible layers in this group.', type: 'error' } });
+        return;
+      }
+
+      if (!acquireMergeLock()) return;
+      try {
+        // The product layer: the bottom visible member (merge target), or
+        // the only member on the degenerate path.
+        let productId: string;
+        if (visibleMembers.length >= 2) {
+          await layers.bake.mergeLayers(activeFrame, visibleMembers, { physicalSuccessHud: 'Group rasterized.' });
+          productId = visibleMembers[0].id;
+        } else {
+          const only = visibleMembers[0];
+          await rasterizeSingleLayer(activeFrame.id, activeFrame, only, layers, actions);
+          productId = only.id;
+        }
+
+        // Discard hidden members and the group header. 'ignore-link': the
+        // bake just rewrote the surviving masks from live data — a
+        // stale-snapshot mask rewrite here would clobber them (same rule as
+        // physicalMerge's own cleanup).
+        layers.factory.removeLayers(activeFrame.id, [groupId, ...hiddenIds], { cutLinks: 'ignore-link' });
+
+        // The product inherits the group's identity: top-level (the group no
+        // longer exists), named after it.
+        actions.updateLayer(activeFrame.id, productId, {
+          groupId: undefined,
+          name: group.name,
+        });
+        layers.factory.activate(activeFrame.id, productId);
+      } catch (err) {
+        console.error('[LayerPanel] Rasterize group failed:', err);
+        actions.setInteraction({ hud: { message: 'Rasterize group failed.', type: 'error' } });
+      } finally {
+        releaseMergeLock();
+      }
+    }
+  } as EditorCommand<{ groupId?: string }, Promise<void>>,
 
   /**
    * mergeBack: Unified merge-back command — auto-detects layer role.

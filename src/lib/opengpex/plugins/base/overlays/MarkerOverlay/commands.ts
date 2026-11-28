@@ -23,16 +23,18 @@ import { EditorCommand, EditorContextValue, Layer } from '@opengpex/editor/core/
 import type { MarkerData } from './marker/types';
 import { isSegmentData, segmentLayoutOf, segmentContainment, shiftSegmentEndpoints } from './marker/shapes/line-segment/geometry';
 import { squareizeMarker } from './marker/squareize';
-import { LayerFactory } from '@opengpex/editor/core/layer';
+import { resolveAutoGroupPlacement } from '../../drawers/CraftDrawer/protocols';
 import * as P from './protocols';
 
 // ─── Commands ──────────────────────────────────────────────────────────────────
 
 /**
  * cmd.place: Places a newly drawn marker as a `type:'vector'` layer directly
- * above the active layer, as a plain top-level layer (no auto-grouping).
+ * above the active layer, folding into the craft auto group when the active
+ * layer is a session member (see `resolveAutoGroupPlacement`).
  *
- * undoable: true → the placement is a single undo step.
+ * undoable: true → the placement (including any auto group formed alongside
+ * it) is a single undo step.
  */
 const placeCommand: EditorCommand<{ frameId: string; layer: Layer }, void> = {
   id: P.CMD_PLACE,
@@ -42,12 +44,18 @@ const placeCommand: EditorCommand<{ frameId: string; layer: Layer }, void> = {
     const frame = ctx.state.frames.byId[payload.frameId];
     if (!frame) return;
 
-    // Plain layer, inserted directly above the active layer
-    // (getInsertIndexAbove handles group / hostId targets). Falls back to
-    // append-on-top (undefined index → reducer push) when there is no active layer.
-    const below = LayerFactory.resolveActiveHostLayer(frame);
-    const insertAt = LayerFactory.getInsertIndexAbove(frame, below?.id);
-    ctx.layers.factory.addLayer(payload.frameId, payload.layer, insertAt);
+    // Craft auto grouping (may also create the group container for a second
+    // consecutive member). All indices come precomputed from the same frame
+    // snapshot — do NOT recompute against the frame after the first addLayer.
+    const placement = resolveAutoGroupPlacement(frame);
+    if (placement.group) {
+      ctx.layers.factory.addLayer(payload.frameId, placement.group.layer, placement.group.insertAt);
+    }
+    if (placement.hostPatch) {
+      ctx.actions.updateLayer(payload.frameId, placement.hostPatch.layerId, { groupId: placement.hostPatch.groupId });
+    }
+    if (placement.groupId) payload.layer.groupId = placement.groupId;
+    ctx.layers.factory.addLayer(payload.frameId, payload.layer, placement.insertAt);
     ctx.layers.factory.activate(payload.frameId, payload.layer.id);
   },
 };

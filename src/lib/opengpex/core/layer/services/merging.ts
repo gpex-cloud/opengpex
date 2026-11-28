@@ -141,6 +141,29 @@ export function stackingNotice(conflicts: readonly Layer[]): string | undefined 
   return `Merged. Stacking changed: ${subject} above the merged result.`;
 }
 
+/**
+ * collectGroupRasterizeMembers — the participant set for a group rasterize,
+ * bottom-to-top in the frame's z order: every HOST member of the group
+ * (`groupId` pointing at it, no `hostId` — hosted triplet sub-layers are
+ * pulled in by the compositor with their hosts and must not be listed).
+ *
+ * Split into visible (bake participants) and hidden (discarded, never
+ * baked — Photoshop Merge Group semantics) so the caller can drive both
+ * the merge and the discard from one read.
+ */
+export function collectGroupRasterizeMembers(
+  frame: Frame,
+  groupId: string,
+): { visible: Layer[]; hidden: Layer[] } {
+  const members = frame.layers.order
+    .map(id => frame.layers.byId[id])
+    .filter(l => l && l.groupId === groupId && !l.hostId);
+  return {
+    visible: members.filter(l => l.visible),
+    hidden: members.filter(l => !l.visible),
+  };
+}
+
 export interface MergeOptions {
   /** Success HUD for the bake. */
   readonly physicalSuccessHud?: string;

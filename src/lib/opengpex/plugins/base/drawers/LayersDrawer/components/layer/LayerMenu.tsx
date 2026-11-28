@@ -38,7 +38,6 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useEditorServices, usePluginCommands } from "@opengpex/editor/core/context";
-import { ADV_LAYER_MERGE_BACK, ADV_LAYER_MERGE_RASTERIZE } from "@opengpex/editor/core/advanced/protocols";
 import { PenOverlayAPI } from "@opengpex/editor/plugins/base/overlays/PenOverlay/protocols";
 import ActionDropdown, {
   ActionOption,
@@ -252,9 +251,9 @@ export const LayerMenu = React.memo(
       } else if (val === "merge-back" || val === "merge-all-fragments") {
         // Both actions dispatch the same unified mergeBack command —
         // the command auto-detects fragment vs source role based on layer metadata.
-        actions.executeCommand(ADV_LAYER_MERGE_BACK, { layerId });
+        actions.adv.layer.merge.back.execute({ layerId });
       } else if (val === "rasterize") {
-        actions.executeCommand(ADV_LAYER_MERGE_RASTERIZE, { layerId });
+        actions.adv.layer.merge.rasterize.execute({ layerId });
       } else if (val === "release-path") {
         actions.executeCommand(PenOverlayAPI.commands.releaseToDraft.uid, { frameId: activeFrameId, layerId });
       } else if (val === "delete") {

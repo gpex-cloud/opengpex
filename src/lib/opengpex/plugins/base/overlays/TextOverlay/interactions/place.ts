@@ -119,6 +119,7 @@ export const createTextPlaceHandler = (): InteractionHandler => {
         boxWidth: box.boxWidth,
         boxHeight: box.boxHeight,
       },
+      metadata: { sourceTool: 'basic-text' },
     });
   };
 

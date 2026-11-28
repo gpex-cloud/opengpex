@@ -30,7 +30,11 @@ export const CMD_RESET_ONBOARDING = "cmd.reset_onboarding";
 export const STORAGE_KEY_SPOTLIGHTS = "gpex_onboarding_dismissed_spotlights";
 export const STORAGE_KEY_SPOTLIGHT_DISABLED = "gpex_onboarding_spotlight_disabled";
 export const STORAGE_KEY_TIPS = "gpex_onboarding_tips_disabled";
-export const STORAGE_KEY_WELCOME_V2 = "gpex_onboarding_welcome_v2_1_shown";
+// The key ENCODES the modal content version ("v2_1" = modal text for v2.1).
+// Bump the embedded version whenever WelcomeModal's content changes to a new
+// release: the new key reads as unset, so users who checked "Don't show
+// again" on the previous version see the updated modal exactly once more.
+export const STORAGE_KEY_WELCOME_V2 = "gpex_onboarding_welcome_v2_2_shown";
 
 // ─── Spotlight Definitions ──────────────────────────────────────────────────
 

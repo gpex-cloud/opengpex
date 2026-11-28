@@ -107,7 +107,10 @@ export function useOnboarding(trigger: SpotlightTrigger): OnboardingState {
   const [tipsHiddenSession, setTipsHiddenSession] = useState(false);
 
   // Welcome modal: show once per browser only if user checked "Don't show again".
-  // By default (no localStorage entry) the modal reappears every session.
+  // By default (no localStorage entry) the modal reappears every session. The
+  // storage key embeds the modal's content version — a new release bumps the
+  // key, which reads as unset and shows the updated modal once more (see the
+  // comment on STORAGE_KEY_WELCOME_V2 in protocols.ts).
   const [welcomeModalDismissedForever, setWelcomeModalDismissedForever] = useState<boolean>(() => {
     try {
       return localStorage.getItem(STORAGE_KEY_WELCOME_V2) === "true";
